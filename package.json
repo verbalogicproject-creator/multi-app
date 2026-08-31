@@ -16,7 +16,7 @@
     "smoke": "curl -sf http://localhost:8080/healthz"
   },
   "dependencies": {
-    "@google/genai": "^1.20.0",
+    "@google/genai": "^2.20.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
@@ -25,9 +25,12 @@
     "react-dom": "^19.1.1"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
     "@types/react": "^19.1.1",
     "@types/react-dom": "^19.1.1",
     "@vitejs/plugin-react": "^4.3.1",
+    "jszip": "^3.10.1",
+    "tailwindcss": "^4.3.3",
     "typescript": "^5.4.5",
     "vite": "^5.2.13"
   }

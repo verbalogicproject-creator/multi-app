@@ -1,5 +1,4 @@
-// This declaration is needed because we're loading JSZip from a CDN script tag in index.html
-declare const JSZip: any;
+import JSZip from 'jszip';
 
 /**
  * Creates a .zip file from a record of file paths and their content.
@@ -7,12 +6,6 @@ declare const JSZip: any;
  * @param projectName The name of the project, used for the zip file name.
  */
 export const createProjectZip = async (files: Record<string, string>, projectName: string): Promise<void> => {
-    if (typeof JSZip === 'undefined') {
-        console.error('JSZip library is not loaded. Make sure it is included in your index.html.');
-        alert('Could not export project: JSZip library not found.');
-        return;
-    }
-
     const zip = new JSZip();
 
     for (const [path, content] of Object.entries(files)) {

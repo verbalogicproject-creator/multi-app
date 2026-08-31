@@ -59,7 +59,7 @@ const ProjectManager: React.FC = () => {
 
 
     return (
-        <aside className={`bg-gray-800 border-r border-gray-700 flex flex-col flex-shrink-0 transition-all duration-300 ease-in-out ${isProjectPanelCollapsed ? 'w-16' : 'w-96'}`}>
+        <aside className={`bg-gray-800 border-r border-gray-700 flex flex-col shrink-0 transition-all duration-300 ease-in-out ${isProjectPanelCollapsed ? 'w-16' : 'w-96'}`}>
             <div className={`flex items-center p-4 ${isProjectPanelCollapsed ? 'justify-center' : 'justify-between'}`}>
                 {!isProjectPanelCollapsed && <h2 className="text-xl font-bold text-sky-400 capitalize">{activeTab.replace('-', ' ')}</h2>}
                 <button onClick={handleToggleProjectPanel} className="p-1 rounded-full text-gray-400 hover:text-white hover:bg-gray-700" aria-label={isProjectPanelCollapsed ? 'Expand panel' : 'Collapse panel'}>

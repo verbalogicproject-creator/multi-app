@@ -17,7 +17,7 @@ interface MessageItemProps {
 }
 
 const AuthorIcon: React.FC<{ author: MessageAuthor }> = ({ author }) => {
-  const baseClasses = "h-8 w-8 rounded-full flex items-center justify-center font-bold text-white flex-shrink-0";
+  const baseClasses = "h-8 w-8 rounded-full flex items-center justify-center font-bold text-white shrink-0";
   if (author === MessageAuthor.USER) {
     return <div className={`${baseClasses} bg-indigo-500`}>U</div>;
   }
