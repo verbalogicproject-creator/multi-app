@@ -95,12 +95,38 @@ export const generateWebAppPlan = async (idea: string): Promise<any> => {
     return response.json();
 };
 
-export const generateWebAppCode = async (plan: any, theme: any): Promise<Record<string, string>> => {
+export const generateWebAppCode = async (plan: any, theme: any, onProgress?: (chars: number) => void): Promise<Record<string, string>> => {
     const response = await fetch('/api/builder/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ plan, theme }),
     });
-    if (!response.ok) { const error = await response.json(); throw new Error(error.message || 'Failed to generate web app code.'); }
-    return response.json();
+    if (!response.ok || !response.body) { const error = await response.json().catch(() => ({})); throw new Error(error.message || 'Failed to generate web app code.'); }
+
+    // NDJSON stream: {progress} events during generation, then {files} or {error}.
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let carry = '';
+    let files: Record<string, string> | null = null;
+
+    const handleLine = (line: string) => {
+        if (!line.trim()) return;
+        const event = JSON.parse(line);
+        if (event.progress && onProgress) onProgress(event.progress);
+        if (event.error) throw new Error(event.error);
+        if (event.files) files = event.files;
+    };
+
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const lines = (carry + decoder.decode(value, { stream: true })).split('\n');
+        carry = lines.pop() ?? '';
+        for (const line of lines) handleLine(line);
+    }
+    const tail = carry + decoder.decode();
+    if (tail.trim()) handleLine(tail);
+
+    if (!files) throw new Error('Generation stream ended without a result. Please try again.');
+    return files;
 };
