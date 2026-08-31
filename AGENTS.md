@@ -12,7 +12,7 @@ This repository contains a Vite-powered React 19 client and an Express API proxy
 - `npm run build` creates the production frontend bundle in `dist/`.
 - `npx tsc --noEmit` runs the strict TypeScript check without writing files.
 
-Run the frontend and backend in separate terminals for full local development. Create `.env.local` or export environment variables locally; the backend currently expects `API_KEY`. Never commit credentials.
+Run the frontend and backend in separate terminals for full local development. Create `.env.local` or export environment variables locally; the backend expects `GEMINI_API_KEY` (legacy `API_KEY` also accepted). Never commit credentials.
 
 ## Coding Style & Naming Conventions
 

@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { Message, MessageAuthor, MessagePart, Project, Persona, CustomAiStyle, ToolCall, ChatMode } from '../types/index';
 import { generateUniqueId } from '../utils/common';
 import * as apiService from '../services/apiService';
@@ -9,6 +9,21 @@ interface PendingToolApproval {
     history: Message[];
     mode: ChatMode;
 }
+
+const loadPersistedMessages = (storageKey: string): Message[] => {
+    try {
+        const raw = localStorage.getItem(storageKey);
+        if (!raw) return [];
+        const parsed: Message[] = JSON.parse(raw);
+        // Approval state does not survive a reload; expire any still-pending tool cards.
+        return parsed.map(m => m.toolResponse?.response?.content?.pending
+            ? { ...m, toolResponse: { ...m.toolResponse!, response: { ...m.toolResponse!.response, content: { error: 'This approval expired when the page was reloaded.' } } } }
+            : m);
+    } catch (e) {
+        console.error('Failed to load chat history', e);
+        return [];
+    }
+};
 
 export const useChat = (
     projects: Project[], 
@@ -22,12 +37,21 @@ export const useChat = (
         readFile: (projectId: string, path: string) => Promise<string | null>;
         updateFile: (projectId: string, path: string, newContent: string) => Promise<any>;
         deleteFile: (projectId: string, path: string) => Promise<boolean>;
-    }
+    },
+    historyStorageKey: string = 'gemini_messages_general'
 ) => {
-    const [messages, setMessages] = useState<Message[]>([]);
+    const [messages, setMessages] = useState<Message[]>(() => loadPersistedMessages(historyStorageKey));
     const [isLoading, setIsLoading] = useState(false);
     const [statusText, setStatusText] = useState('');
     const pendingApprovals = useRef(new Map<string, PendingToolApproval>());
+
+    useEffect(() => {
+        try {
+            localStorage.setItem(historyStorageKey, JSON.stringify(messages));
+        } catch (e) {
+            console.error('Failed to persist chat history', e);
+        }
+    }, [messages, historyStorageKey]);
 
     const addMessage = useCallback((author: MessageAuthor, parts: MessagePart[], toolCall?: ToolCall, toolResponse?: any) => {
         const newMessage: Message = { id: generateUniqueId(), author, parts, toolCall, toolResponse };

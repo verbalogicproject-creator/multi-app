@@ -4,9 +4,13 @@ import ProjectManager from './components/ProjectManager';
 import ChatPanel from './components/ChatPanel';
 import IdeView from './components/IdeView';
 import WebAppBuilder from './components/builders/WebAppBuilder';
+import ProjectSettingsModal from './components/ProjectSettingsModal';
 
 const AppContent: React.FC = () => {
-    const { globalError, setGlobalError, activeAgentId, agents, activeTab } = useAppContext();
+    const {
+        globalError, setGlobalError, activeAgentId, agents, activeTab,
+        editingProject, filesByProject, handleCloseProjectSettings, handleRenameProject, handleAddFile, handleDeleteFile,
+    } = useAppContext();
     const activeAgent = agents.find(a => a.id === activeAgentId);
 
     const renderMainPanel = () => {
@@ -36,6 +40,17 @@ const AppContent: React.FC = () => {
             <ProjectManager />
             
             {renderMainPanel()}
+
+            {editingProject && (
+                <ProjectSettingsModal
+                    project={editingProject}
+                    files={filesByProject.get(editingProject.id) || []}
+                    onClose={handleCloseProjectSettings}
+                    onRenameProject={handleRenameProject}
+                    onAddFile={handleAddFile}
+                    onDeleteFile={handleDeleteFile}
+                />
+            )}
 
             {globalError && (
                 <div className="fixed bottom-4 right-4 bg-red-800 text-white p-4 rounded-lg shadow-lg max-w-sm z-50">
