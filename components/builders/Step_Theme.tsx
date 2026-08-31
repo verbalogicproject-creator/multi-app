@@ -1,5 +1,6 @@
 import React from 'react';
 import { useAppContext } from '../../context/AppContext';
+import ModelPicker from '../ModelPicker';
 
 const themeOptions = {
     palettes: {
@@ -65,7 +66,8 @@ const Step_Theme: React.FC = () => {
                 </div>
             </div>
 
-            <div className="mt-10 text-center">
+            <div className="mt-10 flex flex-col items-center gap-4">
+                <ModelPicker />
                 <button
                     onClick={generateWebAppCode}
                     className="px-10 py-3 bg-sky-600 text-white font-semibold rounded-lg shadow-md hover:bg-sky-500 transition-all transform hover:scale-105"

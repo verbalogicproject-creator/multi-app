@@ -37,6 +37,15 @@ const MODELS = {
     video: process.env.MODEL_VIDEO || 'veo-3.1-generate-preview',
 };
 
+// Models the UI may request per-call; anything else falls back to the defaults above.
+const SELECTABLE_MODELS = new Set([
+    'gemini-3.5-flash',
+    'gemini-3.5-flash-lite',
+    'gemini-3.7-flash',
+    'gemini-3.1-pro-preview',
+]);
+const pickModel = (requested, fallback) => SELECTABLE_MODELS.has(requested) ? requested : fallback;
+
 
 // =========================================================================================
 // Backend Logic for Coding Assistant (moved from frontend)
@@ -164,7 +173,7 @@ No project is loaded. You are in a general chat mode and cannot access or modify
         // For this example, we'll return a placeholder acknowledging the request.
         return { stdout: `Python execution is simulated on the server. Code to run:\n${code}`, stderr: "", result: "Simulation complete." };
     },
-    generateCodingContentStream: async function(history, projects, persona, useWebSearch, customStyles, lowLatencyMode) {
+    generateCodingContentStream: async function(history, projects, persona, useWebSearch, customStyles, lowLatencyMode, model) {
         const projectContexts = (projects || []).map(p => {
             let context = `Project: ${p.name}`;
             if (p.dependencySummary && p.dependencySummary !== 'No files to analyze.' && p.dependencySummary !== 'No major dependencies identified') {
@@ -208,7 +217,7 @@ No project is loaded. You are in a general chat mode and cannot access or modify
         // The last message is the user's current prompt; the rest is prior history,
         // which must be passed at creation time (assigning chat.history later is a no-op).
         const lastMessage = contents.pop();
-        const chat = ai.chats.create({ model: MODELS.coding, config, history: contents });
+        const chat = ai.chats.create({ model: pickModel(model, MODELS.coding), config, history: contents });
 
         const result = await chat.sendMessageStream({ message: lastMessage.parts });
         return result;
@@ -223,12 +232,12 @@ No project is loaded. You are in a general chat mode and cannot access or modify
 // Simple Chat Streaming
 app.post('/api/chat-stream', async (req, res) => {
     try {
-        const { prompt } = req.body;
+        const { prompt, model } = req.body;
         if (!prompt) {
             return res.status(400).json({ message: 'Prompt is required.' });
         }
-        
-        const chat = ai.chats.create({ model: MODELS.chat });
+
+        const chat = ai.chats.create({ model: pickModel(model, MODELS.chat) });
         const result = await chat.sendMessageStream({ message: prompt });
         
         res.setHeader('Content-Type', 'text/plain');
@@ -339,9 +348,9 @@ app.get('/api/video-status', async (req, res) => {
 // Coding Assistant Streaming
 app.post('/api/coding-chat-stream', async (req, res) => {
      try {
-        const { history, projects, persona, useWebSearch, customStyles, lowLatencyMode } = req.body;
-        
-        const resultIterator = await geminiService.generateCodingContentStream(history, projects, persona, useWebSearch, customStyles, lowLatencyMode);
+        const { history, projects, persona, useWebSearch, customStyles, lowLatencyMode, model } = req.body;
+
+        const resultIterator = await geminiService.generateCodingContentStream(history, projects, persona, useWebSearch, customStyles, lowLatencyMode, model);
 
         res.setHeader('Content-Type', 'application/x-ndjson');
         
@@ -415,7 +424,10 @@ async function withModelFallback(models, attempt) {
     }
     throw lastError;
 }
-const builderModelChain = () => MODELS.builder === MODELS.coding ? [MODELS.builder] : [MODELS.builder, MODELS.coding];
+const builderModelChain = (requested) => {
+    const primary = pickModel(requested, MODELS.builder);
+    return [...new Set([primary, MODELS.coding])];
+};
 const friendlyProviderError = (error, fallbackMessage) =>
     TRANSIENT_STATUSES.has(error?.status)
         ? `The model is temporarily overloaded (HTTP ${error.status}). Please try again in a minute.`
@@ -424,13 +436,13 @@ const friendlyProviderError = (error, fallbackMessage) =>
 // Web App Builder - Step 1: Plan
 app.post('/api/builder/plan', async (req, res) => {
     try {
-        const { idea } = req.body;
+        const { idea, model: requestedModel } = req.body;
         const prompt = `You are a senior web architect. A user wants to build a web application.
 User's Idea: "${idea}"
 
 Analyze the user's idea and create a logical project plan for a standard React (Vite) + TailwindCSS application. The plan should include a project name, description, a list of pages, and a list of reusable components.`;
 
-        const response = await withModelFallback(builderModelChain(), (model) => ai.models.generateContent({
+        const response = await withModelFallback(builderModelChain(requestedModel), (model) => ai.models.generateContent({
             model,
             contents: prompt,
             config: {
@@ -463,7 +475,7 @@ const BUILDER_TYPE_TOKENS = {
 
 app.post('/api/builder/generate', async (req, res) => {
     try {
-        const { plan, theme } = req.body;
+        const { plan, theme, model: requestedModel } = req.body;
         const paletteSpec = BUILDER_THEME_TOKENS[theme?.palette] || BUILDER_THEME_TOKENS['Modern & Minimal'];
         const typeSpec = BUILDER_TYPE_TOKENS[theme?.typography] || BUILDER_TYPE_TOKENS['Sans-serif & Friendly'];
         const prompt = `You are a senior product engineer and designer. Generate the complete, production-quality code for a web application from the plan and theme below. The result must look like a designed product, not a template.
@@ -497,16 +509,30 @@ ${JSON.stringify(plan, null, 2)}
 
         // On a transient failure the whole attempt restarts (progress resets to 0
         // client-side, which is harmless — events are self-describing).
-        const accumulated = await withModelFallback(builderModelChain(), async (model) => {
+        // Inside a JSON string value quotes arrive escaped (\"), so a bare "path":
+        // sequence only occurs at real object keys — safe to sniff file names from.
+        const FILE_KEY_RE = /"([^"\\]{1,120}\.(?:tsx|ts|css|html|json|js|svg|md))"\s*:/g;
+        const accumulated = await withModelFallback(builderModelChain(requestedModel), async (model) => {
+            res.write(JSON.stringify({ phase: 'thinking', model }) + '\n');
             const stream = await ai.models.generateContentStream({
                 model,
                 contents: prompt,
                 config: { responseMimeType: 'application/json', maxOutputTokens: 65536 },
             });
             let acc = '';
+            const seenFiles = new Set();
             for await (const chunk of stream) {
                 if (chunk.text) {
+                    if (acc === '') res.write(JSON.stringify({ phase: 'writing', model }) + '\n');
                     acc += chunk.text;
+                    FILE_KEY_RE.lastIndex = 0;
+                    let match;
+                    while ((match = FILE_KEY_RE.exec(acc)) !== null) {
+                        if (!seenFiles.has(match[1])) {
+                            seenFiles.add(match[1]);
+                            res.write(JSON.stringify({ file: match[1] }) + '\n');
+                        }
+                    }
                     res.write(JSON.stringify({ progress: acc.length }) + '\n');
                 }
             }

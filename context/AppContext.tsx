@@ -99,6 +99,8 @@ interface AppContextType {
     setUseWebSearch: React.Dispatch<React.SetStateAction<boolean>>;
     lowLatencyMode: boolean;
     setLowLatencyMode: React.Dispatch<React.SetStateAction<boolean>>;
+    selectedModel: string;                 // 'auto' or a concrete Gemini model id
+    setSelectedModel: (model: string) => void;
     customAiStyles: CustomAiStyle[];
     handleAddCustomStyle: (name: string, instructions: string) => Promise<void>;
     handleUpdateCustomStyle: (id: string, name: string, instructions: string) => Promise<void>;
@@ -144,6 +146,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     
     const [useWebSearch, setUseWebSearch] = useState(false);
     const [lowLatencyMode, setLowLatencyMode] = useState(false);
+    const [selectedModel, setSelectedModelState] = useState<string>(() => {
+        try { return localStorage.getItem('gemini_selected_model') || 'auto'; } catch { return 'auto'; }
+    });
+    const setSelectedModel = (model: string) => {
+        setSelectedModelState(model);
+        try { localStorage.setItem('gemini_selected_model', model); } catch { /* non-fatal */ }
+    };
     const [customAiStyles, setCustomAiStyles] = useState<CustomAiStyle[]>([]);
     const [personas, setPersonas] = useState<Persona[]>([]);
     const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(null);
@@ -393,7 +402,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const generateWebAppPlan = async () => {
         setBuilderState(prev => ({ ...prev, status: { ...prev.status, isLoading: true, message: 'AI is analyzing your idea and creating a blueprint...' }}));
         try {
-            const plan = await apiService.generateWebAppPlan(builderState.idea);
+            const plan = await apiService.generateWebAppPlan(builderState.idea, selectedModel === 'auto' ? undefined : selectedModel);
             setBuilderState(prev => ({ ...prev, plan, status: { ...prev.status, isLoading: false, message: '' }, currentStep: 2 }));
         } catch (e: any) {
             setGlobalError(`Failed to generate plan: ${e.message}`);
@@ -401,11 +410,22 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         }
     };
     const generateWebAppCode = async () => {
-        setBuilderState(prev => ({ ...prev, currentStep: 4, status: { isLoading: true, message: 'Generating project files...', log: [] } }));
+        setBuilderState(prev => ({ ...prev, currentStep: 4, status: { isLoading: true, message: 'Contacting Gemini…', log: [] } }));
         try {
-            const files = await apiService.generateWebAppCode(builderState.plan, builderState.theme, (chars) => {
-                const kb = (chars / 1024).toFixed(1);
-                setBuilderState(prev => ({ ...prev, status: { ...prev.status, message: `Generating project files… ${kb} KB written` } }));
+            const files = await apiService.generateWebAppCode(builderState.plan, builderState.theme, selectedModel === 'auto' ? undefined : selectedModel, (event) => {
+                setBuilderState(prev => {
+                    let message = prev.status.message;
+                    let log = prev.status.log;
+                    if (event.phase === 'thinking') {
+                        message = `${event.model ?? 'Gemini'} is thinking about the architecture…`;
+                        log = [];  // a fresh attempt (retry/fallback) restarts the file log
+                    } else if (event.phase === 'writing') {
+                        message = `${event.model ?? 'Gemini'} is writing code…`;
+                    }
+                    if (event.progress) message = `Writing code… ${(event.progress / 1024).toFixed(1)} KB`;
+                    if (event.file && !log.includes(event.file)) log = [...log, event.file];
+                    return { ...prev, status: { ...prev.status, message, log } };
+                });
             });
             setBuilderState(prev => ({ ...prev, generatedFiles: files, status: { ...prev.status, isLoading: false, message: 'Generation complete!' }, currentStep: 5 }));
         } catch (e: any) {
@@ -438,6 +458,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         handleSaveFileContent, handleOpenProjectSettings, handleCloseProjectSettings, handleRenameProject, handleToggleProjectPanel,
         setSelectedProjectIds,
         useWebSearch, setUseWebSearch, lowLatencyMode, setLowLatencyMode,
+        selectedModel, setSelectedModel,
         customAiStyles, handleAddCustomStyle, handleUpdateCustomStyle, handleDeleteCustomStyle,
         personas, selectedPersonaId, handleSelectPersona, handleSavePersona, handleDeletePersona,
         activePersona, setActivePersona,

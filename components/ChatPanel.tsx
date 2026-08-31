@@ -5,6 +5,7 @@ import ImageEditorPane from './ImageEditorPane';
 import VideoGeneratorPane from './VideoGeneratorPane';
 import LiveChatPane from './LiveChatPane';
 import LoadingIndicator from './LoadingIndicator';
+import ModelPicker from './ModelPicker';
 import { useChat } from '../hooks/useChat';
 import { useTTS } from '../hooks/useTTS';
 import { useLiveChat } from '../hooks/useLiveChat';
@@ -12,8 +13,8 @@ import { useAppContext } from '../context/AppContext';
 import { ChatMode } from '../types/index';
 
 const ChatPanel: React.FC = () => {
-    const { 
-      projects, selectedProjectIds, filesByProject, activePersona, useWebSearch, customAiStyles, lowLatencyMode, activeAgentId,
+    const {
+      projects, selectedProjectIds, filesByProject, activePersona, useWebSearch, customAiStyles, lowLatencyMode, activeAgentId, selectedModel,
       aiCreateFile, aiUpdateFile, aiDeleteFile
     } = useAppContext();
     
@@ -44,7 +45,7 @@ const ChatPanel: React.FC = () => {
         deleteFile: aiDeleteFile,
     };
 
-    const { messages, isLoading, statusText, sendMessage, regenerate, resolvePendingTool } = useChat(selectedProjects, activePersona, useWebSearch, customAiStyles, lowLatencyMode, aiFileOperations, `gemini_messages_${activeAgentId ?? 'general'}`);
+    const { messages, isLoading, statusText, sendMessage, regenerate, resolvePendingTool } = useChat(selectedProjects, activePersona, useWebSearch, customAiStyles, lowLatencyMode, aiFileOperations, `gemini_messages_${activeAgentId ?? 'general'}`, selectedModel === 'auto' ? undefined : selectedModel);
     const { speak, cancel, isPlaying, currentlyPlayingId } = useTTS();
     const { isListening, liveTranscription, liveError, startListening, stopListening } = useLiveChat();
 
@@ -107,7 +108,12 @@ const ChatPanel: React.FC = () => {
     return (
         <main className="flex-1 flex flex-col bg-gray-900 h-full">
             <div className="flex-1 flex flex-col overflow-y-auto p-4">
-                {!activeAgentId && <ModeSelector currentMode={mode} onModeChange={setMode} isAgentActive={!!activeAgentId} />}
+                <div className="flex items-center gap-3 mb-2">
+                    <div className="flex-1">
+                        {!activeAgentId && <ModeSelector currentMode={mode} onModeChange={setMode} isAgentActive={!!activeAgentId} />}
+                    </div>
+                    <ModelPicker compact />
+                </div>
                 <div className="flex-1 space-y-4">
                     {messages.map(msg => (
                       <MessageItem 

@@ -38,7 +38,8 @@ export const useChat = (
         updateFile: (projectId: string, path: string, newContent: string) => Promise<any>;
         deleteFile: (projectId: string, path: string) => Promise<boolean>;
     },
-    historyStorageKey: string = 'gemini_messages_general'
+    historyStorageKey: string = 'gemini_messages_general',
+    model?: string
 ) => {
     const [messages, setMessages] = useState<Message[]>(() => loadPersistedMessages(historyStorageKey));
     const [isLoading, setIsLoading] = useState(false);
@@ -181,10 +182,10 @@ export const useChat = (
              const toolMessage = addMessage(MessageAuthor.TOOL, [], undefined, { name: toolCall.name, response: { content: toolResponseResult } });
 
              const historyWithToolResponse = [...existingMessages, responseMessage, toolMessage];
-             const followUpStream = await apiService.generateCodingContentStream(historyWithToolResponse, activeProjectsForTooling, persona, useWebSearch, customStyles, lowLatencyMode);
+             const followUpStream = await apiService.generateCodingContentStream(historyWithToolResponse, activeProjectsForTooling, persona, useWebSearch, customStyles, lowLatencyMode, model);
              await processStream(followUpStream, historyWithToolResponse, currentMode);
         }
-    }, [addMessage, projects, persona, useWebSearch, customStyles, lowLatencyMode, handleToolCall]);
+    }, [addMessage, projects, persona, useWebSearch, customStyles, lowLatencyMode, model, handleToolCall]);
 
     const resolvePendingTool = useCallback(async (messageId: string, approved: boolean) => {
         const pending = pendingApprovals.current.get(messageId);
@@ -212,7 +213,7 @@ export const useChat = (
 
             const historyWithToolResponse = [...pending.history, toolMessage];
             const activeProjectsForTooling = pending.mode === 'coding' ? projects : [];
-            const followUpStream = await apiService.generateCodingContentStream(historyWithToolResponse, activeProjectsForTooling, persona, useWebSearch, customStyles, lowLatencyMode);
+            const followUpStream = await apiService.generateCodingContentStream(historyWithToolResponse, activeProjectsForTooling, persona, useWebSearch, customStyles, lowLatencyMode, model);
             await processStream(followUpStream, historyWithToolResponse, pending.mode);
         } catch (error: any) {
             addMessage(MessageAuthor.SYSTEM, [{ text: `Error: ${error.message}` }]);
@@ -220,7 +221,7 @@ export const useChat = (
             setIsLoading(false);
             setStatusText('');
         }
-    }, [addMessage, projects, persona, useWebSearch, customStyles, lowLatencyMode, processStream]);
+    }, [addMessage, projects, persona, useWebSearch, customStyles, lowLatencyMode, model, processStream]);
 
 
     const sendMessage = async (prompt: string, mode: ChatMode, file?: File | null) => {
@@ -247,7 +248,7 @@ export const useChat = (
             } else { // coding or chat mode
                 const history = [...messages, userMessage];
                 const activeProjects = mode === 'coding' ? projects : [];
-                const stream = await apiService.generateCodingContentStream(history, activeProjects, persona, useWebSearch, customStyles, lowLatencyMode);
+                const stream = await apiService.generateCodingContentStream(history, activeProjects, persona, useWebSearch, customStyles, lowLatencyMode, model);
                 await processStream(stream, history, mode);
             }
         } catch (error: any) {

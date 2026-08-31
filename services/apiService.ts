@@ -50,11 +50,11 @@ export const generateVideo = async (augmentedPrompt: string, file: File | null, 
     }
 };
 
-export const generateCodingContentStream = async (history: Message[], projects: Project[], persona: Persona, useWebSearch: boolean, customStyles: CustomAiStyle[], lowLatencyMode: boolean): Promise<ReadableStream<Uint8Array>> => {
+export const generateCodingContentStream = async (history: Message[], projects: Project[], persona: Persona, useWebSearch: boolean, customStyles: CustomAiStyle[], lowLatencyMode: boolean, model?: string): Promise<ReadableStream<Uint8Array>> => {
     const response = await fetch('/api/coding-chat-stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ history, projects, persona, useWebSearch, customStyles, lowLatencyMode }),
+        body: JSON.stringify({ history, projects, persona, useWebSearch, customStyles, lowLatencyMode, model }),
     });
     if (!response.ok || !response.body) { const error = await response.json(); throw new Error(error.message || 'Failed to get streaming response from server.'); }
     return response.body;
@@ -85,25 +85,32 @@ export const updateProjectDependencies = async (project: Project, files: Project
 };
 
 // Web App Builder API Calls
-export const generateWebAppPlan = async (idea: string): Promise<any> => {
+export const generateWebAppPlan = async (idea: string, model?: string): Promise<any> => {
     const response = await fetch('/api/builder/plan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idea }),
+        body: JSON.stringify({ idea, model }),
     });
     if (!response.ok) { const error = await response.json(); throw new Error(error.message || 'Failed to generate web app plan.'); }
     return response.json();
 };
 
-export const generateWebAppCode = async (plan: any, theme: any, onProgress?: (chars: number) => void): Promise<Record<string, string>> => {
+export interface BuilderProgressEvent {
+    progress?: number;   // total characters generated so far
+    file?: string;       // a file path Gemini just started writing
+    phase?: 'thinking' | 'writing';
+    model?: string;      // which model is serving this attempt (fallback-aware)
+}
+
+export const generateWebAppCode = async (plan: any, theme: any, model?: string, onProgress?: (event: BuilderProgressEvent) => void): Promise<Record<string, string>> => {
     const response = await fetch('/api/builder/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plan, theme }),
+        body: JSON.stringify({ plan, theme, model }),
     });
     if (!response.ok || !response.body) { const error = await response.json().catch(() => ({})); throw new Error(error.message || 'Failed to generate web app code.'); }
 
-    // NDJSON stream: {progress} events during generation, then {files} or {error}.
+    // NDJSON stream: {phase}/{file}/{progress} events during generation, then {files} or {error}.
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let carry = '';
@@ -112,9 +119,9 @@ export const generateWebAppCode = async (plan: any, theme: any, onProgress?: (ch
     const handleLine = (line: string) => {
         if (!line.trim()) return;
         const event = JSON.parse(line);
-        if (event.progress && onProgress) onProgress(event.progress);
         if (event.error) throw new Error(event.error);
         if (event.files) files = event.files;
+        else if (onProgress) onProgress(event as BuilderProgressEvent);
     };
 
     while (true) {
