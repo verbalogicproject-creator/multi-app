@@ -395,6 +395,32 @@ app.post('/api/analyze-dependencies', async (req, res) => {
     }
 });
 
+// Transient-failure resilience: retry with backoff on 429/503, then fall back to the
+// next model in the list. Used by the builder endpoints (3.7-flash spikes under demand).
+const TRANSIENT_STATUSES = new Set([429, 503]);
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+async function withModelFallback(models, attempt) {
+    let lastError;
+    for (const model of models) {
+        for (let tryNo = 0; tryNo < 2; tryNo++) {
+            try {
+                return await attempt(model);
+            } catch (error) {
+                lastError = error;
+                if (!TRANSIENT_STATUSES.has(error?.status)) throw error;
+                console.warn(`Transient ${error.status} from ${model} (attempt ${tryNo + 1}), backing off...`);
+                await sleep(2000 * (tryNo + 1));
+            }
+        }
+    }
+    throw lastError;
+}
+const builderModelChain = () => MODELS.builder === MODELS.coding ? [MODELS.builder] : [MODELS.builder, MODELS.coding];
+const friendlyProviderError = (error, fallbackMessage) =>
+    TRANSIENT_STATUSES.has(error?.status)
+        ? `The model is temporarily overloaded (HTTP ${error.status}). Please try again in a minute.`
+        : fallbackMessage;
+
 // Web App Builder - Step 1: Plan
 app.post('/api/builder/plan', async (req, res) => {
     try {
@@ -403,22 +429,22 @@ app.post('/api/builder/plan', async (req, res) => {
 User's Idea: "${idea}"
 
 Analyze the user's idea and create a logical project plan for a standard React (Vite) + TailwindCSS application. The plan should include a project name, description, a list of pages, and a list of reusable components.`;
-        
-        const response = await ai.models.generateContent({
-            model: MODELS.builder,
+
+        const response = await withModelFallback(builderModelChain(), (model) => ai.models.generateContent({
+            model,
             contents: prompt,
             config: {
                 responseMimeType: 'application/json',
                 responseSchema: planResponseSchema
             }
-        });
+        }));
 
         res.setHeader('Content-Type', 'application/json');
         res.send(response.text);
 
     } catch (error) {
         console.error('Builder plan error:', error);
-        res.status(500).json({ message: 'Error generating project plan.' });
+        res.status(500).json({ message: friendlyProviderError(error, 'Error generating project plan.') });
     }
 });
 
@@ -467,20 +493,25 @@ ${JSON.stringify(plan, null, 2)}
 
 **Response format:** a single JSON object whose keys are file paths and values are complete file contents as strings. No markdown, no commentary.`;
 
-        const stream = await ai.models.generateContentStream({
-            model: MODELS.builder,
-            contents: prompt,
-            config: { responseMimeType: 'application/json', maxOutputTokens: 65536 },
-        });
-
         res.setHeader('Content-Type', 'application/x-ndjson');
-        let accumulated = '';
-        for await (const chunk of stream) {
-            if (chunk.text) {
-                accumulated += chunk.text;
-                res.write(JSON.stringify({ progress: accumulated.length }) + '\n');
+
+        // On a transient failure the whole attempt restarts (progress resets to 0
+        // client-side, which is harmless — events are self-describing).
+        const accumulated = await withModelFallback(builderModelChain(), async (model) => {
+            const stream = await ai.models.generateContentStream({
+                model,
+                contents: prompt,
+                config: { responseMimeType: 'application/json', maxOutputTokens: 65536 },
+            });
+            let acc = '';
+            for await (const chunk of stream) {
+                if (chunk.text) {
+                    acc += chunk.text;
+                    res.write(JSON.stringify({ progress: acc.length }) + '\n');
+                }
             }
-        }
+            return acc;
+        });
 
         try {
             const files = JSON.parse(accumulated);
@@ -493,11 +524,12 @@ ${JSON.stringify(plan, null, 2)}
 
     } catch (error) {
         console.error('Builder generate error:', error);
+        const message = friendlyProviderError(error, 'Error generating project code.');
         if (res.headersSent) {
-            res.write(JSON.stringify({ error: 'Error generating project code.' }) + '\n');
+            res.write(JSON.stringify({ error: message }) + '\n');
             res.end();
         } else {
-            res.status(500).json({ message: 'Error generating project code.' });
+            res.status(500).json({ message });
         }
     }
 });
