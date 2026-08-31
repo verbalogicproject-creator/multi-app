@@ -29,9 +29,8 @@ const Step_Generate: React.FC = () => {
                 )}
             </div>
 
-            {/* In a real implementation, a sandboxed iframe would go here to show a live preview */}
             <div className="mt-6 text-xs text-gray-500">
-                Live preview would appear here.
+                A visual preview will appear on the next screen when generation finishes.
             </div>
         </div>
     );

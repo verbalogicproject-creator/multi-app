@@ -403,7 +403,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const generateWebAppCode = async () => {
         setBuilderState(prev => ({ ...prev, currentStep: 4, status: { isLoading: true, message: 'Generating project files...', log: [] } }));
         try {
-            const files = await apiService.generateWebAppCode(builderState.plan, builderState.theme);
+            const files = await apiService.generateWebAppCode(builderState.plan, builderState.theme, (chars) => {
+                const kb = (chars / 1024).toFixed(1);
+                setBuilderState(prev => ({ ...prev, status: { ...prev.status, message: `Generating project files… ${kb} KB written` } }));
+            });
             setBuilderState(prev => ({ ...prev, generatedFiles: files, status: { ...prev.status, isLoading: false, message: 'Generation complete!' }, currentStep: 5 }));
         } catch (e: any) {
             setGlobalError(`Failed to generate code: ${e.message}`);

@@ -20,7 +20,19 @@ const Step_Export: React.FC = () => {
             </div>
             <h2 className="mt-4 text-3xl font-bold text-white">"{plan.projectName}" is ready!</h2>
             <p className="mt-2 text-gray-400">The AI successfully generated {fileCount} files for your new project.</p>
-            
+
+            {generatedFiles['preview.html'] && (
+                <div className="mt-8 text-left">
+                    <p className="text-sm font-semibold text-gray-300 mb-2">Visual preview (static snapshot of the home page)</p>
+                    <iframe
+                        sandbox=""
+                        srcDoc={generatedFiles['preview.html']}
+                        title={`${plan.projectName} preview`}
+                        className="w-full h-[28rem] bg-white rounded-lg border border-gray-700"
+                    />
+                </div>
+            )}
+
             <div className="mt-8 flex flex-col md:flex-row justify-center gap-4">
                 <button
                     onClick={exportGeneratedProject}

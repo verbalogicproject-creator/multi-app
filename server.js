@@ -422,48 +422,83 @@ Analyze the user's idea and create a logical project plan for a standard React (
     }
 });
 
-// Web App Builder - Step 2: Generate
+// Web App Builder - Step 2: Generate (streams NDJSON progress, then the final files object)
+const BUILDER_THEME_TOKENS = {
+    'Modern & Minimal': 'Background slate-50/slate-100, surfaces white, text slate-800/slate-500, primary blue-600 (hover blue-700), borders slate-200, generous whitespace, subtle shadow-sm only.',
+    'Vibrant & Playful': 'Background amber-50, surfaces white with rounded-2xl, text gray-800, primary pink-500 (hover pink-600), accents violet-500 and teal-400 used sparingly, playful rounded shapes, shadow-md.',
+    'Corporate & Clean': 'Background white, section alternation with gray-50, text gray-700/gray-500, primary indigo-700 (hover indigo-800), borders gray-200, dense and precise spacing, shadow-sm.',
+    'Dark & Elegant': 'Background gray-950, surfaces gray-900 with border gray-800, text gray-200/gray-400, primary teal-500 (hover teal-400), no pure black or pure white, subtle ring-1 ring-gray-800 on cards.',
+};
+const BUILDER_TYPE_TOKENS = {
+    'Sans-serif & Friendly': 'font-sans; headings font-semibold tracking-tight; body leading-relaxed.',
+    'Serif & Professional': 'font-serif headings with font-sans body; headings font-medium; formal editorial feel.',
+    'Mono & Techy': 'font-mono for headings, labels and data; font-sans for long body text; uppercase tracking-wide micro-labels.',
+};
+
 app.post('/api/builder/generate', async (req, res) => {
     try {
         const { plan, theme } = req.body;
-        const prompt = `You are an expert React developer using Vite and TailwindCSS.
-Your task is to generate the complete code for a web application based on the provided project plan and theme.
-You MUST generate all necessary files, including package.json, vite.config.ts, index.html, App.tsx, main.tsx, and all specified pages and components.
+        const paletteSpec = BUILDER_THEME_TOKENS[theme?.palette] || BUILDER_THEME_TOKENS['Modern & Minimal'];
+        const typeSpec = BUILDER_TYPE_TOKENS[theme?.typography] || BUILDER_TYPE_TOKENS['Sans-serif & Friendly'];
+        const prompt = `You are a senior product engineer and designer. Generate the complete, production-quality code for a web application from the plan and theme below. The result must look like a designed product, not a template.
 
 **Project Plan:**
 ${JSON.stringify(plan, null, 2)}
 
-**Theme:**
-- Color Palette: ${theme.palette}
-- Typography: ${theme.typography}
+**Design contract (mandatory):**
+- Palette: ${paletteSpec}
+- Typography: ${typeSpec}
+- Type scale: one hero-size heading per page (text-4xl/5xl), section headings text-2xl, body text-base, captions text-sm. Never more than three sizes on one screen.
+- Spacing rhythm: sections py-16 to py-24, cards p-6, consistent gap-4/gap-6 grids. Align everything to one max-w-6xl mx-auto px-4 container.
+- Components must have hover and focus-visible states, and disabled states where relevant.
+- Realistic, domain-specific content everywhere: real-sounding names, numbers, dates and copy that fit the project's purpose. NEVER use "Lorem ipsum", "TODO", "placeholder", or empty stub components.
+- No external images. Where an image would go, use a styled div with a gradient or an inline SVG.
 
-**Instructions:**
-1.  **File Structure:** Use a standard Vite React layout (e.g., 'src/pages', 'src/components').
-2.  **Routing:** Use 'react-router-dom' for page navigation. Set it up in 'App.tsx'.
-3.  **Styling:** Use TailwindCSS classes for all styling. Add the tailwind.config.js and postcss.config.js files.
-4.  **Content:** Use placeholder text and images where necessary, but make them relevant to the project's purpose.
-5.  **Response Format:** Your response MUST be a single JSON object where keys are the full file paths (e.g., 'src/components/Navbar.tsx') and values are the complete code for that file as a string.
+**Stack rules:**
+1. Vite + React 18 + TypeScript, standard layout: index.html, src/main.tsx, src/App.tsx, src/index.css, src/pages/*, src/components/*.
+2. Routing with react-router-dom v6 (Routes in src/App.tsx, shared layout with nav + footer).
+3. Styling with Tailwind CSS v4: src/index.css starts with '@import "tailwindcss";' and vite.config.ts uses the @tailwindcss/vite plugin. Do NOT emit tailwind.config.js or postcss.config.js.
+4. package.json with correct dependencies and pinned major versions (react ^18, react-router-dom ^6, tailwindcss ^4, @tailwindcss/vite ^4, vite ^5, @vitejs/plugin-react ^4, typescript ^5) and scripts: "dev": "vite", "build": "vite build", "typecheck": "tsc --noEmit", "preview": "vite preview".
+5. tsconfig.json compilerOptions must be exactly: { "target": "ES2020", "lib": ["ES2020", "DOM", "DOM.Iterable"], "module": "ESNext", "moduleResolution": "bundler", "jsx": "react-jsx", "strict": true, "esModuleInterop": true, "skipLibCheck": true, "noEmit": true } with "include": ["src"].
+6. Code must compile under strict TypeScript: every function parameter, callback parameter and prop is explicitly typed — no implicit any. With jsx react-jsx, do not import React just for JSX; import only the hooks you use.
+7. Every file must be complete and syntactically valid. State lives in React hooks; interactive features (forms, filters, toggles) must actually work with local state.
 
-Example Response:
-{
-  "package.json": "...",
-  "index.html": "...",
-  "src/main.tsx": "...",
-  "src/App.tsx": "...",
-  "src/pages/HomePage.tsx": "...",
-  ...etc
-}
+**Additionally generate "preview.html"**: a single fully self-contained static HTML snapshot of the app's home page for an instant visual preview. Inline ALL of its CSS in a <style> tag (hand-written CSS reproducing the theme — do not reference Tailwind or any external resource, no JavaScript). It must faithfully show the real layout, colors, typography and content.
 
-Now, generate the complete project.`;
+**Response format:** a single JSON object whose keys are file paths and values are complete file contents as strings. No markdown, no commentary.`;
 
-        const response = await ai.models.generateContent({ model: MODELS.builder, contents: prompt, config: { responseMimeType: 'application/json' } });
-        
-        res.setHeader('Content-Type', 'application/json');
-        res.send(response.text);
+        const stream = await ai.models.generateContentStream({
+            model: MODELS.builder,
+            contents: prompt,
+            config: { responseMimeType: 'application/json', maxOutputTokens: 65536 },
+        });
+
+        res.setHeader('Content-Type', 'application/x-ndjson');
+        let accumulated = '';
+        for await (const chunk of stream) {
+            if (chunk.text) {
+                accumulated += chunk.text;
+                res.write(JSON.stringify({ progress: accumulated.length }) + '\n');
+            }
+        }
+
+        try {
+            const files = JSON.parse(accumulated);
+            res.write(JSON.stringify({ files }) + '\n');
+        } catch (parseError) {
+            console.error('Builder generate: model returned malformed JSON', parseError.message);
+            res.write(JSON.stringify({ error: 'The model returned malformed JSON. Please try again.' }) + '\n');
+        }
+        res.end();
 
     } catch (error) {
         console.error('Builder generate error:', error);
-        res.status(500).json({ message: 'Error generating project code.' });
+        if (res.headersSent) {
+            res.write(JSON.stringify({ error: 'Error generating project code.' }) + '\n');
+            res.end();
+        } else {
+            res.status(500).json({ message: 'Error generating project code.' });
+        }
     }
 });
 
