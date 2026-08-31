@@ -1,0 +1,11 @@
+{
+  "name": "Eyal's Multimodal Assistant",
+  "description": "Eyal's Multimodal Assistant, a chat application showcasing the capabilities of Gemini Pro for text, Gemini 2.5 Flash Image Preview (Nano Banana) for image editing, and Veo for video generation in a unified interface.",
+  "requestFramePermissions": [
+    "microphone",
+    "camera"
+  ],
+  "useEnvironmentVariables": [
+    "API_KEY"
+  ]
+}
