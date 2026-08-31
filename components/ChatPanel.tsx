@@ -44,7 +44,7 @@ const ChatPanel: React.FC = () => {
         deleteFile: aiDeleteFile,
     };
 
-    const { messages, isLoading, statusText, sendMessage, regenerate, resolvePendingTool } = useChat(selectedProjects, activePersona, useWebSearch, customAiStyles, lowLatencyMode, aiFileOperations);
+    const { messages, isLoading, statusText, sendMessage, regenerate, resolvePendingTool } = useChat(selectedProjects, activePersona, useWebSearch, customAiStyles, lowLatencyMode, aiFileOperations, `gemini_messages_${activeAgentId ?? 'general'}`);
     const { speak, cancel, isPlaying, currentlyPlayingId } = useTTS();
     const { isListening, liveTranscription, liveError, startListening, stopListening } = useLiveChat();
 
