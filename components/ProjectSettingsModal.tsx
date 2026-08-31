@@ -34,7 +34,7 @@ const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
       <div className="bg-gray-800 rounded-lg shadow-xl w-full max-w-2xl border border-gray-700 flex flex-col max-h-[90vh]">
         <header className="p-4 border-b border-gray-700 flex justify-between items-center">
           <h2 className="text-xl font-bold text-sky-400">Settings for "{project.name}"</h2>

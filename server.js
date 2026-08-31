@@ -27,11 +27,13 @@ if (!apiKey) {
 const ai = new GoogleGenAI({ apiKey });
 
 // Model registry — env-overridable so future model retirements are a config change.
+// Free-tier note: gemini-3.7-flash allows only ~20 requests/day, so it is reserved
+// for the builder's few heavy codegen calls; chat/coding run on gemini-3.5-flash.
 const MODELS = {
-    chat: process.env.MODEL_CHAT || 'gemini-2.5-flash',
-    coding: process.env.MODEL_CODING || 'gemini-2.5-flash',
-    builder: process.env.MODEL_BUILDER || 'gemini-2.5-flash',
-    image: process.env.MODEL_IMAGE || 'gemini-2.5-flash-image',
+    chat: process.env.MODEL_CHAT || 'gemini-3.5-flash',
+    coding: process.env.MODEL_CODING || 'gemini-3.5-flash',
+    builder: process.env.MODEL_BUILDER || 'gemini-3.7-flash',
+    image: process.env.MODEL_IMAGE || 'gemini-3.1-flash-image',
     video: process.env.MODEL_VIDEO || 'veo-3.1-generate-preview',
 };
 
