@@ -185,8 +185,26 @@ often offline and a font that fails to load is a layout that fails to load.
 `font-display: swap` with a metric-matched system fallback in the stack, so a
 missing font degrades to a shift rather than to invisible text.
 
-> **Before shipping:** confirm the Clash Display licence covers this use. Geist is
-> OFL-1.1. This has not been verified yet.
+**Licences, verified.** Geist is OFL-1.1 (Vercel / basement.studio). Clash Display
+is the ITF Free Font License, which grants commercial use free of charge (§01) and
+states explicitly that "nothing in this Section 02 restricts the self-hosting,
+embedding or other use of the Font Software by the Licensee for the Licensee's own
+websites, applications" (§59). Two constraints follow and are binding:
+
+- **§51 — no subsetting and no format conversion.** The woff2 ships exactly as
+  downloaded. Do not run it through a subsetter to save bytes.
+- **§57 — it may not be offered to third parties as a selectable font.** Clash is
+  for multi-app's own chrome. It must never be handed to a *generated* app's
+  typography options.
+
+Both licence texts are committed beside the fonts.
+
+**One skill disagrees, deliberately overruled.** `impeccable detect` flags Geist as
+an overused face, and it is right about marketing sites. This is a personal tool
+with a terminal and a file tree in it, where legibility at 11px beats
+distinctiveness, and Clash Display carries the personality instead. Recorded as a
+value-scoped exception in `.impeccable/config.json` rather than by turning the
+rule off, so the rule still fires for the next font someone reaches for.
 
 ---
 
