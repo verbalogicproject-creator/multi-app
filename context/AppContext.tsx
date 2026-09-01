@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode, useCa
 import { Project, ProjectFile, CustomAiStyle, Persona, Agent, AiResponseStyle } from '../types/index';
 import * as storageService from '../services/geminiService';
 import * as apiService from '../services/apiService';
+import type { CatalogModel } from '../services/apiService';
 import * as buildStorage from '../services/buildStorage';
 import type { SavedBuild } from '../services/buildStorage';
 import { DEFAULT_PALETTE, sanitizeColors, type ArtDirection, type ThemeColors } from '../utils/palettes';
@@ -170,8 +171,10 @@ interface AppContextType {
     setUseWebSearch: React.Dispatch<React.SetStateAction<boolean>>;
     lowLatencyMode: boolean;
     setLowLatencyMode: React.Dispatch<React.SetStateAction<boolean>>;
-    selectedModel: string;                 // 'auto' or a concrete Gemini model id
+    selectedModel: string;                 // 'auto' or a concrete model id from the catalog
     setSelectedModel: (model: string) => void;
+    catalog: CatalogModel[];               // models this backend can actually serve
+    modelDefaults: Record<string, string>; // surface -> default model id
     customAiStyles: CustomAiStyle[];
     handleAddCustomStyle: (name: string, instructions: string) => Promise<void>;
     handleUpdateCustomStyle: (id: string, name: string, instructions: string) => Promise<void>;
@@ -237,6 +240,23 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setSelectedModelState(model);
         try { localStorage.setItem('gemini_selected_model', model); } catch { /* non-fatal */ }
     };
+
+    // The catalog is served by the backend so that a provider without an API key,
+    // or a model that provider will not actually serve, never appears in the picker.
+    const [catalog, setCatalog] = useState<CatalogModel[]>([]);
+    const [modelDefaults, setModelDefaults] = useState<Record<string, string>>({});
+    useEffect(() => {
+        let cancelled = false;
+        apiService.getModels().then(result => {
+            if (cancelled || !result) return;
+            setCatalog(result.models);
+            setModelDefaults(result.defaults ?? {});
+            // A previously chosen model can disappear (key removed, model retired):
+            // fall back to auto rather than sending an id the server will reject.
+            setSelectedModelState(prev => (prev === 'auto' || result.models.some(m => m.id === prev)) ? prev : 'auto');
+        });
+        return () => { cancelled = true; };
+    }, []);
     const [customAiStyles, setCustomAiStyles] = useState<CustomAiStyle[]>([]);
     const [personas, setPersonas] = useState<Persona[]>([]);
     const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(null);
@@ -762,7 +782,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         handleSaveFileContent, handleOpenProjectSettings, handleCloseProjectSettings, handleRenameProject, handleToggleProjectPanel,
         setSelectedProjectIds,
         useWebSearch, setUseWebSearch, lowLatencyMode, setLowLatencyMode,
-        selectedModel, setSelectedModel,
+        selectedModel, setSelectedModel, catalog, modelDefaults,
         customAiStyles, handleAddCustomStyle, handleUpdateCustomStyle, handleDeleteCustomStyle,
         personas, selectedPersonaId, handleSelectPersona, handleSavePersona, handleDeletePersona,
         activePersona, setActivePersona,

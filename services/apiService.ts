@@ -2,9 +2,34 @@
 import { CustomAiStyle, Message, MessagePart, Persona, Project, ProjectFile } from "../types/index";
 import { updateProject as updateProjectInStorage } from "./geminiService";
 
+export interface CatalogModel {
+    id: string;
+    provider: string;
+    providerLabel: string;
+    label: string;
+    hint: string;
+    thinking: boolean;
+    tools: boolean;
+    priceIn: number;
+    priceOut: number;
+    dailyLimit: number | null;
+    paid: boolean;
+}
+
+/** The models this backend can actually serve right now (providers with keys configured). */
+export const getModels = async (): Promise<{ models: CatalogModel[]; defaults: Record<string, string> } | null> => {
+    try {
+        const response = await fetch('/api/models');
+        return response.ok ? await response.json() : null;
+    } catch {
+        return null;
+    }
+};
+
 export interface QuotaSnapshot {
     date: string;
     counts: Record<string, number>;
+    tokens: Record<string, { in: number; out: number }>;
     limits: Record<string, number>;
     models: Record<string, string>;
 }
