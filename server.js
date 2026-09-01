@@ -403,6 +403,22 @@ const friendlyProviderError = (error, fallbackMessage) =>
 /** Splits a catalog model id into the attribution the memory engine records. */
 const attributionFor = (model) => (model ? { provider: getModel(model)?.provider, model } : {});
 
+/**
+ * What was asked for, next to what actually answered.
+ *
+ * The model dropdown holds a REQUEST. It can be "auto", which is not a model at
+ * all, and under a transient failure the fallback chain serves the next model
+ * instead — so the request and the answer are different facts and both are worth
+ * keeping. The gap between them is itself a signal: a model that is frequently
+ * asked for and frequently replaced is telling you something no single-value
+ * field could.
+ */
+const servedPayload = (requested, served) => ({
+    requestedModel: requested ?? 'auto',
+    servedModel: served ?? null,
+    fellBack: Boolean(served && requested && requested !== 'auto' && served !== requested),
+});
+
 // Web App Builder - Step 1: Plan
 app.post('/api/builder/plan', async (req, res) => {
     try {
@@ -462,6 +478,7 @@ Analyze the user's idea and create a logical project plan for a standard React (
             surface: isRefinement ? 'builder.refine' : 'builder.plan',
             ...attributionFor(servingModel),
             payload: {
+                ...servedPayload(requestedModel, servingModel),
                 idea: String(idea ?? '').slice(0, 500),
                 ...(isRefinement ? { feedback: feedback.trim().slice(0, 500) } : {}),
                 pages: Array.isArray(object?.pages) ? object.pages.length : 0,
@@ -532,6 +549,7 @@ For each direction give hex values for all six roles. Requirements:
             surface: 'builder.directions',
             ...attributionFor(servingModel),
             payload: {
+                ...servedPayload(requestedModel, servingModel),
                 directions: (object?.directions ?? []).map((d) => String(d?.name ?? '').slice(0, 120)),
                 memoryInjected: recalled !== '',
             },
@@ -681,6 +699,7 @@ ${Array.isArray(plan?.acceptanceCriteria) && plan.acceptanceCriteria.length > 0
                 surface: 'builder.generate',
                 ...attributionFor(servingModel),
                 payload: {
+                    ...servedPayload(requestedModel, servingModel),
                     fileCount: Object.keys(files).length,
                     bytes: accumulated.text.length,
                     memoryInjected: recalled !== '',
