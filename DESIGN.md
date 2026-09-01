@@ -262,6 +262,8 @@ explain the system, and the moment you have time to read it:
     3 episodes recorded so far.
 ```
 
+**Unproven notes are shown, not hidden.** A proposed lesson has no action attached — it cannot be approved and it is not waiting on you — so it sits below the fold, greyed, with one line explaining that it reaches you only if a later attempt that used it then passes. Hiding it would make the ladder's bottom rung invisible, and the bottom rung is where most notes live.
+
 **Degraded state** says what broke and, immediately, what it did not break:
 
 ```

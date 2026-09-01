@@ -10,3 +10,6 @@ logs/
 
 # Per-build memory databases (multi-graph-memory)
 .multi-memory/
+
+# Design review scratch — served by vite, never shipped
+public/memory-preview.html

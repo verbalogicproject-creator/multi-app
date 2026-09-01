@@ -5,6 +5,7 @@ import ChatPanel from './components/ChatPanel';
 import IdeView from './components/IdeView';
 import WebAppBuilder from './components/builders/WebAppBuilder';
 import ProjectSettingsModal from './components/ProjectSettingsModal';
+import MemoryPanel from './components/memory/MemoryPanel';
 
 const AppContent: React.FC = () => {
     const {
@@ -36,10 +37,13 @@ const AppContent: React.FC = () => {
     };
 
     return (
-        <div className="flex h-screen bg-gray-900 text-white font-sans overflow-hidden">
+        <div className="flex h-dvh bg-ground text-metal-100 font-sans overflow-hidden">
             <ProjectManager />
-            
+
             {renderMainPanel()}
+
+            {/* Reachable from every tab, because a build runs while you are elsewhere. */}
+            <MemoryPanel />
 
             {editingProject && (
                 <ProjectSettingsModal
@@ -53,12 +57,18 @@ const AppContent: React.FC = () => {
             )}
 
             {globalError && (
-                <div className="fixed bottom-4 right-4 bg-red-800 text-white p-4 rounded-lg shadow-lg max-w-sm z-50">
+                <div className="fixed bottom-20 right-4 z-50 max-w-sm p-4 rounded-[--radius-card] bg-raised shadow-[inset_0_0_0_1px_rgb(255_255_255/0.10)]">
                     <div className="flex justify-between items-center">
-                        <p className="font-semibold">Error</p>
-                        <button onClick={() => setGlobalError(null)} className="text-xl">&times;</button>
+                        <p className="flex items-center gap-2 text-sm font-medium text-metal-100">
+                            <span aria-hidden className="w-1.5 h-1.5 rounded-full bg-accent shrink-0" />
+                            Error
+                        </p>
+                        <button onClick={() => setGlobalError(null)} aria-label="Dismiss error"
+                            className="tap -mr-2 text-metal-300 md:hover:text-metal-100">
+                            <span aria-hidden>&times;</span>
+                        </button>
                     </div>
-                    <p className="text-sm mt-2">{globalError}</p>
+                    <p className="text-xs text-metal-300 mt-2 leading-relaxed">{globalError}</p>
                 </div>
             )}
         </div>
