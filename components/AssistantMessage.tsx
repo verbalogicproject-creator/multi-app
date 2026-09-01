@@ -23,6 +23,16 @@ const AssistantMessage: React.FC<AssistantMessageProps> = ({ message, onRegenera
 
     return (
         <div className="p-4 rounded-2xl max-w-lg lg:max-w-2xl xl:max-w-4xl break-words bg-gray-700 rounded-bl-none">
+          {message.thinking && (
+            <details className="mb-3 rounded-lg border border-gray-600 bg-gray-800/60">
+              <summary className="cursor-pointer px-3 py-1.5 text-xs text-gray-400 select-none">
+                Thinking · {message.thinking.length.toLocaleString()} characters
+              </summary>
+              <div className="px-3 pb-3 pt-1 text-xs text-gray-400 whitespace-pre-wrap font-mono max-h-64 overflow-y-auto">
+                {message.thinking}
+              </div>
+            </details>
+          )}
           {message.parts.map((part, index) => (
             <div key={index}>
               {part.text && <div className="whitespace-pre-wrap">{renderTextWithCodeBlocks(part.text)}</div>}
