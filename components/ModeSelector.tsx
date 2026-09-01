@@ -19,14 +19,18 @@ const modes = allModes.filter(m => m.enabled);
 
 const ModeSelector: React.FC<ModeSelectorProps> = ({ currentMode, onModeChange }) => {
   return (
-    <div className="flex justify-center items-center p-2 rounded-lg bg-gray-900/50 mb-4 flex-wrap">
+    <div className="flex justify-center items-center p-2 rounded-lg bg-black/20 mb-4 flex-wrap">
       {modes.map(mode => {
         return (
           <button
             key={mode.id}
             onClick={() => onModeChange(mode.id)}
-            className={`px-4 py-2 text-sm font-semibold rounded-md transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-sky-500
-              ${currentMode === mode.id ? 'bg-sky-600 text-white' : 'text-gray-300 hover:bg-gray-700'}
+            aria-pressed={currentMode === mode.id}
+            className={`tap px-4 rounded-md text-sm font-medium
+              transition-[background-color,color,transform] duration-200 ease-[--ease-fluid] active:scale-[0.98]
+              ${currentMode === mode.id
+                ? 'bg-raised text-metal-100 shadow-[inset_0_0_0_1px_rgb(255_255_255/0.14)]'
+                : 'text-metal-300 md:hover:bg-metal-700 md:hover:text-metal-100'}
             `}
             title={mode.description}
           >
