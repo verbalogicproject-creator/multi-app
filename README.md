@@ -210,6 +210,15 @@ npm run smoke            # backend health (server must be running)
 # real break rather than a flaky test.
 npm run check:memory-loop
 
+# The same loop through a real server process: builds the engine's dist, spawns
+# the backend on a free port over a scratch database, drives the routes, proves
+# recall reached the outgoing prompt and that the art-direction bar excludes a
+# lesson it would otherwise have recalled, restarts and re-reads, then cross-checks
+# with the multi-memory CLI. Spends nothing: the server is started with a
+# deliberately invalid key, so builder calls fail at the model — which is the
+# proof, since recall runs before the model and leaves its receipt either way.
+npm run smoke:memory
+
 # Live provider contract tests: streaming + usage, tool call, tool-result
 # round-trip, and schema-constrained JSON. Costs a few cheap requests.
 npm run smoke:providers -- gemini-3.5-flash-lite claude-haiku-4-5 gpt-5.6-luna meta/llama-3.2-11b-vision-instruct
