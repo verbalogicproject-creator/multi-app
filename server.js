@@ -2,10 +2,17 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
-import { GoogleGenAI, Modality, Type } from '@google/genai';
+// The direct client remains only for the media features (image edit, video), which
+// are Gemini-only and flagged off in the UI. Chat and builder calls go through providers/.
+import { GoogleGenAI, Modality } from '@google/genai';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import { providerForModel, usableModels, isModelUsable } from './providers/index.js';
+import { getModel, modelChain, pickModel } from './providers/catalog.js';
+import { toolsForRequest } from './providers/tools.js';
+import { PLAN_SCHEMA, DIRECTIONS_SCHEMA, GENERATE_SCHEMA, filesArrayToRecord } from './providers/schemas.js';
+import { buildSystemPrompt, builderPreamble } from './providers/prompts.js';
 
 const app = express();
 const port = process.env.PORT || 8080;
@@ -67,146 +74,38 @@ try {
     if (saved?.date === quotaState.date && saved.counts) quotaState = saved;   // a new day starts clean
 } catch { /* first run, or unreadable — start fresh */ }
 
-/** Counts a served request against today's per-model budget. Never throws. */
-const recordModelCall = (model) => {
-    if (quotaState.date !== today()) quotaState = { date: today(), counts: {} };
+/** Counts a served request, and its tokens when the provider reported them. Never throws. */
+const recordModelCall = (model, usage) => {
+    if (quotaState.date !== today()) quotaState = { date: today(), counts: {}, tokens: {} };
+    if (!quotaState.tokens) quotaState.tokens = {};
     quotaState.counts[model] = (quotaState.counts[model] ?? 0) + 1;
+    if (usage) {
+        const bucket = quotaState.tokens[model] ?? { in: 0, out: 0 };
+        bucket.in += usage.inputTokens ?? 0;
+        bucket.out += usage.outputTokens ?? 0;
+        quotaState.tokens[model] = bucket;
+    }
     fs.promises.mkdir(path.dirname(QUOTA_FILE), { recursive: true })
         .then(() => fs.promises.writeFile(QUOTA_FILE, JSON.stringify(quotaState)))
         .catch(e => console.warn('Could not persist quota counts:', e.message));
 };
 
 app.get('/api/quota', (req, res) => {
-    if (quotaState.date !== today()) quotaState = { date: today(), counts: {} };
-    res.json({ date: quotaState.date, counts: quotaState.counts, limits: QUOTA_LIMITS, models: MODELS });
+    if (quotaState.date !== today()) quotaState = { date: today(), counts: {}, tokens: {} };
+    res.json({ date: quotaState.date, counts: quotaState.counts, tokens: quotaState.tokens ?? {}, limits: QUOTA_LIMITS, models: MODELS });
 });
 
-// Models the UI may request per-call; anything else falls back to the defaults above.
-const SELECTABLE_MODELS = new Set([
-    'gemini-3.5-flash',
-    'gemini-3.5-flash-lite',
-    'gemini-3.7-flash',
-    'gemini-3.1-pro-preview',
-]);
-const pickModel = (requested, fallback) => SELECTABLE_MODELS.has(requested) ? requested : fallback;
+// Selectable models, their capabilities and their fallbacks all come from the
+// catalog; a provider with no API key configured is absent from it entirely.
+app.get('/api/models', (req, res) => {
+    res.json({ models: usableModels(), defaults: MODELS });
+});
 
 
 // =========================================================================================
 // Backend Logic for Coding Assistant (moved from frontend)
 // =========================================================================================
-const npmSearchTool = { name: 'searchNpm', parameters: { type: Type.OBJECT, description: "Search for packages on the npm registry.", properties: { packageName: { type: Type.STRING, description: "The name of the package to search for." } }, required: ['packageName'] } };
-const runPythonTool = { name: 'runPython', parameters: { type: Type.OBJECT, description: "Execute Python code in a sandboxed environment. IMPORTANT: This tool is sandboxed and CANNOT access the local file system or network.", properties: { code: { type: Type.STRING, description: "The Python code to execute." } }, required: ['code'] } };
-const fileSystemTools = [
-    { name: 'listFiles', parameters: { type: Type.OBJECT, description: "List all files in the current project.", properties: {}, required: [] } },
-    { name: 'createFile', parameters: { type: Type.OBJECT, description: "Create a new file in the project.", properties: { path: { type: Type.STRING, description: "The full path of the file to create (e.g., 'src/components/Button.tsx')." }, content: { type: Type.STRING, description: "The initial content of the file." } }, required: ['path', 'content'] } },
-    { name: 'readFile', parameters: { type: Type.OBJECT, description: "Read the content of a file.", properties: { path: { type: Type.STRING, description: "The full path of the file to read." } }, required: ['path'] } },
-    { name: 'updateFile', parameters: { type: Type.OBJECT, description: "Update the content of an existing file.", properties: { path: { type: Type.STRING, description: "The full path of the file to update." }, newContent: { type: Type.STRING, description: "The new content to write to the file." } }, required: ['path', 'newContent'] } },
-    { name: 'deleteFile', parameters: { type: Type.OBJECT, description: "Delete a file.", properties: { path: { type: Type.STRING, description: "The full path of the file to delete." } }, required: ['path'] } }
-];
-
-const planResponseSchema = {
-    type: Type.OBJECT,
-    properties: {
-        projectName: { type: Type.STRING, description: "A short, catchy name for the project based on the idea" },
-        projectDescription: { type: Type.STRING, description: "A one-sentence description of the web app." },
-        pages: {
-            type: Type.ARRAY,
-            description: "A list of pages for the web application.",
-            items: {
-                type: Type.OBJECT,
-                properties: {
-                    name: { type: Type.STRING, description: "The component name for the page, e.g., HomePage" },
-                    path: { type: Type.STRING, description: "The URL path for the page, e.g., /" },
-                    description: { type: Type.STRING, description: "A brief description of the page's purpose." }
-                },
-                required: ['name', 'path', 'description']
-            }
-        },
-        components: {
-            type: Type.ARRAY,
-            description: "A list of shared UI components to be created.",
-            items: {
-                type: Type.OBJECT,
-                properties: {
-                    name: { type: Type.STRING, description: "The component name, e.g., Navbar" },
-                    description: { type: Type.STRING, description: "A brief description of the component's purpose." }
-                },
-                required: ['name', 'description']
-            }
-        },
-        acceptanceCriteria: {
-            type: Type.ARRAY,
-            description: "3-6 concrete, checkable statements describing what the finished app must do for it to be considered complete.",
-            items: { type: Type.STRING }
-        }
-    },
-    required: ['projectName', 'projectDescription', 'pages', 'components', 'acceptanceCriteria']
-};
-
-
 const geminiService = {
-    getSystemInstruction: (persona, projectContexts, customStyles) => {
-        const hasProjectContext = projectContexts && projectContexts.trim() !== "";
-
-        const baseIntro = hasProjectContext
-            ? `You are an expert AI coding assistant and software engineer. Your purpose is to help developers design, build, and refactor full applications.`
-            : `You are a helpful general-purpose AI assistant. You do not have access to a file system.`;
-
-         const getDefaultStyleInstructions = (styleName) => {
-            const style = customStyles.find(s => s.name === styleName);
-            return style ? style.instructions : `Provide clear, accurate, and concise responses. Balance detail with brevity.`;
-        }
-
-        let personaInstruction = '';
-        if (persona.baseInstructions) {
-            personaInstruction += `\n**Core Directives:**\n${persona.baseInstructions}\n`;
-        }
-        if (persona.composedStyles.length > 0) {
-            personaInstruction += "\n**Persona Composition:**\nYou must blend the following styles according to their specified influence. The first style is your primary persona.\n";
-            persona.composedStyles.forEach((style, index) => {
-                const isPrimary = index === 0;
-                const instructions = getDefaultStyleInstructions(style.name);
-                const influence = Math.round(style.weight * 100);
-                personaInstruction += `\n--- STYLE: ${style.name} (${isPrimary ? 'Primary' : 'Modifier'}, Influence: ${influence}%) ---\n${instructions}\n`;
-            });
-            personaInstruction += "--- END OF PERSONA COMPOSITION ---\n";
-        } else {
-            personaInstruction += getDefaultStyleInstructions('The Pragmatist');
-        }
-        
-        let instruction = `${baseIntro}\n${personaInstruction}`;
-        if (hasProjectContext) {
-            instruction += `
-**Chain of Thought Process:**
-For complex requests, you MUST follow these steps: 1. Analyze Request, 2. Formulate a detailed, step-by-step plan. 3. Execute the plan using the available tools. 4. Conclude and summarize the work done.
-
-**Available Tools:**
-- \`listFiles()\`: See all files in the project.
-- \`createFile(path, content)\`: Create a new file.
-- \`readFile(path)\`: Read a file's content.
-- \`updateFile(path, newContent)\`: Overwrite a file's content.
-- \`deleteFile(path)\`: Delete a file from the project.
-- \`searchNpm(packageName)\`: Find information about NPM packages.
-- \`runPython(code)\`: Execute Python code in a sandbox.
-- \`googleSearch\`: Use for recent events or up-to-date information.
-
-**Project Context:**
-Use the following project context to provide relevant responses.
-${projectContexts}
-`;
-        } else {
-            instruction += `
-**Available Tools:**
-- \`searchNpm(packageName)\`: Find information about NPM packages.
-- \`runPython(code)\`: Execute Python code in a sandbox.
-- \`googleSearch\`: Use for recent events or up-to-date information.
-
-**Project Context:**
-No project is loaded. You are in a general chat mode and cannot access or modify files.
-`;
-        }
-        return instruction;
-    },
     npmSearch: async (packageName) => {
          try {
             const response = await fetch(`https://registry.npmjs.org/-/v1/search?text=${packageName}&size=5`);
@@ -222,56 +121,38 @@ No project is loaded. You are in a general chat mode and cannot access or modify
         // For this example, we'll return a placeholder acknowledging the request.
         return { stdout: `Python execution is simulated on the server. Code to run:\n${code}`, stderr: "", result: "Simulation complete." };
     },
-    generateCodingContentStream: async function(history, projects, persona, useWebSearch, customStyles, lowLatencyMode, model) {
-        const projectContexts = (projects || []).map(p => {
-            let context = `Project: ${p.name}`;
-            if (p.dependencySummary && p.dependencySummary !== 'No files to analyze.' && p.dependencySummary !== 'No major dependencies identified') {
-                context += `\nDependencies: ${p.dependencySummary}`;
-            }
-            return context;
-        }).join('\n\n');
-
-        const systemInstruction = this.getSystemInstruction(persona, projectContexts, customStyles);
-        
-        const contents = history.map(msg => {
-            const role = msg.author === 'assistant' ? 'model' : 'user';
-            let parts = [];
-            if (msg.author === 'assistant') {
-                const textPart = msg.parts.find(p => p.text);
-                if(textPart?.text) parts.push({ text: textPart.text });
-                if (msg.toolCall) parts.push({ functionCall: msg.toolCall });
-            } else if (msg.author === 'tool') {
-                 if (msg.toolResponse) parts.push({ functionResponse: { name: msg.toolResponse.name, response: { content: msg.toolResponse.response.content } } });
-            } else {
-                parts = msg.parts.map(p => ({ text: p.text || '' }));
-            }
-            return { role, parts };
-        }).filter(c => c.parts.length > 0 && !(c.role === 'model' && c.parts.length === 1 && c.parts[0].text === ''));
-
-        const config = { systemInstruction };
-        if (useWebSearch) {
-            config.tools = [{ googleSearch: {} }];
-        } else {
-            const functionDeclarations = [npmSearchTool, runPythonTool];
-            if (projects && projects.length > 0) {
-                functionDeclarations.push(...fileSystemTools);
-            }
-            config.tools = [{ functionDeclarations }];
-        }
-
-        if (lowLatencyMode) {
-            config.thinkingConfig = { thinkingBudget: 0 };
-        }
-        
-        // The last message is the user's current prompt; the rest is prior history,
-        // which must be passed at creation time (assigning chat.history later is a no-op).
-        const lastMessage = contents.pop();
+    /**
+     * Streams a coding turn from whichever provider serves the chosen model.
+     * Returns { model, stream } where stream yields normalized events.
+     */
+    generateCodingContentStream: function(history, projects, persona, useWebSearch, customStyles, lowLatencyMode, model) {
         const codingModel = pickModel(model, MODELS.coding);
-        const chat = ai.chats.create({ model: codingModel, config, history: contents });
+        const entry = getModel(codingModel);
+        const provider = providerForModel(codingModel);
 
-        const result = await chat.sendMessageStream({ message: lastMessage.parts });
-        recordModelCall(codingModel);
-        return result;
+        const system = buildSystemPrompt({
+            provider: entry.provider,
+            persona,
+            projects,
+            customStyles,
+        });
+
+        // Google's built-in web search replaces function tools; other providers
+        // have no equivalent, so they keep their function tools either way.
+        const useGoogleSearch = useWebSearch && entry.provider === 'google';
+
+        return {
+            model: codingModel,
+            stream: provider.streamChat({
+                model: codingModel,
+                system,
+                messages: history ?? [],
+                tools: useGoogleSearch ? [] : toolsForRequest(Boolean(projects?.length)),
+                webSearch: useGoogleSearch,
+                effort: lowLatencyMode ? 'none' : 'medium',
+                maxOutputTokens: 8192,
+            }),
+        };
     },
 };
 
@@ -289,14 +170,20 @@ app.post('/api/chat-stream', async (req, res) => {
         }
 
         const chatModel = pickModel(model, MODELS.chat);
-        const chat = ai.chats.create({ model: chatModel });
-        const result = await chat.sendMessageStream({ message: prompt });
-        recordModelCall(chatModel);
-        
+        const provider = providerForModel(chatModel);
+
         res.setHeader('Content-Type', 'text/plain');
-        for await (const chunk of result) {
-            res.write(chunk.text);
+        let usage = null;
+        for await (const event of provider.streamChat({
+            model: chatModel,
+            messages: [{ author: 'user', parts: [{ text: prompt }] }],
+            effort: 'low',
+            maxOutputTokens: 4096,
+        })) {
+            if (event.usage) usage = event.usage;
+            if (event.text) res.write(event.text);
         }
+        recordModelCall(chatModel, usage);
         res.end();
     } catch (error) {
         console.error('Chat stream error:', error);
@@ -403,20 +290,26 @@ app.post('/api/coding-chat-stream', async (req, res) => {
      try {
         const { history, projects, persona, useWebSearch, customStyles, lowLatencyMode, model } = req.body;
 
-        const resultIterator = await geminiService.generateCodingContentStream(history, projects, persona, useWebSearch, customStyles, lowLatencyMode, model);
+        const { model: servingModel, stream } = geminiService.generateCodingContentStream(history, projects, persona, useWebSearch, customStyles, lowLatencyMode, model);
 
         res.setHeader('Content-Type', 'application/x-ndjson');
-        
-        for await (const chunk of resultIterator) {
-            // chunk.text / chunk.functionCalls are getters on the SDK response class;
-            // serialize the fields the client consumes explicitly or they are lost.
+
+        let usage = null;
+        for await (const event of stream) {
+            if (event.usage) usage = event.usage;
+            // Only fields the client consumes are serialized; provider response
+            // objects use getters that would not survive JSON.stringify.
             const payload = {
-                text: chunk.text ?? undefined,
-                functionCalls: chunk.functionCalls ?? undefined,
-                groundingMetadata: chunk.candidates?.[0]?.groundingMetadata ?? undefined,
+                text: event.text ?? undefined,
+                thinking: event.thinking ?? undefined,
+                functionCalls: event.toolCalls ?? undefined,
+                groundingMetadata: event.grounding ?? undefined,
             };
-            res.write(JSON.stringify(payload) + '\n');
+            if (payload.text !== undefined || payload.thinking !== undefined || payload.functionCalls !== undefined || payload.groundingMetadata !== undefined) {
+                res.write(JSON.stringify(payload) + '\n');
+            }
         }
+        recordModelCall(servingModel, usage);
         res.end();
 
     } catch (error) {
@@ -449,9 +342,9 @@ app.post('/api/analyze-dependencies', async (req, res) => {
         }
         const fileContents = files.map((f) => f.content).join('\n\n');
         const prompt = `Analyze the following code and provide a brief summary of the main dependencies, libraries, and frameworks used. List only the names, separated by commas. For example: "React, TailwindCSS, Express.js". If there are no clear dependencies, say "No major dependencies identified".\n\n${fileContents}`;
-        const response = await ai.models.generateContent({ model: MODELS.coding, contents: prompt });
-        recordModelCall(MODELS.coding);
-        res.json({ summary: response.text.trim() });
+        const { text, usage } = await providerForModel(MODELS.coding).generateText({ model: MODELS.coding, prompt });
+        recordModelCall(MODELS.coding, usage);
+        res.json({ summary: text.trim() });
     } catch (error) {
         console.error('Dependency analysis error:', error);
         res.status(500).json({ message: 'Error analyzing dependencies.' });
@@ -468,7 +361,9 @@ async function withModelFallback(models, attempt) {
         for (let tryNo = 0; tryNo < 2; tryNo++) {
             try {
                 const result = await attempt(model);
-                recordModelCall(model);   // only served requests count against the budget
+                // Only served requests count; usage is recorded by the caller when
+                // the provider reports it.
+                recordModelCall(model, result?.usage);
                 return result;
             } catch (error) {
                 lastError = error;
@@ -480,10 +375,7 @@ async function withModelFallback(models, attempt) {
     }
     throw lastError;
 }
-const builderModelChain = (requested) => {
-    const primary = pickModel(requested, MODELS.builder);
-    return [...new Set([primary, MODELS.coding])];
-};
+const builderModelChain = (requested) => modelChain(pickModel(requested, MODELS.builder), MODELS.coding);
 const friendlyProviderError = (error, fallbackMessage) =>
     TRANSIENT_STATUSES.has(error?.status)
         ? `The model is temporarily overloaded (HTTP ${error.status}). Please try again in a minute.`
@@ -512,17 +404,17 @@ User's Idea: "${idea}"
 
 Analyze the user's idea and create a logical project plan for a standard React (Vite) + TailwindCSS application. The plan should include a project name, description, a list of pages, a list of reusable components, and acceptance criteria that state what the finished app must do.`;
 
-        const response = await withModelFallback(builderModelChain(requestedModel), (model) => ai.models.generateContent({
-            model,
-            contents: prompt,
-            config: {
-                responseMimeType: 'application/json',
-                responseSchema: planResponseSchema
-            }
-        }));
+        const { object } = await withModelFallback(builderModelChain(requestedModel), (model) =>
+            providerForModel(model).generateJson({
+                model,
+                system: builderPreamble(getModel(model).provider),
+                prompt,
+                schema: PLAN_SCHEMA,
+                effort: 'medium',
+                maxOutputTokens: 8192,
+            }));
 
-        res.setHeader('Content-Type', 'application/json');
-        res.send(response.text);
+        res.json(object);
 
     } catch (error) {
         console.error('Builder plan error:', error);
@@ -532,39 +424,6 @@ Analyze the user's idea and create a logical project plan for a standard React (
 
 // Web App Builder - Art directions: three distinct visual proposals for the theme step
 const TYPOGRAPHY_NAMES = ['Sans-serif & Friendly', 'Serif & Professional', 'Mono & Techy', 'Grotesk & Bold', 'Editorial Serif'];
-
-const hexProp = (role) => ({ type: Type.STRING, description: `Hex color for the ${role} role, e.g. #1f2937` });
-const directionsResponseSchema = {
-    type: Type.OBJECT,
-    properties: {
-        directions: {
-            type: Type.ARRAY,
-            description: "Exactly three genuinely different art directions.",
-            items: {
-                type: Type.OBJECT,
-                properties: {
-                    name: { type: Type.STRING, description: "Two or three word name for the direction, e.g. 'Quiet Archive'." },
-                    rationale: { type: Type.STRING, description: "One or two sentences on why this direction suits the product and who it speaks to." },
-                    typography: { type: Type.STRING, description: `Exactly one of: ${TYPOGRAPHY_NAMES.join(' | ')}` },
-                    colors: {
-                        type: Type.OBJECT,
-                        properties: {
-                            bg: hexProp('page background'),
-                            surface: hexProp('cards and nav surface'),
-                            text: hexProp('primary text'),
-                            muted: hexProp('secondary text'),
-                            primary: hexProp('primary action'),
-                            accent: hexProp('accent'),
-                        },
-                        required: ['bg', 'surface', 'text', 'muted', 'primary', 'accent'],
-                    },
-                },
-                required: ['name', 'rationale', 'typography', 'colors'],
-            },
-        },
-    },
-    required: ['directions'],
-};
 
 app.post('/api/builder/directions', async (req, res) => {
     try {
@@ -582,14 +441,17 @@ For each direction give hex values for all six roles. Requirements:
 - The accent must differ from the primary in hue, not just lightness.
 - Typography must be exactly one of: ${TYPOGRAPHY_NAMES.join(' | ')}.`;
 
-        const response = await withModelFallback(builderModelChain(requestedModel), (model) => ai.models.generateContent({
-            model,
-            contents: prompt,
-            config: { responseMimeType: 'application/json', responseSchema: directionsResponseSchema },
-        }));
+        const { object } = await withModelFallback(builderModelChain(requestedModel), (model) =>
+            providerForModel(model).generateJson({
+                model,
+                system: builderPreamble(getModel(model).provider),
+                prompt,
+                schema: DIRECTIONS_SCHEMA,
+                effort: 'medium',
+                maxOutputTokens: 4096,
+            }));
 
-        res.setHeader('Content-Type', 'application/json');
-        res.send(response.text);
+        res.json(object);
     } catch (error) {
         console.error('Builder directions error:', error);
         res.status(500).json({ message: friendlyProviderError(error, 'Error suggesting art directions.') });
@@ -663,31 +525,38 @@ ${Array.isArray(plan?.acceptanceCriteria) && plan.acceptanceCriteria.length > 0
 
 **Additionally generate "preview.html"**: a single fully self-contained static HTML snapshot of the app's home page for an instant visual preview. Inline ALL of its CSS in a <style> tag (hand-written CSS reproducing the theme — do not reference Tailwind or any external resource, no JavaScript). It must faithfully show the real layout, colors, typography and content.
 
-**Response format:** a single JSON object whose keys are file paths and values are complete file contents as strings. No markdown, no commentary.`;
+**Before you finish**, verify every relative import you wrote resolves to a file you also emitted, and that every package you imported appears in package.json. Escape quotes inside JSX text (setQuote("I can't do this"), never setQuote('I can't do this')) — unescaped quotes are a build failure.
+
+**Response format:** a single JSON object of the form {"files":[{"path":"...","content":"..."}, ...]} listing every file. No markdown, no commentary.`;
 
         res.setHeader('Content-Type', 'application/x-ndjson');
 
         // On a transient failure the whole attempt restarts (progress resets to 0
         // client-side, which is harmless — events are self-describing).
-        // Inside a JSON string value quotes arrive escaped (\"), so a bare "path":
-        // sequence only occurs at real object keys — safe to sniff file names from.
-        const FILE_KEY_RE = /"([^"\\]{1,120}\.(?:tsx|ts|css|html|json|js|svg|md))"\s*:/g;
+        // Matches the value of each "path" field as it streams in. Provider-neutral:
+        // the files array shape is identical whichever model produced it.
+        const FILE_PATH_RE = /"path"\s*:\s*"([^"\\]{1,160})"/g;
         const accumulated = await withModelFallback(builderModelChain(requestedModel), async (model) => {
             res.write(JSON.stringify({ phase: 'thinking', model }) + '\n');
-            const stream = await ai.models.generateContentStream({
-                model,
-                contents: prompt,
-                config: { responseMimeType: 'application/json', maxOutputTokens: 65536 },
-            });
+            const provider = providerForModel(model);
             let acc = '';
+            let usage = null;
             const seenFiles = new Set();
-            for await (const chunk of stream) {
-                if (chunk.text) {
+            for await (const event of provider.streamJson({
+                model,
+                system: builderPreamble(getModel(model).provider),
+                prompt,
+                schema: GENERATE_SCHEMA,
+                effort: 'medium',
+                maxOutputTokens: 65536,
+            })) {
+                if (event.usage) usage = event.usage;
+                if (event.text) {
                     if (acc === '') res.write(JSON.stringify({ phase: 'writing', model }) + '\n');
-                    acc += chunk.text;
-                    FILE_KEY_RE.lastIndex = 0;
+                    acc += event.text;
+                    FILE_PATH_RE.lastIndex = 0;
                     let match;
-                    while ((match = FILE_KEY_RE.exec(acc)) !== null) {
+                    while ((match = FILE_PATH_RE.exec(acc)) !== null) {
                         if (!seenFiles.has(match[1])) {
                             seenFiles.add(match[1]);
                             res.write(JSON.stringify({ file: match[1] }) + '\n');
@@ -696,11 +565,14 @@ ${Array.isArray(plan?.acceptanceCriteria) && plan.acceptanceCriteria.length > 0
                     res.write(JSON.stringify({ progress: acc.length }) + '\n');
                 }
             }
-            return acc;
+            return { text: acc, usage };
         });
 
         try {
-            const files = JSON.parse(accumulated);
+            // The client protocol is unchanged: the files array becomes the
+            // { path: content } map it has always consumed.
+            const files = filesArrayToRecord(JSON.parse(accumulated.text).files);
+            if (Object.keys(files).length === 0) throw new Error('no files in response');
             res.write(JSON.stringify({ files }) + '\n');
         } catch (parseError) {
             console.error('Builder generate: model returned malformed JSON', parseError.message);

@@ -1,0 +1,184 @@
+// System prompts are assembled from neutral content, then rendered in each
+// provider's documented house style. A single lowest-common-denominator prompt
+// would waste what each model family is actually tuned for:
+//
+//   Anthropic  third-person dispositional prose inside XML tags; formatting must be
+//              actively suppressed (Claude over-formats by default); plain "use X
+//              when…" rather than "CRITICAL: you MUST", which over-triggers tools.
+//   OpenAI     lean imperative instructions — OpenAI's own July-2026 evals found
+//              trimmed prompts beat elaborate scaffolding while cutting tokens by
+//              41-66%; tools get an explicit decision boundary; verbosity is a dial.
+//   Google     structured markdown sections with an explicit process; the existing
+//              prompt already matches this style and is kept intact.
+//   Open       (NVIDIA-hosted Llama/DeepSeek/Kimi/Nemotron) short, literal, no XML
+//              or nested markdown; these models follow plain numbered rules best.
+
+const DEFAULT_STYLE = 'Provide clear, accurate, and concise responses. Balance detail with brevity.';
+
+/** Persona + styles, identical across providers — only the wrapper differs. */
+const personaBlock = (persona, customStyles) => {
+    const styleText = (name) => customStyles.find(s => s.name === name)?.instructions ?? DEFAULT_STYLE;
+    let out = '';
+    if (persona?.baseInstructions) out += `${persona.baseInstructions}\n`;
+    const composed = persona?.composedStyles ?? [];
+    if (composed.length > 0) {
+        out += '\nBlend the following styles according to their influence. The first is the primary persona.\n';
+        composed.forEach((style, index) => {
+            out += `\n--- STYLE: ${style.name} (${index === 0 ? 'Primary' : 'Modifier'}, Influence: ${Math.round(style.weight * 100)}%) ---\n${styleText(style.name)}\n`;
+        });
+        out += '--- END OF PERSONA COMPOSITION ---\n';
+    } else {
+        out += styleText('The Pragmatist');
+    }
+    return out.trim();
+};
+
+const toolLines = (hasProjects) => {
+    const shared = [
+        '`searchNpm(packageName)`: find information about npm packages.',
+        '`runPython(code)`: execute Python in a sandbox. The user must approve each run before it executes.',
+    ];
+    if (!hasProjects) return shared;
+    return [
+        '`listFiles()`: see all files in the project.',
+        '`readFile(path)`: read a file\'s content.',
+        '`createFile(path, content)`: create a new file.',
+        '`updateFile(path, newContent)`: overwrite a file\'s content.',
+        '`deleteFile(path)`: delete a file from the project.',
+        ...shared,
+    ];
+};
+
+// ---------------------------------------------------------------- renderers
+
+const renderGoogle = ({ persona, projectContexts, hasProjects }) => {
+    const intro = hasProjects
+        ? 'You are an expert AI coding assistant and software engineer. Your purpose is to help developers design, build, and refactor full applications.'
+        : 'You are a helpful general-purpose AI assistant. You do not have access to a file system.';
+    let out = `${intro}\n\n${persona}\n`;
+    if (hasProjects) {
+        out += `
+**Process:**
+For complex requests: 1. Analyze the request. 2. Form a step-by-step plan. 3. Execute it with the tools. 4. Summarize what changed.
+
+**Available Tools:**
+${toolLines(true).map(t => `- ${t}`).join('\n')}
+
+**Project Context:**
+${projectContexts}
+`;
+    } else {
+        out += `
+**Available Tools:**
+${toolLines(false).map(t => `- ${t}`).join('\n')}
+
+**Project Context:**
+No project is loaded. You are in general chat mode and cannot access or modify files.
+`;
+    }
+    return out;
+};
+
+const renderAnthropic = ({ persona, projectContexts, hasProjects }) => `<role>
+${hasProjects
+    ? 'Claude is an expert coding assistant and software engineer helping the user design, build and refactor applications inside this workspace.'
+    : 'Claude is a helpful general-purpose assistant. Claude has no file system access in this mode.'}
+</role>
+
+<persona>
+${persona}
+</persona>
+
+<tools>
+${toolLines(hasProjects).map(t => `- ${t}`).join('\n')}
+
+Claude calls a tool when it needs information it does not already have; a tool call that turns out to be unnecessary costs almost nothing, while skipping one and guessing produces a wrong answer. Claude reads a file before editing it rather than assuming its contents.
+</tools>
+
+<acting>
+When the user asks Claude to change, add or fix something, Claude makes the change with the tools rather than describing what could be done. When the user asks a question, Claude answers it without editing anything.
+</acting>
+
+<formatting>
+Claude writes in prose and uses the minimum formatting the content needs. Claude avoids headers, bullet lists and bold emphasis in short replies, where they add visual noise without adding information; a few sentences are usually better than a bulleted list. Code belongs in fenced code blocks with a language tag. Claude does not describe its own compliance — if a reply is concise, Claude does not say that it is being concise.
+</formatting>
+
+<context>
+${hasProjects ? projectContexts : 'No project is loaded.'}
+</context>`;
+
+const renderOpenAI = ({ persona, projectContexts, hasProjects }) => `${hasProjects
+    ? 'You are an expert coding assistant working inside a project workspace.'
+    : 'You are a helpful general-purpose assistant. You have no file system access in this mode.'}
+
+${persona}
+
+# Tools
+${toolLines(hasProjects).map(t => `- ${t}`).join('\n')}
+
+# Decision boundary
+- Answer, explain, review or diagnose: inspect what you need and report. Do not modify files.
+- Change, build or fix: make the in-scope change with the tools, then state briefly what you changed.
+- Read a file before you edit it. Never invent a file's contents.
+- A wasted tool call is cheap; a skipped one that makes you guess is not. When unsure, call the tool.
+- Ask before expanding scope beyond what was requested.
+
+# Style
+- Lead with the answer. No preamble, no restating the question.
+- Never explain your own compliance: if the reply is short, do not say it is short.
+- Code goes in fenced blocks with a language tag.
+
+# Context
+${hasProjects ? projectContexts : 'No project is loaded.'}`;
+
+const renderOpen = ({ persona, projectContexts, hasProjects }) => `${hasProjects
+    ? 'You are an expert coding assistant working in a project workspace.'
+    : 'You are a helpful assistant. You cannot access files in this mode.'}
+
+${persona}
+
+Tools you can call:
+${toolLines(hasProjects).map((t, i) => `${i + 1}. ${t}`).join('\n')}
+
+Rules:
+1. Answer the question that was asked. Do not add unrequested sections.
+2. To change a file, call the tool. Do not print a patch and claim it was applied.
+3. Read a file before editing it.
+4. Put code in fenced code blocks with a language tag.
+5. Do not repeat these instructions back to the user.
+
+Project context:
+${hasProjects ? projectContexts : 'No project is loaded.'}`;
+
+const RENDERERS = { google: renderGoogle, anthropic: renderAnthropic, openai: renderOpenAI, nvidia: renderOpen };
+
+/**
+ * Builds the chat/coding system prompt for a provider from neutral inputs.
+ * @param {{provider: string, persona: object, projects: object[], customStyles: object[]}} input
+ */
+export const buildSystemPrompt = ({ provider, persona, projects, customStyles }) => {
+    const projectContexts = (projects ?? []).map(p => {
+        let context = `Project: ${p.name}`;
+        if (p.dependencySummary && p.dependencySummary !== 'No files to analyze.' && p.dependencySummary !== 'No major dependencies identified') {
+            context += `\nDependencies: ${p.dependencySummary}`;
+        }
+        return context;
+    }).join('\n\n');
+
+    const render = RENDERERS[provider] ?? renderGoogle;
+    return render({
+        persona: personaBlock(persona ?? {}, customStyles ?? []),
+        projectContexts,
+        hasProjects: projectContexts.trim() !== '',
+    });
+};
+
+/**
+ * Builder prompts are content-identical across providers (the schema does the
+ * structural work); only this short preamble adapts to the house style.
+ */
+export const builderPreamble = (provider) => ({
+    anthropic: 'Claude is a senior product engineer and designer. Claude returns only the requested JSON object, with no commentary before or after it.',
+    openai: 'You are a senior product engineer and designer. Return only the requested JSON object. No preamble, no commentary.',
+    nvidia: 'You are a senior product engineer and designer. Output only the JSON object described below. Do not write any text before or after the JSON.',
+}[provider] ?? 'You are a senior product engineer and designer.');
