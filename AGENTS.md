@@ -11,6 +11,8 @@ Builder-specific modules worth knowing before changing that flow:
 - `utils/palettes.ts` / `utils/designContract.ts` — design tokens and the self-contained HTML preview rendered from them.
 - `context/AppContext.tsx` — builder state machine, candidate promotion and the evidence trail.
 
+Provider layer (`providers/`): `server.js` routes every model call through one interface — `streamChat`, `streamJson`, `generateJson`, `generateText`, each yielding normalized `{text, thinking, toolCalls, usage}` events. **Adding a model is one entry in `providers/catalog.js`**; adding a provider is one adapter plus a line in `providers/index.js`. Capability flags in the catalog (`efforts`, `thinkingStyle`, `maxOutput`, `tools`, `jsonMode`) exist because provider behaviour is genuinely not uniform — an unsupported thinking level, an over-large `max_tokens`, or the wrong reasoning parameter is a hard 400, not a graceful degrade. Verify a new model with `npm run smoke:providers -- <model-id>` before adding it; do not infer capabilities from a sibling model.
+
 Two invariants to preserve: builder state is persisted on **content fields only** (never on `status`, which churns once per streaming chunk), and colours arriving from a model or from storage must pass `sanitizeColors` before reaching the preview or a prompt.
 
 ## Build, Test, and Development Commands
