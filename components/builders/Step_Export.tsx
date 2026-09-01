@@ -3,7 +3,7 @@ import { useAppContext } from '../../context/AppContext';
 
 const Step_Export: React.FC = () => {
     const { builderState, loadGeneratedProjectIntoIDE, exportGeneratedProject, resetWebAppBuild, saveCurrentBuild, savedBuilds } = useAppContext();
-    const { plan, generatedFiles, savedBuildId, status, validation } = builderState;
+    const { plan, generatedFiles, savedBuildId, status, validation, evidence } = builderState;
     const [buildName, setBuildName] = useState<string>(
         () => savedBuilds.find(b => b.id === savedBuildId)?.name || plan?.projectName || 'Untitled build'
     );
@@ -106,6 +106,22 @@ const Step_Export: React.FC = () => {
                 </button>
             </div>
             
+            {evidence.length > 0 && (
+                <details className="mt-8 text-left p-3 bg-gray-800/60 border border-gray-700 rounded-lg">
+                    <summary className="cursor-pointer text-sm text-gray-300">Build record ({evidence.length} steps)</summary>
+                    <ol className="mt-3 space-y-1.5">
+                        {evidence.map((entry, index) => (
+                            <li key={index} className="text-xs text-gray-400 flex gap-2">
+                                <span className="text-gray-600 font-mono shrink-0">
+                                    {new Date(entry.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                </span>
+                                <span>{entry.event}</span>
+                            </li>
+                        ))}
+                    </ol>
+                </details>
+            )}
+
             <button onClick={resetWebAppBuild} className="mt-8 text-sm text-gray-500 hover:text-gray-300">
                 Start a New Build
             </button>

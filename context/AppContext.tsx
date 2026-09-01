@@ -9,6 +9,16 @@ import { validateBuild, type BuildValidation } from '../utils/validateBuild';
 import { generateUniqueId } from '../utils/common';
 import { createProjectZip } from '../utils/export';
 
+export interface BuildEvent {
+    ts: number;
+    event: string;
+}
+
+const MAX_EVIDENCE = 50;
+/** Appends to the build's evidence trail, keeping only the most recent entries. */
+const withEvidence = (evidence: BuildEvent[], event: string): BuildEvent[] =>
+    [...evidence, { ts: Date.now(), event }].slice(-MAX_EVIDENCE);
+
 // Add builder types
 export interface WebAppBuilderState {
     isActive: boolean;
@@ -26,6 +36,8 @@ export interface WebAppBuilderState {
     candidateFiles: Record<string, string> | null;
     validation: BuildValidation | null;
     artDirections: ArtDirection[] | null;
+    // Time-ordered record of what was asked, decided and produced for this build.
+    evidence: BuildEvent[];
     savedBuildId: string | null;   // links this build to its entry in the saved library
     status: {
         message: string;
@@ -44,6 +56,7 @@ const initialBuilderState: WebAppBuilderState = {
     candidateFiles: null,
     validation: null,
     artDirections: null,
+    evidence: [],
     savedBuildId: null,
     status: { message: '', isLoading: false, log: [] },
 };
@@ -78,6 +91,7 @@ export const restoreBuilderState = (): WebAppBuilderState => {
             colors: persisted.theme?.colors ? sanitizeColors(persisted.theme.colors) : initialBuilderState.theme.colors,
         },
         artDirections: Array.isArray(persisted.artDirections) ? persisted.artDirections : null,
+        evidence: Array.isArray(persisted.evidence) ? persisted.evidence : [],
         candidateFiles: persisted.candidateFiles ?? null,
         validation: persisted.validation ?? null,
         savedBuildId: persisted.savedBuildId ?? null,
@@ -188,6 +202,7 @@ interface AppContextType {
     suggestArtDirections: () => Promise<void>;
     promoteCandidate: () => void;
     discardCandidate: () => void;
+    recordEvidence: (event: string) => void;
     quotaTick: number;
     bumpQuotaTick: () => void;
     generateWebAppCode: () => Promise<void>;
@@ -243,7 +258,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const { isActive: builderIsActive, currentStep: builderStep, idea: builderIdea,
             plan: builderPlan, theme: builderTheme, generatedFiles: builderFiles,
             artDirections: builderDirections, candidateFiles: builderCandidate,
-            validation: builderValidation, savedBuildId: builderSavedId } = builderState;
+            validation: builderValidation, evidence: builderEvidence,
+            savedBuildId: builderSavedId } = builderState;
     useEffect(() => {
         const failure = buildStorage.saveBuilderState({
             isActive: builderIsActive,
@@ -255,10 +271,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             artDirections: builderDirections,
             candidateFiles: builderCandidate,
             validation: builderValidation,
+            evidence: builderEvidence,
             savedBuildId: builderSavedId,
         });
         if (failure) setGlobalError(failure);
-    }, [builderIsActive, builderStep, builderIdea, builderPlan, builderTheme, builderFiles, builderDirections, builderCandidate, builderValidation, builderSavedId]);
+    }, [builderIsActive, builderStep, builderIdea, builderPlan, builderTheme, builderFiles, builderDirections, builderCandidate, builderValidation, builderEvidence, builderSavedId]);
 
     useEffect(() => {
         const loadInitialData = async () => {
@@ -493,6 +510,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
 
     // Builder Handlers
+    /** Adds a line to the current build's evidence trail. */
+    const recordEvidence = useCallback((event: string) => {
+        setBuilderState(prev => ({ ...prev, evidence: withEvidence(prev.evidence, event) }));
+    }, []);
     const startWebAppBuild = () => { setBuilderState({ ...initialBuilderState, isActive: true, currentStep: 1 }); };
     const resetWebAppBuild = () => setBuilderState(initialBuilderState);
     const generateWebAppPlan = async () => {
@@ -500,7 +521,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         try {
             const plan = await apiService.generateWebAppPlan(builderState.idea, selectedModel === 'auto' ? undefined : selectedModel);
             bumpQuotaTick();
-            setBuilderState(prev => ({ ...prev, plan, status: { ...prev.status, isLoading: false, message: '' }, currentStep: 2 }));
+            setBuilderState(prev => ({
+                ...prev, plan, currentStep: 2,
+                evidence: withEvidence(prev.evidence, `Blueprint drafted for "${prev.idea.slice(0, 80)}" — ${plan?.pages?.length ?? 0} pages, ${plan?.components?.length ?? 0} components`),
+                status: { ...prev.status, isLoading: false, message: '' },
+            }));
         } catch (e: any) {
             setGlobalError(`Failed to generate plan: ${e.message}`);
             setBuilderState(prev => ({ ...prev, status: { ...prev.status, isLoading: false, message: 'An error occurred.' }}));
@@ -523,7 +548,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 colors: sanitizeColors(d?.colors),
             }));
             bumpQuotaTick();
-            setBuilderState(prev => ({ ...prev, artDirections, status: { ...prev.status, isLoading: false, message: '' } }));
+            setBuilderState(prev => ({
+                ...prev, artDirections,
+                evidence: withEvidence(prev.evidence, `AI proposed ${artDirections.length} art directions: ${artDirections.map(d => d.name).join(', ')}`),
+                status: { ...prev.status, isLoading: false, message: '' },
+            }));
         } catch (e: any) {
             setGlobalError(`Failed to suggest art directions: ${e.message}`);
             setBuilderState(prev => ({ ...prev, status: { ...prev.status, isLoading: false, message: '' } }));
@@ -540,7 +569,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 { previousPlan: currentPlan, feedback },
             );
             bumpQuotaTick();
-            setBuilderState(prev => ({ ...prev, plan, status: { ...prev.status, isLoading: false, message: 'Blueprint revised.' } }));
+            setBuilderState(prev => ({
+                ...prev, plan,
+                evidence: withEvidence(prev.evidence, `Blueprint revised: "${feedback.slice(0, 100)}"`),
+                status: { ...prev.status, isLoading: false, message: 'Blueprint revised.' },
+            }));
         } catch (e: any) {
             setGlobalError(`Failed to revise plan: ${e.message}`);
             setBuilderState(prev => ({ ...prev, status: { ...prev.status, isLoading: false, message: '' } }));
@@ -548,7 +581,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
 
     /** Adopts a validated file set as the build: saves it and advances to export. */
-    const promoteFiles = (files: Record<string, string>, validation: BuildValidation) => {
+    const promoteFiles = (files: Record<string, string>, validation: BuildValidation, note: string) => {
+        const evidence = withEvidence(builderState.evidence, note);
         let savedId: string | null = null;
         try {
             const saved = buildStorage.saveBuild({
@@ -557,6 +591,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 plan: builderState.plan,
                 theme: builderState.theme,
                 generatedFiles: files,
+                evidence,
+                validation,
             });
             savedId = saved.id;
             setSavedBuilds(buildStorage.getSavedBuilds());
@@ -568,6 +604,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             generatedFiles: files,
             candidateFiles: null,
             validation,
+            evidence,
             savedBuildId: savedId,
             status: { ...prev.status, isLoading: false, message: 'Generation complete!' },
             currentStep: 5,
@@ -578,7 +615,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const promoteCandidate = () => {
         const files = builderState.candidateFiles;
         if (!files) return;
-        promoteFiles(files, builderState.validation ?? validateBuild(files, builderState.plan));
+        const validation = builderState.validation ?? validateBuild(files, builderState.plan);
+        const errors = validation.issues.filter(i => i.severity === 'error').length;
+        promoteFiles(files, validation, `Kept despite validation: ${errors} error${errors === 1 ? '' : 's'} accepted by the user`);
     };
 
     /** Throws away a failed candidate and returns to the theme step. */
@@ -588,14 +627,22 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             candidateFiles: null,
             validation: null,
             currentStep: 3,
+            evidence: withEvidence(prev.evidence, 'Candidate discarded; previous build left untouched'),
             status: { ...prev.status, isLoading: false, message: 'Candidate discarded. Your previous build is untouched.' },
         }));
     };
 
     const generateWebAppCode = async () => {
-        setBuilderState(prev => ({ ...prev, currentStep: 4, candidateFiles: null, validation: null, status: { isLoading: true, message: 'Contacting Gemini…', log: [] } }));
+        const theme = builderState.theme;
+        setBuilderState(prev => ({
+            ...prev, currentStep: 4, candidateFiles: null, validation: null,
+            evidence: withEvidence(prev.evidence, `Generation requested — style "${theme.palette}" / ${theme.typography}`),
+            status: { isLoading: true, message: 'Contacting Gemini…', log: [] },
+        }));
+        let servingModel = 'Gemini';
         try {
-            const files = await apiService.generateWebAppCode(builderState.plan, builderState.theme, selectedModel === 'auto' ? undefined : selectedModel, (event) => {
+            const files = await apiService.generateWebAppCode(builderState.plan, theme, selectedModel === 'auto' ? undefined : selectedModel, (event) => {
+                if (event.model) servingModel = event.model;
                 setBuilderState(prev => {
                     let message = prev.status.message;
                     let log = prev.status.log;
@@ -613,19 +660,27 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             bumpQuotaTick();
             // The model's word is not evidence: check the files before adopting them.
             const validation = validateBuild(files, builderState.plan);
+            const fileCount = Object.keys(files).length;
             if (!validation.ok) {
+                const errors = validation.issues.filter(i => i.severity === 'error').length;
                 setBuilderState(prev => ({
                     ...prev,
                     candidateFiles: files,
                     validation,
+                    evidence: withEvidence(prev.evidence, `${servingModel} wrote ${fileCount} files — validation failed with ${errors} error${errors === 1 ? '' : 's'}, held for review`),
                     status: { ...prev.status, isLoading: false, message: 'Generation finished, but the result did not pass validation.' },
                 }));
                 return;
             }
-            promoteFiles(files, validation);
+            const warnings = validation.issues.length;
+            promoteFiles(files, validation, `${servingModel} wrote ${fileCount} files — validation passed${warnings ? ` with ${warnings} warning${warnings === 1 ? '' : 's'}` : ''}`);
         } catch (e: any) {
             setGlobalError(`Failed to generate code: ${e.message}`);
-            setBuilderState(prev => ({ ...prev, status: { ...prev.status, isLoading: false, message: 'An error occurred during code generation.' }}));
+            setBuilderState(prev => ({
+                ...prev,
+                evidence: withEvidence(prev.evidence, `Generation failed: ${e.message}`),
+                status: { ...prev.status, isLoading: false, message: 'An error occurred during code generation.' },
+            }));
         }
     };
     const loadGeneratedProjectIntoIDE = async () => {
@@ -655,9 +710,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 plan: builderState.plan,
                 theme: builderState.theme,
                 generatedFiles: builderState.generatedFiles,
+                evidence: builderState.evidence,
+                validation: builderState.validation,
             }, asCopy ? null : builderState.savedBuildId);
             setSavedBuilds(buildStorage.getSavedBuilds());
-            setBuilderState(prev => ({ ...prev, savedBuildId: saved.id, status: { ...prev.status, message: `Saved as "${saved.name}"` } }));
+            setBuilderState(prev => ({
+                ...prev, savedBuildId: saved.id,
+                evidence: withEvidence(prev.evidence, `Saved to library as "${saved.name}"`),
+                status: { ...prev.status, message: `Saved as "${saved.name}"` },
+            }));
         } catch (e: any) {
             setGlobalError(e.message);
         }
@@ -674,6 +735,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             plan: build.plan,
             theme: build.theme ?? initialBuilderState.theme,
             generatedFiles: build.generatedFiles,
+            evidence: Array.isArray(build.evidence) ? build.evidence : [],
+            validation: (build.validation as BuildValidation | undefined) ?? null,
             savedBuildId: build.id,
             status: { isLoading: false, log: [], message: `Loaded "${build.name}"` },
         });
@@ -707,7 +770,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         globalError, setGlobalError,
         builderState, setBuilderState, startWebAppBuild, resetWebAppBuild, generateWebAppPlan, refineWebAppPlan, suggestArtDirections, generateWebAppCode, loadGeneratedProjectIntoIDE, exportGeneratedProject,
         savedBuilds, saveCurrentBuild, loadSavedBuild, removeSavedBuild, exportSavedBuild,
-        promoteCandidate, discardCandidate, quotaTick, bumpQuotaTick,
+        promoteCandidate, discardCandidate, recordEvidence, quotaTick, bumpQuotaTick,
     };
 
     return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
