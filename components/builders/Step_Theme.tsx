@@ -25,7 +25,7 @@ const cardClass = (selected: boolean) =>
     `p-3 border-2 rounded-lg cursor-pointer transition-all text-left ${selected ? 'border-sky-500 ring-2 ring-sky-500/40' : 'border-gray-700 hover:border-gray-500'}`;
 
 const Step_Theme: React.FC = () => {
-    const { builderState, setBuilderState, generateWebAppCode, suggestArtDirections, selectedModel, catalog, modelDefaults } = useAppContext();
+    const { builderState, setBuilderState, generateWebAppCode, suggestArtDirections, noteDirectionSelected, selectedModel, catalog, modelDefaults } = useAppContext();
     const { theme, plan, status, artDirections } = builderState;
 
     // Generation is by far the most expensive action here: it is the one call that
@@ -73,7 +73,9 @@ const Step_Theme: React.FC = () => {
     const selectTypography = (name: string) =>
         setBuilderState(prev => ({ ...prev, theme: { ...prev.theme, typography: name } }));
 
-    const applyDirection = (direction: ArtDirection) =>
+    const applyDirection = (direction: ArtDirection, index: number) => {
+        // Which of the three proposals actually won — the only place that is knowable.
+        noteDirectionSelected(direction, index);
         setBuilderState(prev => ({
             ...prev,
             theme: {
@@ -83,6 +85,7 @@ const Step_Theme: React.FC = () => {
                 typography: findTypography(direction.typography).name,
             },
         }));
+    };
 
     return (
         <div className="w-full max-w-4xl mx-auto">
@@ -183,7 +186,7 @@ const Step_Theme: React.FC = () => {
                                     <p className="mt-2 text-xs font-semibold text-gray-100">{direction.name}</p>
                                     <p className="text-[11px] text-gray-400 leading-snug mt-1">{direction.rationale}</p>
                                     <p className="text-[10px] text-gray-500 mt-1">{findTypography(direction.typography).name}</p>
-                                    <button onClick={() => applyDirection(direction)} disabled={isBusy}
+                                    <button onClick={() => applyDirection(direction, index)} disabled={isBusy}
                                         className="mt-2 w-full py-1.5 bg-sky-700 text-white text-xs font-semibold rounded-md hover:bg-sky-600 disabled:opacity-50">
                                         {selected ? 'Applied ✓' : 'Use this direction'}
                                     </button>

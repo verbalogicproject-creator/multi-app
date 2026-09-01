@@ -2,8 +2,32 @@
 // succeeded is never evidence: these run without any model call and decide
 // whether a candidate may be promoted.
 
+/**
+ * A stable name for each kind of failure.
+ *
+ * The message beside it is written for a human and will be reworded; this will
+ * not. Anything that keys off a verdict — a memory event, and later a lesson
+ * proposed from one — keys off the code, so improving the wording of a check can
+ * never read downstream as a new kind of failure.
+ */
+export type BuildIssueCode =
+    | 'no-files'
+    | 'missing-index-html'
+    | 'missing-src-main'
+    | 'missing-preview-html'
+    | 'empty-file'
+    | 'file-too-short'
+    | 'invalid-json'
+    | 'placeholder-content'
+    | 'unbalanced-braces'
+    | 'unresolved-import'
+    | 'unresolved-html-ref'
+    | 'plan-page-missing'
+    | 'plan-component-missing';
+
 export interface BuildIssue {
     severity: 'error' | 'warning';
+    code: BuildIssueCode;
     file?: string;
     message: string;
 }
@@ -121,41 +145,42 @@ const extractHtmlRefs = (html: string): string[] => {
 export const validateBuild = (files: Record<string, string>, plan?: any): BuildValidation => {
     const issues: BuildIssue[] = [];
     const paths = Object.keys(files);
-    const add = (severity: BuildIssue['severity'], message: string, file?: string) => issues.push({ severity, file, message });
+    const add = (severity: BuildIssue['severity'], code: BuildIssueCode, message: string, file?: string) =>
+        issues.push({ severity, code, file, message });
 
     if (paths.length === 0) {
-        return { ok: false, issues: [{ severity: 'error', message: 'The generator returned no files.' }], checked: 0 };
+        return { ok: false, issues: [{ severity: 'error', code: 'no-files', message: 'The generator returned no files.' }], checked: 0 };
     }
 
     // Entry points
-    if (!paths.some(p => p === 'index.html')) add('error', 'index.html is missing, so the app has no entry point.');
-    if (!paths.some(p => /^src\/main\.(tsx|ts|jsx|js)$/.test(p))) add('warning', 'No src/main entry file was generated.');
-    if (!files['preview.html']) add('warning', 'preview.html is missing, so the visual preview will be unavailable.');
+    if (!paths.some(p => p === 'index.html')) add('error', 'missing-index-html', 'index.html is missing, so the app has no entry point.');
+    if (!paths.some(p => /^src\/main\.(tsx|ts|jsx|js)$/.test(p))) add('warning', 'missing-src-main', 'No src/main entry file was generated.');
+    if (!files['preview.html']) add('warning', 'missing-preview-html', 'preview.html is missing, so the visual preview will be unavailable.');
 
     for (const [path, content] of Object.entries(files)) {
         const trimmed = (content ?? '').trim();
 
-        if (trimmed.length === 0) { add('error', 'File is empty.', path); continue; }
-        if (trimmed.length < 20 && CODE_EXT.test(path)) add('warning', 'File looks too short to be complete.', path);
+        if (trimmed.length === 0) { add('error', 'empty-file', 'File is empty.', path); continue; }
+        if (trimmed.length < 20 && CODE_EXT.test(path)) add('warning', 'file-too-short', 'File looks too short to be complete.', path);
 
         // JSON must parse
         if (path.endsWith('.json')) {
             try { JSON.parse(content); }
-            catch (e: any) { add('error', `Invalid JSON: ${e.message}`, path); }
+            catch (e: any) { add('error', 'invalid-json', `Invalid JSON: ${e.message}`, path); }
         }
 
         // Lazy output
         for (const { re, label } of PLACEHOLDER_PATTERNS) {
-            if (re.test(content)) { add('error', `Contains ${label} instead of real code.`, path); break; }
+            if (re.test(content)) { add('error', 'placeholder-content', `Contains ${label} instead of real code.`, path); break; }
         }
 
         if (CODE_EXT.test(path)) {
             const depth = braceBalance(content);
             if (depth !== 0) {
-                add('error', `Unbalanced braces (${depth > 0 ? `${depth} unclosed` : `${-depth} extra closing`}) — the file looks truncated.`, path);
+                add('error', 'unbalanced-braces', `Unbalanced braces (${depth > 0 ? `${depth} unclosed` : `${-depth} extra closing`}) — the file looks truncated.`, path);
             }
             for (const spec of extractRelativeImports(content)) {
-                if (!resolves(files, path, spec)) add('error', `Imports "${spec}", which was not generated.`, path);
+                if (!resolves(files, path, spec)) add('error', 'unresolved-import', `Imports "${spec}", which was not generated.`, path);
             }
         }
     }
@@ -165,7 +190,7 @@ export const validateBuild = (files: Record<string, string>, plan?: any): BuildV
             const clean = normalizePath(ref.replace(/^\//, ''));
             const exists = RESOLVE_SUFFIXES.some(s => Object.prototype.hasOwnProperty.call(files, clean + s));
             if (!exists && !/\.(ico|png|svg|jpg|webp)$/i.test(clean)) {
-                add('error', `index.html references "${ref}", which was not generated.`, 'index.html');
+                add('error', 'unresolved-html-ref', `index.html references "${ref}", which was not generated.`, 'index.html');
             }
         }
     }
@@ -173,10 +198,10 @@ export const validateBuild = (files: Record<string, string>, plan?: any): BuildV
     // Did the build deliver what the approved plan promised?
     const allPaths = paths.join('\n');
     for (const page of Array.isArray(plan?.pages) ? plan.pages : []) {
-        if (page?.name && !allPaths.includes(page.name)) add('warning', `The plan included a "${page.name}" page, but no matching file was generated.`);
+        if (page?.name && !allPaths.includes(page.name)) add('warning', 'plan-page-missing', `The plan included a "${page.name}" page, but no matching file was generated.`);
     }
     for (const component of Array.isArray(plan?.components) ? plan.components : []) {
-        if (component?.name && !allPaths.includes(component.name)) add('warning', `The plan included a "${component.name}" component, but no matching file was generated.`);
+        if (component?.name && !allPaths.includes(component.name)) add('warning', 'plan-component-missing', `The plan included a "${component.name}" component, but no matching file was generated.`);
     }
 
     return { ok: !issues.some(i => i.severity === 'error'), issues, checked: paths.length };
