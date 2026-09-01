@@ -479,6 +479,72 @@ Analyze the user's idea and create a logical project plan for a standard React (
     }
 });
 
+// Web App Builder - Art directions: three distinct visual proposals for the theme step
+const TYPOGRAPHY_NAMES = ['Sans-serif & Friendly', 'Serif & Professional', 'Mono & Techy', 'Grotesk & Bold', 'Editorial Serif'];
+
+const hexProp = (role) => ({ type: Type.STRING, description: `Hex color for the ${role} role, e.g. #1f2937` });
+const directionsResponseSchema = {
+    type: Type.OBJECT,
+    properties: {
+        directions: {
+            type: Type.ARRAY,
+            description: "Exactly three genuinely different art directions.",
+            items: {
+                type: Type.OBJECT,
+                properties: {
+                    name: { type: Type.STRING, description: "Two or three word name for the direction, e.g. 'Quiet Archive'." },
+                    rationale: { type: Type.STRING, description: "One or two sentences on why this direction suits the product and who it speaks to." },
+                    typography: { type: Type.STRING, description: `Exactly one of: ${TYPOGRAPHY_NAMES.join(' | ')}` },
+                    colors: {
+                        type: Type.OBJECT,
+                        properties: {
+                            bg: hexProp('page background'),
+                            surface: hexProp('cards and nav surface'),
+                            text: hexProp('primary text'),
+                            muted: hexProp('secondary text'),
+                            primary: hexProp('primary action'),
+                            accent: hexProp('accent'),
+                        },
+                        required: ['bg', 'surface', 'text', 'muted', 'primary', 'accent'],
+                    },
+                },
+                required: ['name', 'rationale', 'typography', 'colors'],
+            },
+        },
+    },
+    required: ['directions'],
+};
+
+app.post('/api/builder/directions', async (req, res) => {
+    try {
+        const { idea, plan, model: requestedModel } = req.body;
+        const prompt = `You are an art director proposing visual directions for a web product.
+
+Product idea: "${idea ?? ''}"
+${plan ? `Plan:\n${JSON.stringify({ projectName: plan.projectName, projectDescription: plan.projectDescription, pages: (plan.pages || []).map(p => p.name) }, null, 2)}` : ''}
+
+Propose exactly three art directions that are genuinely different from one another — not three variations of the same hue. Each should take a defensible position on mood and audience (for example: restrained and editorial; warm and human; high-contrast and technical). At least one should be light and at least one dark.
+
+For each direction give hex values for all six roles. Requirements:
+- Primary text on the page background must be clearly readable (strong contrast), and so must text on surfaces.
+- The primary action colour must stand out against both background and surface.
+- The accent must differ from the primary in hue, not just lightness.
+- Typography must be exactly one of: ${TYPOGRAPHY_NAMES.join(' | ')}.`;
+
+        const response = await withModelFallback(builderModelChain(requestedModel), (model) => ai.models.generateContent({
+            model,
+            contents: prompt,
+            config: { responseMimeType: 'application/json', responseSchema: directionsResponseSchema },
+        }));
+
+        res.setHeader('Content-Type', 'application/json');
+        res.send(response.text);
+    } catch (error) {
+        console.error('Builder directions error:', error);
+        res.status(500).json({ message: friendlyProviderError(error, 'Error suggesting art directions.') });
+    }
+});
+
 // Web App Builder - Step 2: Generate (streams NDJSON progress, then the final files object)
 const BUILDER_THEME_TOKENS = {
     'Modern & Minimal': 'Background slate-50/slate-100, surfaces white, text slate-800/slate-500, primary blue-600 (hover blue-700), borders slate-200, generous whitespace, subtle shadow-sm only.',
@@ -490,12 +556,34 @@ const BUILDER_TYPE_TOKENS = {
     'Sans-serif & Friendly': 'font-sans; headings font-semibold tracking-tight; body leading-relaxed.',
     'Serif & Professional': 'font-serif headings with font-sans body; headings font-medium; formal editorial feel.',
     'Mono & Techy': 'font-mono for headings, labels and data; font-sans for long body text; uppercase tracking-wide micro-labels.',
+    'Grotesk & Bold': 'font-sans throughout; headings font-extrabold uppercase tracking-tighter at large sizes; body text-base leading-relaxed for contrast.',
+    'Editorial Serif': 'font-serif for both headings and body; generous leading-loose body; long-form editorial rhythm with wide margins.',
+};
+
+const HEX_RE = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
+const COLOR_ROLES = ['bg', 'surface', 'text', 'muted', 'primary', 'accent'];
+/** Accepts token colors only when every role is a valid hex value. */
+const readThemeColors = (colors) => {
+    if (!colors || typeof colors !== 'object') return null;
+    const clean = {};
+    for (const role of COLOR_ROLES) {
+        const value = colors[role];
+        if (typeof value !== 'string' || !HEX_RE.test(value.trim())) return null;
+        clean[role] = value.trim();
+    }
+    return clean;
+};
+
+const describePalette = (theme) => {
+    const colors = readThemeColors(theme?.colors);
+    if (!colors) return BUILDER_THEME_TOKENS[theme?.palette] || BUILDER_THEME_TOKENS['Modern & Minimal'];
+    return `Use these EXACT hex tokens and no substitutes — page background ${colors.bg}, surfaces/cards/nav ${colors.surface}, primary text ${colors.text}, secondary text ${colors.muted}, primary action ${colors.primary}, accent ${colors.accent}. Declare them once as CSS custom properties in src/index.css (--color-bg, --color-surface, --color-text, --color-muted, --color-primary, --color-accent), reference them through Tailwind arbitrary values (e.g. bg-[var(--color-primary)]), derive hover states by darkening the primary, and keep text contrast readable on every surface.`;
 };
 
 app.post('/api/builder/generate', async (req, res) => {
     try {
         const { plan, theme, model: requestedModel } = req.body;
-        const paletteSpec = BUILDER_THEME_TOKENS[theme?.palette] || BUILDER_THEME_TOKENS['Modern & Minimal'];
+        const paletteSpec = describePalette(theme);
         const typeSpec = BUILDER_TYPE_TOKENS[theme?.typography] || BUILDER_TYPE_TOKENS['Sans-serif & Friendly'];
         const prompt = `You are a senior product engineer and designer. Generate the complete, production-quality code for a web application from the plan and theme below. The result must look like a designed product, not a template.
 

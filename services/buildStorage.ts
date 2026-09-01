@@ -14,6 +14,7 @@ export interface PersistedBuilderState {
     plan: any | null;
     theme: any;
     generatedFiles: Record<string, string> | null;
+    artDirections?: any[] | null;
     savedBuildId?: string | null;
 }
 
