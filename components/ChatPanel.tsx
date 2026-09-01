@@ -6,6 +6,7 @@ import VideoGeneratorPane from './VideoGeneratorPane';
 import LiveChatPane from './LiveChatPane';
 import LoadingIndicator from './LoadingIndicator';
 import ModelPicker from './ModelPicker';
+import QuotaBadge from './QuotaBadge';
 import { useChat } from '../hooks/useChat';
 import { useTTS } from '../hooks/useTTS';
 import { useLiveChat } from '../hooks/useLiveChat';
@@ -15,7 +16,7 @@ import { ChatMode } from '../types/index';
 const ChatPanel: React.FC = () => {
     const {
       projects, selectedProjectIds, filesByProject, activePersona, useWebSearch, customAiStyles, lowLatencyMode, activeAgentId, selectedModel,
-      aiCreateFile, aiUpdateFile, aiDeleteFile
+      aiCreateFile, aiUpdateFile, aiDeleteFile, bumpQuotaTick
     } = useAppContext();
     
     const [mode, setMode] = useState<ChatMode>('chat');
@@ -83,7 +84,7 @@ const ChatPanel: React.FC = () => {
         }
         
         const currentChatMode = activeAgentId ? 'coding' : mode;
-        sendMessage(augmentedPrompt, currentChatMode, uploadedFile);
+        void sendMessage(augmentedPrompt, currentChatMode, uploadedFile).finally(bumpQuotaTick);
         setSpecificPrompt('');
         setUploadedFile(null);
         setExternalPreviewUrl(null);
@@ -112,6 +113,7 @@ const ChatPanel: React.FC = () => {
                     <div className="flex-1">
                         {!activeAgentId && <ModeSelector currentMode={mode} onModeChange={setMode} isAgentActive={!!activeAgentId} />}
                     </div>
+                    <QuotaBadge surface="chat" />
                     <ModelPicker compact />
                 </div>
                 <div className="flex-1 space-y-4">

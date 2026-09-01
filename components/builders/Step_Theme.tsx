@@ -1,7 +1,9 @@
 import React from 'react';
 import { useAppContext } from '../../context/AppContext';
 import ModelPicker from '../ModelPicker';
+import QuotaBadge, { modelForSurface, remainingFor } from '../QuotaBadge';
 import DesignContractPreview from './DesignContractPreview';
+import * as apiService from '../../services/apiService';
 import {
     PALETTES, TYPOGRAPHY_OPTIONS, COLOR_ROLES, CUSTOM_PALETTE_NAME,
     findTypography, resolveThemeColors, sanitizeColors,
@@ -23,8 +25,23 @@ const cardClass = (selected: boolean) =>
     `p-3 border-2 rounded-lg cursor-pointer transition-all text-left ${selected ? 'border-sky-500 ring-2 ring-sky-500/40' : 'border-gray-700 hover:border-gray-500'}`;
 
 const Step_Theme: React.FC = () => {
-    const { builderState, setBuilderState, generateWebAppCode, suggestArtDirections } = useAppContext();
+    const { builderState, setBuilderState, generateWebAppCode, suggestArtDirections, selectedModel } = useAppContext();
     const { theme, plan, status, artDirections } = builderState;
+
+    // Generation is the most expensive action here; warn before spending the last
+    // requests of a small daily budget.
+    const handleGenerate = async () => {
+        const quota = await apiService.getQuota();
+        const model = modelForSurface(quota, selectedModel, 'builder');
+        const left = remainingFor(quota, model);
+        if (left !== null && left <= 2) {
+            const message = left === 0
+                ? `Today's free-tier budget for ${model} looks used up, so this will probably fail. Try anyway?`
+                : `Only ${left} free-tier request${left === 1 ? '' : 's'} left today for ${model}. Generate anyway?`;
+            if (!window.confirm(message)) return;
+        }
+        generateWebAppCode();
+    };
 
     const colors = resolveThemeColors(theme);
     const typography = findTypography(theme.typography);
@@ -168,9 +185,12 @@ const Step_Theme: React.FC = () => {
             </div>
 
             <div className="mt-8 flex flex-col items-center gap-4">
-                <ModelPicker />
+                <div className="flex items-center gap-3">
+                    <ModelPicker />
+                    <QuotaBadge surface="builder" />
+                </div>
                 <button
-                    onClick={generateWebAppCode}
+                    onClick={handleGenerate}
                     disabled={isBusy}
                     className="px-10 py-3 bg-sky-600 text-white font-semibold rounded-lg shadow-md hover:bg-sky-500 transition-all transform hover:scale-105 disabled:opacity-50 disabled:transform-none"
                 >

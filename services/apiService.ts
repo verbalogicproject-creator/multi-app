@@ -2,6 +2,23 @@
 import { CustomAiStyle, Message, MessagePart, Persona, Project, ProjectFile } from "../types/index";
 import { updateProject as updateProjectInStorage } from "./geminiService";
 
+export interface QuotaSnapshot {
+    date: string;
+    counts: Record<string, number>;
+    limits: Record<string, number>;
+    models: Record<string, string>;
+}
+
+/** Today's per-model request counts. Returns null when the backend is unreachable. */
+export const getQuota = async (): Promise<QuotaSnapshot | null> => {
+    try {
+        const response = await fetch('/api/quota');
+        return response.ok ? await response.json() : null;
+    } catch {
+        return null;
+    }
+};
+
 export const sendMessageStream = async (prompt: string, onChunk: (chunk: string) => void): Promise<void> => {
     const response = await fetch('/api/chat-stream', {
         method: 'POST',

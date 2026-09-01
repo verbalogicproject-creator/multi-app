@@ -5,6 +5,7 @@ import * as apiService from '../services/apiService';
 import * as buildStorage from '../services/buildStorage';
 import type { SavedBuild } from '../services/buildStorage';
 import { DEFAULT_PALETTE, sanitizeColors, type ArtDirection, type ThemeColors } from '../utils/palettes';
+import { validateBuild, type BuildValidation } from '../utils/validateBuild';
 import { generateUniqueId } from '../utils/common';
 import { createProjectZip } from '../utils/export';
 
@@ -20,6 +21,10 @@ export interface WebAppBuilderState {
         colors?: ThemeColors;      // concrete tokens; absent on builds saved before the token picker
     };
     generatedFiles: Record<string, string> | null;
+    // A fresh generation lands here first and is only promoted once it passes
+    // validation, so a bad run can never overwrite a good build.
+    candidateFiles: Record<string, string> | null;
+    validation: BuildValidation | null;
     artDirections: ArtDirection[] | null;
     savedBuildId: string | null;   // links this build to its entry in the saved library
     status: {
@@ -36,6 +41,8 @@ const initialBuilderState: WebAppBuilderState = {
     plan: null,
     theme: { palette: DEFAULT_PALETTE.name, typography: 'Sans-serif & Friendly', colors: DEFAULT_PALETTE.colors },
     generatedFiles: null,
+    candidateFiles: null,
+    validation: null,
     artDirections: null,
     savedBuildId: null,
     status: { message: '', isLoading: false, log: [] },
@@ -53,11 +60,13 @@ const getRestoredBuilderState = (): WebAppBuilderState => {
     return restoredBuilderCache;
 };
 
-const restoreBuilderState = (): WebAppBuilderState => {
+export const restoreBuilderState = (): WebAppBuilderState => {
     const persisted = buildStorage.loadBuilderState();
     if (!persisted) return initialBuilderState;
 
-    const interrupted = persisted.currentStep === 4 && !persisted.generatedFiles;
+    // A held candidate also sits at step 4 without generatedFiles — that is a result
+    // awaiting a decision, not an interrupted run.
+    const interrupted = persisted.currentStep === 4 && !persisted.generatedFiles && !persisted.candidateFiles;
     return {
         ...initialBuilderState,
         ...persisted,
@@ -69,6 +78,8 @@ const restoreBuilderState = (): WebAppBuilderState => {
             colors: persisted.theme?.colors ? sanitizeColors(persisted.theme.colors) : initialBuilderState.theme.colors,
         },
         artDirections: Array.isArray(persisted.artDirections) ? persisted.artDirections : null,
+        candidateFiles: persisted.candidateFiles ?? null,
+        validation: persisted.validation ?? null,
         savedBuildId: persisted.savedBuildId ?? null,
         currentStep: interrupted ? 3 : persisted.currentStep,
         status: {
@@ -175,6 +186,10 @@ interface AppContextType {
     generateWebAppPlan: () => Promise<void>;
     refineWebAppPlan: (currentPlan: any, feedback: string) => Promise<void>;
     suggestArtDirections: () => Promise<void>;
+    promoteCandidate: () => void;
+    discardCandidate: () => void;
+    quotaTick: number;
+    bumpQuotaTick: () => void;
     generateWebAppCode: () => Promise<void>;
     loadGeneratedProjectIntoIDE: () => Promise<void>;
     exportGeneratedProject: () => Promise<void>;
@@ -215,6 +230,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const [activeAgentId, setActiveAgentId] = useState<string | null>(null);
 
     const [globalError, setGlobalError] = useState<string | null>(null);
+    // Bumped after every served model request so quota badges refetch.
+    const [quotaTick, setQuotaTick] = useState(0);
+    const bumpQuotaTick = useCallback(() => setQuotaTick(t => t + 1), []);
 
     const [builderState, setBuilderState] = useState<WebAppBuilderState>(getRestoredBuilderState);
     const [savedBuilds, setSavedBuilds] = useState<SavedBuild[]>(() => buildStorage.getSavedBuilds());
@@ -224,7 +242,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     // not trigger a localStorage write per chunk.
     const { isActive: builderIsActive, currentStep: builderStep, idea: builderIdea,
             plan: builderPlan, theme: builderTheme, generatedFiles: builderFiles,
-            artDirections: builderDirections, savedBuildId: builderSavedId } = builderState;
+            artDirections: builderDirections, candidateFiles: builderCandidate,
+            validation: builderValidation, savedBuildId: builderSavedId } = builderState;
     useEffect(() => {
         const failure = buildStorage.saveBuilderState({
             isActive: builderIsActive,
@@ -234,10 +253,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             theme: builderTheme,
             generatedFiles: builderFiles,
             artDirections: builderDirections,
+            candidateFiles: builderCandidate,
+            validation: builderValidation,
             savedBuildId: builderSavedId,
         });
         if (failure) setGlobalError(failure);
-    }, [builderIsActive, builderStep, builderIdea, builderPlan, builderTheme, builderFiles, builderDirections, builderSavedId]);
+    }, [builderIsActive, builderStep, builderIdea, builderPlan, builderTheme, builderFiles, builderDirections, builderCandidate, builderValidation, builderSavedId]);
 
     useEffect(() => {
         const loadInitialData = async () => {
@@ -478,6 +499,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setBuilderState(prev => ({ ...prev, status: { ...prev.status, isLoading: true, message: 'AI is analyzing your idea and creating a blueprint...' }}));
         try {
             const plan = await apiService.generateWebAppPlan(builderState.idea, selectedModel === 'auto' ? undefined : selectedModel);
+            bumpQuotaTick();
             setBuilderState(prev => ({ ...prev, plan, status: { ...prev.status, isLoading: false, message: '' }, currentStep: 2 }));
         } catch (e: any) {
             setGlobalError(`Failed to generate plan: ${e.message}`);
@@ -500,6 +522,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 typography: String(d?.typography ?? 'Sans-serif & Friendly'),
                 colors: sanitizeColors(d?.colors),
             }));
+            bumpQuotaTick();
             setBuilderState(prev => ({ ...prev, artDirections, status: { ...prev.status, isLoading: false, message: '' } }));
         } catch (e: any) {
             setGlobalError(`Failed to suggest art directions: ${e.message}`);
@@ -516,6 +539,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 selectedModel === 'auto' ? undefined : selectedModel,
                 { previousPlan: currentPlan, feedback },
             );
+            bumpQuotaTick();
             setBuilderState(prev => ({ ...prev, plan, status: { ...prev.status, isLoading: false, message: 'Blueprint revised.' } }));
         } catch (e: any) {
             setGlobalError(`Failed to revise plan: ${e.message}`);
@@ -523,8 +547,53 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         }
     };
 
+    /** Adopts a validated file set as the build: saves it and advances to export. */
+    const promoteFiles = (files: Record<string, string>, validation: BuildValidation) => {
+        let savedId: string | null = null;
+        try {
+            const saved = buildStorage.saveBuild({
+                name: builderState.plan?.projectName || 'Untitled build',
+                idea: builderState.idea,
+                plan: builderState.plan,
+                theme: builderState.theme,
+                generatedFiles: files,
+            });
+            savedId = saved.id;
+            setSavedBuilds(buildStorage.getSavedBuilds());
+        } catch (saveError: any) {
+            setGlobalError(`Build generated, but could not be saved to your library: ${saveError.message}`);
+        }
+        setBuilderState(prev => ({
+            ...prev,
+            generatedFiles: files,
+            candidateFiles: null,
+            validation,
+            savedBuildId: savedId,
+            status: { ...prev.status, isLoading: false, message: 'Generation complete!' },
+            currentStep: 5,
+        }));
+    };
+
+    /** Accepts a candidate the validator flagged (the user reviewed the issues). */
+    const promoteCandidate = () => {
+        const files = builderState.candidateFiles;
+        if (!files) return;
+        promoteFiles(files, builderState.validation ?? validateBuild(files, builderState.plan));
+    };
+
+    /** Throws away a failed candidate and returns to the theme step. */
+    const discardCandidate = () => {
+        setBuilderState(prev => ({
+            ...prev,
+            candidateFiles: null,
+            validation: null,
+            currentStep: 3,
+            status: { ...prev.status, isLoading: false, message: 'Candidate discarded. Your previous build is untouched.' },
+        }));
+    };
+
     const generateWebAppCode = async () => {
-        setBuilderState(prev => ({ ...prev, currentStep: 4, status: { isLoading: true, message: 'Contacting Gemini…', log: [] } }));
+        setBuilderState(prev => ({ ...prev, currentStep: 4, candidateFiles: null, validation: null, status: { isLoading: true, message: 'Contacting Gemini…', log: [] } }));
         try {
             const files = await apiService.generateWebAppCode(builderState.plan, builderState.theme, selectedModel === 'auto' ? undefined : selectedModel, (event) => {
                 setBuilderState(prev => {
@@ -541,22 +610,19 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                     return { ...prev, status: { ...prev.status, message, log } };
                 });
             });
-            // Auto-save immediately so a reload can never lose a finished build.
-            let savedId: string | null = null;
-            try {
-                const saved = buildStorage.saveBuild({
-                    name: builderState.plan?.projectName || 'Untitled build',
-                    idea: builderState.idea,
-                    plan: builderState.plan,
-                    theme: builderState.theme,
-                    generatedFiles: files,
-                });
-                savedId = saved.id;
-                setSavedBuilds(buildStorage.getSavedBuilds());
-            } catch (saveError: any) {
-                setGlobalError(`Build generated, but could not be saved to your library: ${saveError.message}`);
+            bumpQuotaTick();
+            // The model's word is not evidence: check the files before adopting them.
+            const validation = validateBuild(files, builderState.plan);
+            if (!validation.ok) {
+                setBuilderState(prev => ({
+                    ...prev,
+                    candidateFiles: files,
+                    validation,
+                    status: { ...prev.status, isLoading: false, message: 'Generation finished, but the result did not pass validation.' },
+                }));
+                return;
             }
-            setBuilderState(prev => ({ ...prev, generatedFiles: files, savedBuildId: savedId, status: { ...prev.status, isLoading: false, message: 'Generation complete!' }, currentStep: 5 }));
+            promoteFiles(files, validation);
         } catch (e: any) {
             setGlobalError(`Failed to generate code: ${e.message}`);
             setBuilderState(prev => ({ ...prev, status: { ...prev.status, isLoading: false, message: 'An error occurred during code generation.' }}));
@@ -641,6 +707,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         globalError, setGlobalError,
         builderState, setBuilderState, startWebAppBuild, resetWebAppBuild, generateWebAppPlan, refineWebAppPlan, suggestArtDirections, generateWebAppCode, loadGeneratedProjectIntoIDE, exportGeneratedProject,
         savedBuilds, saveCurrentBuild, loadSavedBuild, removeSavedBuild, exportSavedBuild,
+        promoteCandidate, discardCandidate, quotaTick, bumpQuotaTick,
     };
 
     return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
