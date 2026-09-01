@@ -43,6 +43,23 @@ const dirOf = (filePath: string): string => {
     return i === -1 ? '' : filePath.slice(0, i);
 };
 
+/**
+ * Characters after which a quote genuinely opens a string literal. In JSX text a
+ * quote is just punctuation ("you're", "the books' covers"), and treating it as a
+ * string opener makes the scanner swallow the rest of the file — which showed up
+ * as a phantom "truncated" verdict on a complete, working component.
+ */
+const EXPRESSION_CONTEXT = new Set(['=', '(', ',', '[', '{', ':', ';', '?', '&', '|', '+', '!', '<', '>', '*', '/', '%', '^', '~', 'return']);
+
+const opensString = (source: string, index: number): boolean => {
+    for (let k = index - 1; k >= 0; k--) {
+        const ch = source[k];
+        if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') continue;
+        return EXPRESSION_CONTEXT.has(ch);
+    }
+    return true;   // start of file
+};
+
 /** Counts braces outside strings, comments and template literals. */
 export const braceBalance = (source: string): number => {
     let depth = 0, i = 0;
@@ -51,7 +68,7 @@ export const braceBalance = (source: string): number => {
         const c = source[i], next = source[i + 1];
         if (c === '/' && next === '/') { while (i < n && source[i] !== '\n') i++; continue; }
         if (c === '/' && next === '*') { i += 2; while (i < n && !(source[i] === '*' && source[i + 1] === '/')) i++; i += 2; continue; }
-        if (c === '"' || c === "'" || c === '`') {
+        if ((c === '"' || c === "'" || c === '`') && opensString(source, i)) {
             const quote = c; i++;
             while (i < n) {
                 if (source[i] === '\\') { i += 2; continue; }

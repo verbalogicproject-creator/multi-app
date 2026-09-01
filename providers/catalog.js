@@ -40,10 +40,10 @@ const ENTRIES = [
     // thinkingStyle is load-bearing: 5-gen models take adaptive thinking plus
     // output_config.effort, while haiku-4.5 rejects effort with a 400 and needs
     // a manual budget_tokens instead. Both verified live.
-    { id: 'claude-haiku-4-5', provider: 'anthropic', label: 'Haiku 4.5', hint: 'Fastest Claude, cheapest — good default for chat', tools: true, jsonMode: 'native', thinking: true, thinkingStyle: 'budget', priceIn: 1, priceOut: 5, fallback: [] },
-    { id: 'claude-sonnet-5', provider: 'anthropic', label: 'Sonnet 5', hint: 'Balanced speed and intelligence, 1M context', tools: true, jsonMode: 'native', thinking: true, thinkingStyle: 'adaptive', priceIn: 2, priceOut: 10, fallback: ['claude-haiku-4-5'] },
-    { id: 'claude-opus-5', provider: 'anthropic', label: 'Opus 5', hint: 'Strongest agentic coding — expensive', tools: true, jsonMode: 'native', thinking: true, thinkingStyle: 'adaptive', priceIn: 5, priceOut: 25, fallback: ['claude-sonnet-5'] },
-    { id: 'claude-fable-5', provider: 'anthropic', label: 'Fable 5', hint: 'Deepest reasoning, thinking always on — most expensive', tools: true, jsonMode: 'native', thinking: true, thinkingStyle: 'always-on', priceIn: 10, priceOut: 50, fallback: ['claude-opus-5', 'claude-sonnet-5'] },
+    { id: 'claude-haiku-4-5', provider: 'anthropic', label: 'Haiku 4.5', hint: 'Fastest Claude, cheapest — good default for chat', tools: true, jsonMode: 'native', thinking: true, thinkingStyle: 'budget', priceIn: 1, priceOut: 5, maxOutput: 64000, fallback: [] },
+    { id: 'claude-sonnet-5', provider: 'anthropic', label: 'Sonnet 5', hint: 'Balanced speed and intelligence, 1M context', tools: true, jsonMode: 'native', thinking: true, thinkingStyle: 'adaptive', priceIn: 2, priceOut: 10, maxOutput: 128000, fallback: ['claude-haiku-4-5'] },
+    { id: 'claude-opus-5', provider: 'anthropic', label: 'Opus 5', hint: 'Strongest agentic coding — expensive', tools: true, jsonMode: 'native', thinking: true, thinkingStyle: 'adaptive', priceIn: 5, priceOut: 25, maxOutput: 128000, fallback: ['claude-sonnet-5'] },
+    { id: 'claude-fable-5', provider: 'anthropic', label: 'Fable 5', hint: 'Deepest reasoning, thinking always on — most expensive', tools: true, jsonMode: 'native', thinking: true, thinkingStyle: 'always-on', priceIn: 10, priceOut: 50, maxOutput: 128000, fallback: ['claude-opus-5', 'claude-sonnet-5'] },
 
     // ---- OpenAI (paid) ------------------------------------------------------
     // Responses API; text.format json_schema strict and tools may be sent together
@@ -59,11 +59,11 @@ const ENTRIES = [
     // deepseek-v4-flash & -pro (timeout >120s), gpt-oss-20b/120b (timeout),
     // gemma-3-4b/12b, nemotron-70b, kimi-k2.6, mistral-* (404), qwen3-coder,
     // phi-4-mini (410 end-of-life).
-    { id: 'meta/llama-3.2-11b-vision-instruct', provider: 'nvidia', label: 'Llama 3.2 11B', hint: 'Free, ~0.6s — fastest option for quick tests', tools: true, jsonMode: 'native', thinking: false, priceIn: 0, priceOut: 0, fallback: [] },
-    { id: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning', provider: 'nvidia', label: 'Nemotron Nano 3', hint: 'Free reasoning model, ~1.6s', tools: true, jsonMode: 'native', thinking: true, priceIn: 0, priceOut: 0, fallback: ['meta/llama-3.2-11b-vision-instruct'] },
-    { id: 'nvidia/nemotron-3.5-lightning-30b-a3b', provider: 'nvidia', label: 'Nemotron Lightning', hint: 'Free reasoning model, ~3.9s', tools: true, jsonMode: 'native', thinking: true, priceIn: 0, priceOut: 0, fallback: ['meta/llama-3.2-11b-vision-instruct'] },
-    { id: 'minimaxai/minimax-m3', provider: 'nvidia', label: 'MiniMax M3', hint: 'Free, ~6s, JSON and tools', tools: true, jsonMode: 'native', thinking: false, priceIn: 0, priceOut: 0, fallback: ['meta/llama-3.2-11b-vision-instruct'] },
-    { id: 'moonshotai/kimi-k3', provider: 'nvidia', label: 'Kimi K3', hint: 'Free, large context, reasoning — ~7s', tools: true, jsonMode: 'native', thinking: true, priceIn: 0, priceOut: 0, fallback: ['minimaxai/minimax-m3'] },
+    { id: 'meta/llama-3.2-11b-vision-instruct', provider: 'nvidia', label: 'Llama 3.2 11B', hint: 'Free, ~0.6s — fastest option for quick tests', tools: true, jsonMode: 'native', thinking: false, priceIn: 0, priceOut: 0, maxOutput: 16384, fallback: [] },
+    { id: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning', provider: 'nvidia', label: 'Nemotron Nano 3', hint: 'Free reasoning model, ~1.6s', tools: true, jsonMode: 'native', thinking: true, priceIn: 0, priceOut: 0, maxOutput: 16384, fallback: ['meta/llama-3.2-11b-vision-instruct'] },
+    { id: 'nvidia/nemotron-3.5-lightning-30b-a3b', provider: 'nvidia', label: 'Nemotron Lightning', hint: 'Free reasoning model, ~3.9s', tools: true, jsonMode: 'native', thinking: true, priceIn: 0, priceOut: 0, maxOutput: 16384, fallback: ['meta/llama-3.2-11b-vision-instruct'] },
+    { id: 'minimaxai/minimax-m3', provider: 'nvidia', label: 'MiniMax M3', hint: 'Free, ~6s, JSON and tools', tools: true, jsonMode: 'native', thinking: false, priceIn: 0, priceOut: 0, maxOutput: 32768, fallback: ['meta/llama-3.2-11b-vision-instruct'] },
+    { id: 'moonshotai/kimi-k3', provider: 'nvidia', label: 'Kimi K3', hint: 'Free, large context, reasoning — ~7s', tools: true, jsonMode: 'native', thinking: true, priceIn: 0, priceOut: 0, maxOutput: 32768, fallback: ['minimaxai/minimax-m3'] },
 ];
 
 const PRICE_OVERRIDES = (() => {
@@ -88,6 +88,16 @@ export const CATALOG = ENTRIES.map(e => ({ ...e, ...(PRICE_OVERRIDES[e.id] ?? {}
 const BY_ID = new Map(CATALOG.map(e => [e.id, e]));
 
 export const getModel = (id) => BY_ID.get(id) ?? null;
+
+/**
+ * Largest max output tokens a model accepts. Exceeding it is a hard 400, and the
+ * ceiling is not uniform: haiku-4.5 stops at 64000 where the 5-gen models allow
+ * 128000, and the small NVIDIA models are far lower still.
+ */
+export const maxOutputFor = (id, requested) => {
+    const cap = BY_ID.get(id)?.maxOutput;
+    return cap ? Math.min(requested, cap) : requested;
+};
 
 /** Reasoning efforts a model accepts; empty means "all of them". */
 export const supportedEfforts = (id) => BY_ID.get(id)?.efforts ?? [];
