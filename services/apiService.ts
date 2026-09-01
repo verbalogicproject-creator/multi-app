@@ -85,11 +85,11 @@ export const updateProjectDependencies = async (project: Project, files: Project
 };
 
 // Web App Builder API Calls
-export const generateWebAppPlan = async (idea: string, model?: string): Promise<any> => {
+export const generateWebAppPlan = async (idea: string, model?: string, refine?: { previousPlan: any; feedback: string }): Promise<any> => {
     const response = await fetch('/api/builder/plan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idea, model }),
+        body: JSON.stringify({ idea, model, ...refine }),
     });
     if (!response.ok) { const error = await response.json(); throw new Error(error.message || 'Failed to generate web app plan.'); }
     return response.json();
