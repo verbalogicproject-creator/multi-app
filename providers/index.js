@@ -1,4 +1,5 @@
 import { createGoogleProvider } from './google.js';
+import { createAnthropicProvider } from './anthropic.js';
 import { CATALOG, PROVIDER_KEYS, PROVIDER_LABELS, getModel, isProviderEnabled } from './catalog.js';
 
 // Lazily constructed provider clients, keyed by provider id. Only providers with
@@ -7,7 +8,8 @@ import { CATALOG, PROVIDER_KEYS, PROVIDER_LABELS, getModel, isProviderEnabled } 
 
 const FACTORIES = {
     google: createGoogleProvider,
-    // anthropic / openai / nvidia are registered as their adapters land.
+    anthropic: createAnthropicProvider,
+    // openai / nvidia are registered as their adapters land.
 };
 
 const instances = new Map();
