@@ -127,22 +127,37 @@ export const updateProjectDependencies = async (project: Project, files: Project
 };
 
 // Web App Builder API Calls
-export const suggestArtDirections = async (idea: string, plan: any, model?: string): Promise<any[]> => {
+
+/**
+ * Links a builder request to its memory cluster, so the server-side taps can
+ * attribute what they record and the recall step knows which build to read.
+ * Omitted, or carrying a null `buildId`, means memory is off for this call — the
+ * server treats a missing id as "do not record" rather than as an error.
+ */
+export interface MemoryRef {
+    buildId: string | null;
+    episodeId?: string | null;
+}
+
+const memoryFields = (ref?: MemoryRef): { buildId?: string; episodeId?: string | null } =>
+    ref?.buildId ? { buildId: ref.buildId, episodeId: ref.episodeId ?? null } : {};
+
+export const suggestArtDirections = async (idea: string, plan: any, model?: string, memory?: MemoryRef): Promise<any[]> => {
     const response = await fetch('/api/builder/directions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idea, plan, model }),
+        body: JSON.stringify({ idea, plan, model, ...memoryFields(memory) }),
     });
     if (!response.ok) { const error = await response.json().catch(() => ({})); throw new Error(error.message || 'Failed to suggest art directions.'); }
     const data = await response.json();
     return Array.isArray(data?.directions) ? data.directions : [];
 };
 
-export const generateWebAppPlan = async (idea: string, model?: string, refine?: { previousPlan: any; feedback: string }): Promise<any> => {
+export const generateWebAppPlan = async (idea: string, model?: string, refine?: { previousPlan: any; feedback: string }, memory?: MemoryRef): Promise<any> => {
     const response = await fetch('/api/builder/plan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idea, model, ...refine }),
+        body: JSON.stringify({ idea, model, ...refine, ...memoryFields(memory) }),
     });
     if (!response.ok) { const error = await response.json(); throw new Error(error.message || 'Failed to generate web app plan.'); }
     return response.json();
@@ -155,11 +170,11 @@ export interface BuilderProgressEvent {
     model?: string;      // which model is serving this attempt (fallback-aware)
 }
 
-export const generateWebAppCode = async (plan: any, theme: any, model?: string, onProgress?: (event: BuilderProgressEvent) => void): Promise<Record<string, string>> => {
+export const generateWebAppCode = async (plan: any, theme: any, model?: string, onProgress?: (event: BuilderProgressEvent) => void, memory?: MemoryRef): Promise<Record<string, string>> => {
     const response = await fetch('/api/builder/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plan, theme, model }),
+        body: JSON.stringify({ plan, theme, model, ...memoryFields(memory) }),
     });
     if (!response.ok || !response.body) { const error = await response.json().catch(() => ({})); throw new Error(error.message || 'Failed to generate web app code.'); }
 

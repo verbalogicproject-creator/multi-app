@@ -1,10 +1,12 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, ReactNode, useCallback } from 'react';
 import { Project, ProjectFile, CustomAiStyle, Persona, Agent, AiResponseStyle } from '../types/index';
 import * as storageService from '../services/geminiService';
 import * as apiService from '../services/apiService';
 import type { CatalogModel } from '../services/apiService';
 import * as buildStorage from '../services/buildStorage';
 import type { SavedBuild } from '../services/buildStorage';
+import * as memoryService from '../services/memoryService';
+import type { EpisodeOutcome, MemoryEvent, MemoryEvidence } from '../services/memoryService';
 import { DEFAULT_PALETTE, sanitizeColors, type ArtDirection, type ThemeColors } from '../utils/palettes';
 import { validateBuild, type BuildValidation } from '../utils/validateBuild';
 import { generateUniqueId } from '../utils/common';
@@ -40,6 +42,24 @@ export interface WebAppBuilderState {
     // Time-ordered record of what was asked, decided and produced for this build.
     evidence: BuildEvent[];
     savedBuildId: string | null;   // links this build to its entry in the saved library
+    /**
+     * This build's link to the memory engine. `buildId` names its database;
+     * `episodeId` is set ONLY while an episode is open, so a stale one found at
+     * startup is an attempt a reload cut short. `lastOutcome` is how the next
+     * attempt knows it is a repair rather than a first try.
+     */
+    memory: {
+        buildId: string | null;
+        episodeId: string | null;
+        lastOutcome: EpisodeOutcome | null;
+        /**
+         * The model that actually served this build's generation, which is only
+         * known once it is over. Kept in state because the decision it attributes —
+         * keeping or discarding a held candidate — can happen after a reload, by
+         * which time nothing else remembers who wrote the code.
+         */
+        servingModel: string | null;
+    };
     status: {
         message: string;
         isLoading: boolean;
@@ -59,8 +79,25 @@ const initialBuilderState: WebAppBuilderState = {
     artDirections: null,
     evidence: [],
     savedBuildId: null,
+    memory: { buildId: null, episodeId: null, lastOutcome: null, servingModel: null },
     status: { message: '', isLoading: false, log: [] },
 };
+
+const OUTCOMES: EpisodeOutcome[] = ['verified', 'failed', 'abandoned'];
+
+/**
+ * Occurrence count per stable issue code.
+ *
+ * A verdict is recorded as codes rather than messages because events are
+ * immutable: reword a validator message a year from now and every stored verdict
+ * keyed on the old wording becomes a different kind of failure to whatever reads
+ * them. The code is the thing that is allowed to be compared across time.
+ */
+const issueCodes = (validation: BuildValidation): Record<string, number> =>
+    validation.issues.reduce<Record<string, number>>((counts, issue) => {
+        counts[issue.code] = (counts[issue.code] ?? 0) + 1;
+        return counts;
+    }, {});
 
 /**
  * Rebuilds builder state from localStorage. Generation itself is never persisted
@@ -96,6 +133,17 @@ export const restoreBuilderState = (): WebAppBuilderState => {
         candidateFiles: persisted.candidateFiles ?? null,
         validation: persisted.validation ?? null,
         savedBuildId: persisted.savedBuildId ?? null,
+        memory: {
+            // A build in progress from before memory existed gets its cluster now
+            // rather than never: with no id, every tap for the rest of this build
+            // would silently no-op.
+            buildId: persisted.memory?.buildId ?? memoryService.newBuildId(),
+            episodeId: persisted.memory?.episodeId ?? null,
+            lastOutcome: OUTCOMES.includes(persisted.memory?.lastOutcome as EpisodeOutcome)
+                ? (persisted.memory!.lastOutcome as EpisodeOutcome)
+                : null,
+            servingModel: persisted.memory?.servingModel ?? null,
+        },
         currentStep: interrupted ? 3 : persisted.currentStep,
         status: {
             isLoading: false,
@@ -206,6 +254,7 @@ interface AppContextType {
     promoteCandidate: () => void;
     discardCandidate: () => void;
     recordEvidence: (event: string) => void;
+    noteDirectionSelected: (direction: ArtDirection, index: number) => void;
     quotaTick: number;
     bumpQuotaTick: () => void;
     generateWebAppCode: () => Promise<void>;
@@ -279,7 +328,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             plan: builderPlan, theme: builderTheme, generatedFiles: builderFiles,
             artDirections: builderDirections, candidateFiles: builderCandidate,
             validation: builderValidation, evidence: builderEvidence,
-            savedBuildId: builderSavedId } = builderState;
+            savedBuildId: builderSavedId, memory: builderMemory } = builderState;
     useEffect(() => {
         const failure = buildStorage.saveBuilderState({
             isActive: builderIsActive,
@@ -293,9 +342,27 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             validation: builderValidation,
             evidence: builderEvidence,
             savedBuildId: builderSavedId,
+            memory: builderMemory,
         });
         if (failure) setGlobalError(failure);
-    }, [builderIsActive, builderStep, builderIdea, builderPlan, builderTheme, builderFiles, builderDirections, builderCandidate, builderValidation, builderEvidence, builderSavedId]);
+    }, [builderIsActive, builderStep, builderIdea, builderPlan, builderTheme, builderFiles, builderDirections, builderCandidate, builderValidation, builderEvidence, builderSavedId, builderMemory]);
+
+    /**
+     * A generation cut short by a reload or a crash leaves its episode open, and the
+     * engine reuses an open episode for the same objective rather than forking a
+     * second one. So an orphan does not merely sit there: it silently absorbs the
+     * next genuine attempt, and two runs become one record. Close it before anything
+     * can join it.
+     */
+    const orphanHandled = useRef(false);
+    useEffect(() => {
+        if (orphanHandled.current) return;   // React 18 remounts effects in development
+        orphanHandled.current = true;
+        const { buildId, episodeId } = getRestoredBuilderState().memory;
+        if (!buildId || !episodeId) return;
+        memoryService.closeEpisode(buildId, episodeId, 'abandoned');
+        setBuilderState(prev => ({ ...prev, memory: { ...prev.memory, episodeId: null, lastOutcome: 'abandoned' } }));
+    }, []);
 
     useEffect(() => {
         const loadInitialData = async () => {
@@ -534,12 +601,54 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const recordEvidence = useCallback((event: string) => {
         setBuilderState(prev => ({ ...prev, evidence: withEvidence(prev.evidence, event) }));
     }, []);
-    const startWebAppBuild = () => { setBuilderState({ ...initialBuilderState, isActive: true, currentStep: 1 }); };
-    const resetWebAppBuild = () => setBuilderState(initialBuilderState);
+    // ---- memory taps -----------------------------------------------------------
+    // Every call below is best-effort by construction: memoryService answers null
+    // instead of throwing, and no builder transition waits on one. A tap must never
+    // be the reason a build behaves differently.
+
+    /**
+     * Splits a model id into the attribution the engine stores. The provider comes
+     * from the catalog rather than from parsing the id, and a model the catalog does
+     * not know — a fallback can serve one that was never in the picker — is recorded
+     * with no provider rather than a guessed one.
+     */
+    const attributionFor = (model: string | null | undefined): { provider?: string; model?: string } => {
+        if (!model) return {};
+        const entry = catalog.find(m => m.id === model);
+        return entry ? { provider: entry.provider, model: entry.id } : { model };
+    };
+
+    /** Records events against whatever episode this build currently has open. */
+    const recordMemory = (events: MemoryEvent[], evidence: MemoryEvidence[] = []) => {
+        memoryService.record(builderState.memory.buildId, builderState.memory.episodeId, events, evidence);
+    };
+
+    /** Abandons an episode this build left open, if any. A no-op when there is none. */
+    const abandonOpenEpisode = () => {
+        const { buildId, episodeId, servingModel } = builderState.memory;
+        memoryService.closeEpisode(buildId, episodeId, 'abandoned', attributionFor(servingModel));
+    };
+
+    const startWebAppBuild = () => {
+        abandonOpenEpisode();   // starting over abandons whatever the last build left open
+        setBuilderState({
+            ...initialBuilderState, isActive: true, currentStep: 1,
+            memory: { buildId: memoryService.newBuildId(), episodeId: null, lastOutcome: null, servingModel: null },
+        });
+    };
+    const resetWebAppBuild = () => {
+        abandonOpenEpisode();
+        setBuilderState(initialBuilderState);
+    };
     const generateWebAppPlan = async () => {
         setBuilderState(prev => ({ ...prev, status: { ...prev.status, isLoading: true, message: 'AI is analyzing your idea and creating a blueprint...' }}));
         try {
-            const plan = await apiService.generateWebAppPlan(builderState.idea, selectedModel === 'auto' ? undefined : selectedModel);
+            const plan = await apiService.generateWebAppPlan(
+                builderState.idea,
+                selectedModel === 'auto' ? undefined : selectedModel,
+                undefined,
+                builderState.memory,
+            );
             bumpQuotaTick();
             setBuilderState(prev => ({
                 ...prev, plan, currentStep: 2,
@@ -559,6 +668,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 builderState.idea,
                 builderState.plan,
                 selectedModel === 'auto' ? undefined : selectedModel,
+                builderState.memory,
             );
             // Model output is untrusted: every colour is re-validated as hex before use.
             const artDirections: ArtDirection[] = raw.slice(0, 3).map((d: any) => ({
@@ -587,6 +697,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 builderState.idea,
                 selectedModel === 'auto' ? undefined : selectedModel,
                 { previousPlan: currentPlan, feedback },
+                builderState.memory,
             );
             bumpQuotaTick();
             setBuilderState(prev => ({
@@ -600,9 +711,41 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         }
     };
 
-    /** Adopts a validated file set as the build: saves it and advances to export. */
-    const promoteFiles = (files: Record<string, string>, validation: BuildValidation, note: string) => {
+    /**
+     * Records which proposed art direction the user actually adopted.
+     *
+     * The server already records that three were offered. Without this, nothing
+     * anywhere says which one won — and "what did they choose from what I proposed"
+     * is the only question the proposals were ever evidence for.
+     */
+    const noteDirectionSelected = (direction: ArtDirection, index: number) => {
+        recordMemory([{
+            kind: 'direction.selected',
+            surface: 'builder.theme',
+            // Taste territory in the engine's vocabulary, and deliberately so: a
+            // palette choice must not recall as strongly as a build failure.
+            domain: 'art-direction',
+            payload: {
+                name: direction.name,
+                index,
+                typography: direction.typography,
+                offered: builderState.artDirections?.length ?? 0,
+            },
+        }]);
+    };
+
+    /**
+     * Adopts a file set as the build: saves it and advances to export.
+     *
+     * `servedModelId` is passed in by the generation that produced these files,
+     * because state written moments earlier is not yet visible in this closure. The
+     * stored value is the fallback for the other caller, where the decision is a
+     * human one taken later — possibly after a reload.
+     */
+    const promoteFiles = (files: Record<string, string>, validation: BuildValidation, note: string, servedModelId?: string | null) => {
         const evidence = withEvidence(builderState.evidence, note);
+        const { buildId, episodeId } = builderState.memory;
+        const model = servedModelId ?? builderState.memory.servingModel;
         let savedId: string | null = null;
         try {
             const saved = buildStorage.saveBuild({
@@ -613,12 +756,36 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 generatedFiles: files,
                 evidence,
                 validation,
+                ...(buildId ? { memory: { buildId, episodeId } } : {}),
             });
             savedId = saved.id;
             setSavedBuilds(buildStorage.getSavedBuilds());
         } catch (saveError: any) {
             setGlobalError(`Build generated, but could not be saved to your library: ${saveError.message}`);
         }
+
+        /*
+         * The validator's verdict decides the outcome, never the act of adopting the
+         * result. A human keeping a candidate the validator rejected is a decision
+         * worth recording — it is not a verification, and closing it as one would let
+         * an override manufacture the very evidence a lesson is later promoted on.
+         */
+        const outcome: EpisodeOutcome = validation.ok ? 'verified' : 'failed';
+        memoryService.record(buildId, episodeId, [{
+            kind: 'revision.promoted',
+            surface: 'builder.promote',
+            domain: 'build',
+            ...attributionFor(model),
+            payload: { fileCount: Object.keys(files).length, savedBuildId: savedId, validationOk: validation.ok },
+            evidenceKeys: ['revision'],
+        }], [{
+            key: 'revision',
+            kind: 'artifact',
+            ref: `build://${buildId ?? 'unknown'}/revision/${savedId ?? 'unsaved'}`,
+            summary: note,
+        }]);
+        memoryService.closeEpisode(buildId, episodeId, outcome, attributionFor(model));
+
         setBuilderState(prev => ({
             ...prev,
             generatedFiles: files,
@@ -626,6 +793,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             validation,
             evidence,
             savedBuildId: savedId,
+            memory: { ...prev.memory, episodeId: null, lastOutcome: outcome, servingModel: model },
             status: { ...prev.status, isLoading: false, message: 'Generation complete!' },
             currentStep: 5,
         }));
@@ -637,32 +805,81 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         if (!files) return;
         const validation = builderState.validation ?? validateBuild(files, builderState.plan);
         const errors = validation.issues.filter(i => i.severity === 'error').length;
+        recordMemory([{
+            kind: 'human.decision',
+            surface: 'builder.candidate',
+            domain: 'build',
+            payload: { decision: 'kept-despite-validation', errors, codes: issueCodes(validation) },
+        }]);
         promoteFiles(files, validation, `Kept despite validation: ${errors} error${errors === 1 ? '' : 's'} accepted by the user`);
     };
 
     /** Throws away a failed candidate and returns to the theme step. */
     const discardCandidate = () => {
+        const { buildId, episodeId, servingModel } = builderState.memory;
+        const validation = builderState.validation;
+        memoryService.record(buildId, episodeId, [{
+            kind: 'human.decision',
+            surface: 'builder.candidate',
+            domain: 'build',
+            ...attributionFor(servingModel),
+            payload: {
+                decision: 'discarded',
+                errors: validation ? validation.issues.filter(i => i.severity === 'error').length : null,
+                codes: validation ? issueCodes(validation) : {},
+            },
+        }]);
+        memoryService.closeEpisode(buildId, episodeId, 'failed', attributionFor(servingModel));
+
         setBuilderState(prev => ({
             ...prev,
             candidateFiles: null,
             validation: null,
             currentStep: 3,
             evidence: withEvidence(prev.evidence, 'Candidate discarded; previous build left untouched'),
+            memory: { ...prev.memory, episodeId: null, lastOutcome: 'failed' },
             status: { ...prev.status, isLoading: false, message: 'Candidate discarded. Your previous build is untouched.' },
         }));
     };
 
     const generateWebAppCode = async () => {
         const theme = builderState.theme;
+        const { buildId, lastOutcome } = builderState.memory;
         setBuilderState(prev => ({
             ...prev, currentStep: 4, candidateFiles: null, validation: null,
             evidence: withEvidence(prev.evidence, `Generation requested — style "${theme.palette}" / ${theme.typography}`),
             status: { isLoading: true, message: 'Contacting Gemini…', log: [] },
         }));
-        let servingModel = 'Gemini';
+
+        /*
+         * The one memory call that is awaited, because a null episode id is what
+         * makes every tap below a no-op and they have to know which case they are in.
+         * The server reuses an episode still open for the same objective, so a
+         * double-tap or a remount joins the attempt in flight rather than forking it.
+         */
+        const episodeId = await memoryService.openEpisode(
+            buildId,
+            `generate ${builderState.plan?.projectName ?? 'a web application'} — style "${theme.palette}" / ${theme.typography}`,
+            builderState.savedBuildId,
+        );
+        setBuilderState(prev => ({ ...prev, memory: { ...prev.memory, episodeId } }));
+
+        // A generation that follows a failed or discarded one is a repair, and saying
+        // so is the only thing that later distinguishes a first try from a retry.
+        if (lastOutcome === 'failed') {
+            memoryService.record(buildId, episodeId, [{
+                kind: 'repair.attempted',
+                surface: 'builder.generate',
+                domain: 'build',
+                payload: { after: lastOutcome },
+            }]);
+        }
+
+        let servingModel = 'Gemini';      // for the user-facing evidence line
+        let servedModelId: string | null = null;   // a real catalog id, or nothing
         try {
             const files = await apiService.generateWebAppCode(builderState.plan, theme, selectedModel === 'auto' ? undefined : selectedModel, (event) => {
-                if (event.model) servingModel = event.model;
+                if (event.model) { servingModel = event.model; servedModelId = event.model; }
                 setBuilderState(prev => {
                     let message = prev.status.message;
                     let log = prev.status.log;
@@ -676,29 +893,69 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                     if (event.file && !log.includes(event.file)) log = [...log, event.file];
                     return { ...prev, status: { ...prev.status, message, log } };
                 });
-            });
+            }, { buildId, episodeId });
             bumpQuotaTick();
             // The model's word is not evidence: check the files before adopting them.
             const validation = validateBuild(files, builderState.plan);
             const fileCount = Object.keys(files).length;
+            const errors = validation.issues.filter(i => i.severity === 'error').length;
+
+            /*
+             * The verdict, whichever way it went. A failed check is a result, not an
+             * absence of one — recording only the passes would leave the memory
+             * describing a builder that never gets anything wrong.
+             */
+            memoryService.record(buildId, episodeId, [{
+                kind: 'verification.completed',
+                surface: 'builder.generate',
+                domain: 'build',
+                ...attributionFor(servedModelId),
+                payload: {
+                    ok: validation.ok,
+                    checked: validation.checked,
+                    errors,
+                    warnings: validation.issues.length - errors,
+                    codes: issueCodes(validation),
+                    fileCount,
+                },
+                evidenceKeys: ['validation'],
+            }], [{
+                key: 'validation',
+                kind: 'validation',
+                ref: `build://${buildId ?? 'unknown'}/episode/${episodeId ?? 'none'}/validation`,
+                summary: validation.ok
+                    ? `Validation passed over ${validation.checked} files.`
+                    : `Validation failed over ${validation.checked} files: ${validation.issues
+                        .filter(i => i.severity === 'error')
+                        .slice(0, 5)
+                        .map(i => `${i.code}${i.file ? ` (${i.file})` : ''}`)
+                        .join('; ')}`,
+            }]);
+
             if (!validation.ok) {
-                const errors = validation.issues.filter(i => i.severity === 'error').length;
+                // The episode stays open: a held candidate is a decision still pending,
+                // and it is that decision — keep or discard — that closes it.
                 setBuilderState(prev => ({
                     ...prev,
                     candidateFiles: files,
                     validation,
                     evidence: withEvidence(prev.evidence, `${servingModel} wrote ${fileCount} files — validation failed with ${errors} error${errors === 1 ? '' : 's'}, held for review`),
+                    memory: { ...prev.memory, servingModel: servedModelId },
                     status: { ...prev.status, isLoading: false, message: 'Generation finished, but the result did not pass validation.' },
                 }));
                 return;
             }
             const warnings = validation.issues.length;
-            promoteFiles(files, validation, `${servingModel} wrote ${fileCount} files — validation passed${warnings ? ` with ${warnings} warning${warnings === 1 ? '' : 's'}` : ''}`);
+            promoteFiles(files, validation, `${servingModel} wrote ${fileCount} files — validation passed${warnings ? ` with ${warnings} warning${warnings === 1 ? '' : 's'}` : ''}`, servedModelId);
         } catch (e: any) {
             setGlobalError(`Failed to generate code: ${e.message}`);
+            // An attempt that threw is over, and an episode left open would be joined
+            // by the next one rather than starting it.
+            memoryService.closeEpisode(buildId, episodeId, 'failed', attributionFor(servedModelId));
             setBuilderState(prev => ({
                 ...prev,
                 evidence: withEvidence(prev.evidence, `Generation failed: ${e.message}`),
+                memory: { ...prev.memory, episodeId: null, lastOutcome: 'failed', servingModel: servedModelId },
                 status: { ...prev.status, isLoading: false, message: 'An error occurred during code generation.' },
             }));
         }
@@ -732,6 +989,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 generatedFiles: builderState.generatedFiles,
                 evidence: builderState.evidence,
                 validation: builderState.validation,
+                ...(builderState.memory.buildId
+                    ? { memory: { buildId: builderState.memory.buildId, episodeId: builderState.memory.episodeId } }
+                    : {}),
             }, asCopy ? null : builderState.savedBuildId);
             setSavedBuilds(buildStorage.getSavedBuilds());
             setBuilderState(prev => ({
@@ -747,6 +1007,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const loadSavedBuild = (id: string) => {
         const build = buildStorage.getSavedBuilds().find(b => b.id === id);
         if (!build) { setGlobalError('That saved build could no longer be found.'); return; }
+        abandonOpenEpisode();   // whatever was in progress is being left behind
         setBuilderState({
             ...initialBuilderState,
             isActive: true,
@@ -758,6 +1019,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             evidence: Array.isArray(build.evidence) ? build.evidence : [],
             validation: (build.validation as BuildValidation | undefined) ?? null,
             savedBuildId: build.id,
+            // Reopening a build resumes its memory cluster, so further work lands
+            // beside the history that produced it. A build saved before memory
+            // existed gets a cluster of its own from here on.
+            memory: {
+                buildId: build.memory?.buildId ?? memoryService.newBuildId(),
+                episodeId: null,
+                lastOutcome: null,
+                servingModel: null,
+            },
             status: { isLoading: false, log: [], message: `Loaded "${build.name}"` },
         });
         setActiveTab('tools');
@@ -790,7 +1060,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         globalError, setGlobalError,
         builderState, setBuilderState, startWebAppBuild, resetWebAppBuild, generateWebAppPlan, refineWebAppPlan, suggestArtDirections, generateWebAppCode, loadGeneratedProjectIntoIDE, exportGeneratedProject,
         savedBuilds, saveCurrentBuild, loadSavedBuild, removeSavedBuild, exportSavedBuild,
-        promoteCandidate, discardCandidate, recordEvidence, quotaTick, bumpQuotaTick,
+        promoteCandidate, discardCandidate, recordEvidence, noteDirectionSelected, quotaTick, bumpQuotaTick,
     };
 
     return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

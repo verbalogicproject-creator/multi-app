@@ -87,6 +87,7 @@ a cost estimate first.
 | `MODEL_IMAGE` / `MODEL_VIDEO` | Media models (features flagged off) | `gemini-3.1-flash-image` / `veo-3.1-generate-preview` |
 | `QUOTA_LIMITS` | JSON overriding assumed daily free-tier request limits | see `server.js` |
 | `MODEL_PRICES` | JSON overriding per-1M token prices used for spend estimates | see `providers/catalog.js` |
+| `MEMORY_DB_DIR` | Where per-build memory databases are written | `.multi-memory/` |
 
 Feature flags live in `utils/features.ts`. Image editing, video generation and
 live audio are **off** pending re-verification against current models.
@@ -117,6 +118,56 @@ API; NVIDIA emits reasoning before content and will starve the answer without
 extra headroom, and cannot constrain output to a schema at all. Each of those
 was found by a failing live call, not by reading a doc.
 
+### How memory works
+
+The builder records what it did and recalls what it learned. The engine is
+[`multi-graph-memory`](/root/multi-graph-memory), consumed as a local `file:`
+dependency; this app supplies the facts and the human gate, and owns none of the
+storage logic.
+
+**One database per build**, at `.multi-memory/<buildId>.db`. A build id is minted
+when a wizard run starts and travels with it — in localStorage, in the request
+body of every builder call, and into `SavedBuild.memory` when the result is kept.
+The stock `multi-memory` CLI reads exactly the same files.
+
+**Where the facts come from** is split by who can see them:
+
+- The **server** records what only it knows — which model actually served a call
+  after fallback. `planning.answer`, `contract.delta` and `candidate.created` are
+  emitted inside the `/api/builder/*` handlers, after the response, never on the
+  critical path.
+- The **client** records what only it knows — that a generation started, what the
+  validator said, and whether a human kept or discarded the result. Those go
+  through `services/memoryService.ts` to `/api/memory/*`.
+
+**An episode is one generation attempt.** It opens when generation starts and
+closes exactly once: `verified` when the validator passed, `failed` when it did
+not or the attempt threw, `abandoned` when a reload or a reset cut it short. The
+engine *reuses* an episode that is still open for the same objective, so a
+double-tap joins the attempt in flight rather than forking it — which makes
+closing the thing that matters, and is why an episode left open by a reload is
+closed at startup before anything can join it.
+
+**The validator's verdict decides the outcome, never the act of adopting the
+result.** Keeping a candidate the validator rejected is recorded as a
+`human.decision` and closes the episode `failed`. Closing it `verified` would let
+an override manufacture the evidence a lesson is later promoted on.
+
+**Verdicts are recorded as stable issue codes**, not messages
+(`utils/validateBuild.ts`). Events are immutable: reword a check's message and
+every stored verdict keyed on the old wording would read as a different kind of
+failure.
+
+**Nothing waits on memory.** Every client call bounds itself at 2s and answers
+`null` rather than throwing; the server bridge catches everything and reports
+`{degraded, reason}` on `/api/memory/state`. With the engine absent the builder
+behaves identically and records nothing. One call is awaited — opening an
+episode — because a null episode id is what makes every later tap a no-op.
+
+Approval of a lesson is human-only and lives at
+`POST /api/memory/lessons/:id/approve`. It is declared in no tool schema and
+reachable from no prompt, which is a structural property rather than a check.
+
 ## Checks
 
 ```sh
@@ -129,13 +180,32 @@ npm run smoke            # backend health (server must be running)
 npm run smoke:providers -- gemini-3.5-flash-lite claude-haiku-4-5 gpt-5.6-luna meta/llama-3.2-11b-vision-instruct
 ```
 
+Read a build's memory back with the engine's own CLI — the same databases, no
+export step:
+
+```sh
+export MULTI_MEMORY_BUILDS=/root/multi-app/.multi-memory
+cd /root/multi-graph-memory
+node bin/multi-memory.ts --build <buildId> episode list
+node bin/multi-memory.ts --build <buildId> events --limit 20
+node bin/multi-memory.ts --build <buildId> attribution
+```
+
+`--build` creates a cluster it does not find, so a mistyped id answers "No
+episodes recorded" rather than "no such build". Check the id against
+`.multi-memory/` before concluding a run recorded nothing.
+
 ## Roadmap
 
 Next cycles, in the order chosen:
 
-1. **Memory** — recall, RAG and a human-in-the-loop loop that ingests fixes so
-   each build improves (see `/root/hybrid-graph-memory`), scoped per project
-   with provider attribution.
+1. **Memory** — recording and recall are wired end to end (see *How memory works*
+   above): the engine is `/root/multi-graph-memory`, every builder call is
+   attributed, and a wizard run now leaves a readable episode behind. What remains
+   is the half that closes the loop — a deterministic lesson proposer that turns a
+   failed verdict into a candidate lesson, the reuse ratchet that promotes one only
+   after a *different* episode benefits from it, and a Memory panel with the
+   one-click human approval the CLI already has.
 2. **Agent link (SAG-lite)** — a localhost-only, token-gated channel where the running app
    publishes bounded context (active project, current step, selection, diagnostics) and accepts
    typed directives, each answered with an effect receipt describing what actually happened. Lets a

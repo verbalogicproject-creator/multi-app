@@ -6,6 +6,21 @@ const BUILDER_STATE_KEY = 'gemini_builder_state';
 const SAVED_BUILDS_KEY = 'gemini_saved_builds';
 const MAX_SAVED_BUILDS = 10;
 
+/**
+ * Where this build's memory lives.
+ *
+ * `episodeId` is populated ONLY while an episode is open — every close path clears
+ * it — so an id still sitting here at startup is unambiguously an episode a reload
+ * cut short, and can be closed as abandoned without guessing.
+ */
+export interface BuildMemoryRef {
+    buildId: string | null;
+    episodeId: string | null;
+    lastOutcome?: 'verified' | 'failed' | 'abandoned' | null;
+    /** The model that served the last generation, so a decision made after a reload can still attribute it. */
+    servingModel?: string | null;
+}
+
 /** The subset of builder state worth surviving a reload (transient status is dropped). */
 export interface PersistedBuilderState {
     isActive: boolean;
@@ -19,6 +34,7 @@ export interface PersistedBuilderState {
     artDirections?: any[] | null;
     evidence?: { ts: number; event: string }[];
     savedBuildId?: string | null;
+    memory?: BuildMemoryRef;
 }
 
 export interface SavedBuild {
@@ -31,7 +47,12 @@ export interface SavedBuild {
     generatedFiles: Record<string, string>;
     evidence?: { ts: number; event: string }[];
     /** Verdict recorded when the build was saved, so the shelf can show it. */
-    validation?: { ok: boolean; issues: { severity: string; message: string; file?: string }[]; checked: number } | null;
+    validation?: { ok: boolean; issues: { severity: string; code?: string; message: string; file?: string }[]; checked: number } | null;
+    /**
+     * The memory cluster and the episode that produced this build. Absent on builds
+     * saved before memory existed, which is why every reader must tolerate it.
+     */
+    memory?: { buildId: string; episodeId: string | null };
 }
 
 const isQuotaError = (e: unknown): boolean =>
@@ -108,7 +129,7 @@ const writeSavedBuilds = (builds: SavedBuild[]): SavedBuild[] => {
 
 /** Creates a new saved build (or updates the one matching `existingId`). */
 export const saveBuild = (
-    input: { name: string; idea: string; plan: any; theme: any; generatedFiles: Record<string, string>; evidence?: { ts: number; event: string }[]; validation?: SavedBuild['validation'] },
+    input: { name: string; idea: string; plan: any; theme: any; generatedFiles: Record<string, string>; evidence?: { ts: number; event: string }[]; validation?: SavedBuild['validation']; memory?: SavedBuild['memory'] },
     existingId?: string | null,
 ): SavedBuild => {
     const builds = getSavedBuilds();
