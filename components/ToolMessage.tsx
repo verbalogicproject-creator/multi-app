@@ -62,7 +62,7 @@ const ToolMessage: React.FC<ToolMessageProps> = ({ message, onSaveScript, select
     } else { content = <pre className="p-2 bg-black/20 rounded text-xs overflow-x-auto"><code>{JSON.stringify(result, null, 2)}</code></pre>; }
     return (
         <div className="my-2 p-3 bg-surface hairline rounded-lg text-sm text-metal-300 max-w-lg lg:max-w-2xl xl:max-w-4xl w-full">
-             <div className="flex items-center gap-2 font-mono text-xs text-purple-400"><svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg><span>Tool Result: {name}</span></div>
+             <div className="flex items-center gap-2 font-mono text-xs text-metal-200"><svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg><span>Tool Result: {name}</span></div>
              <div className="mt-1">{content}</div>
         </div>
     );
