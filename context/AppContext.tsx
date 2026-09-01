@@ -2,6 +2,8 @@ import React, { createContext, useContext, useState, useEffect, ReactNode, useCa
 import { Project, ProjectFile, CustomAiStyle, Persona, Agent, AiResponseStyle } from '../types/index';
 import * as storageService from '../services/geminiService';
 import * as apiService from '../services/apiService';
+import * as buildStorage from '../services/buildStorage';
+import type { SavedBuild } from '../services/buildStorage';
 import { generateUniqueId } from '../utils/common';
 import { createProjectZip } from '../utils/export';
 
@@ -16,6 +18,7 @@ export interface WebAppBuilderState {
         typography: string;
     };
     generatedFiles: Record<string, string> | null;
+    savedBuildId: string | null;   // links this build to its entry in the saved library
     status: {
         message: string;
         isLoading: boolean;
@@ -30,7 +33,38 @@ const initialBuilderState: WebAppBuilderState = {
     plan: null,
     theme: { palette: 'Modern & Minimal', typography: 'Sans-serif & Friendly' },
     generatedFiles: null,
+    savedBuildId: null,
     status: { message: '', isLoading: false, log: [] },
+};
+
+/**
+ * Rebuilds builder state from localStorage. Generation itself is never persisted
+ * mid-flight, so a state restored at step 4 without files means the run was cut
+ * short (reload/crash) — recover to the theme step rather than a dead spinner.
+ */
+let restoredBuilderCache: WebAppBuilderState | null = null;
+/** Restores once per page load; shared by the builder state and the initial tab. */
+const getRestoredBuilderState = (): WebAppBuilderState => {
+    if (!restoredBuilderCache) restoredBuilderCache = restoreBuilderState();
+    return restoredBuilderCache;
+};
+
+const restoreBuilderState = (): WebAppBuilderState => {
+    const persisted = buildStorage.loadBuilderState();
+    if (!persisted) return initialBuilderState;
+
+    const interrupted = persisted.currentStep === 4 && !persisted.generatedFiles;
+    return {
+        ...initialBuilderState,
+        ...persisted,
+        savedBuildId: persisted.savedBuildId ?? null,
+        currentStep: interrupted ? 3 : persisted.currentStep,
+        status: {
+            isLoading: false,
+            log: [],
+            message: interrupted ? 'That generation was interrupted. Your plan and theme are intact — generate again when ready.' : '',
+        },
+    };
 };
 
 
@@ -130,6 +164,11 @@ interface AppContextType {
     generateWebAppCode: () => Promise<void>;
     loadGeneratedProjectIntoIDE: () => Promise<void>;
     exportGeneratedProject: () => Promise<void>;
+    savedBuilds: SavedBuild[];
+    saveCurrentBuild: (name: string, asCopy?: boolean) => void;
+    loadSavedBuild: (id: string) => void;
+    removeSavedBuild: (id: string) => void;
+    exportSavedBuild: (id: string) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -142,7 +181,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const [editingProject, setEditingProject] = useState<Project | null>(null);
     const [isProjectPanelCollapsed, setIsProjectPanelCollapsed] = useState(false);
     const [analyzingProjects, setAnalyzingProjects] = useState<Set<string>>(new Set());
-    const [activeTab, setActiveTab] = useState<AppTab>('projects');
+    // Land on the builder when a build was in progress, so a reload never looks like data loss.
+    const [activeTab, setActiveTab] = useState<AppTab>(() => getRestoredBuilderState().isActive ? 'tools' : 'projects');
     
     const [useWebSearch, setUseWebSearch] = useState(false);
     const [lowLatencyMode, setLowLatencyMode] = useState(false);
@@ -162,7 +202,27 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     const [globalError, setGlobalError] = useState<string | null>(null);
 
-    const [builderState, setBuilderState] = useState<WebAppBuilderState>(initialBuilderState);
+    const [builderState, setBuilderState] = useState<WebAppBuilderState>(getRestoredBuilderState);
+    const [savedBuilds, setSavedBuilds] = useState<SavedBuild[]>(() => buildStorage.getSavedBuilds());
+
+    // Persist the durable half of builder state. Deliberately keyed on content
+    // fields only — `status` churns on every streaming progress event and must
+    // not trigger a localStorage write per chunk.
+    const { isActive: builderIsActive, currentStep: builderStep, idea: builderIdea,
+            plan: builderPlan, theme: builderTheme, generatedFiles: builderFiles,
+            savedBuildId: builderSavedId } = builderState;
+    useEffect(() => {
+        const failure = buildStorage.saveBuilderState({
+            isActive: builderIsActive,
+            currentStep: builderStep,
+            idea: builderIdea,
+            plan: builderPlan,
+            theme: builderTheme,
+            generatedFiles: builderFiles,
+            savedBuildId: builderSavedId,
+        });
+        if (failure) setGlobalError(failure);
+    }, [builderIsActive, builderStep, builderIdea, builderPlan, builderTheme, builderFiles, builderSavedId]);
 
     useEffect(() => {
         const loadInitialData = async () => {
@@ -427,7 +487,22 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                     return { ...prev, status: { ...prev.status, message, log } };
                 });
             });
-            setBuilderState(prev => ({ ...prev, generatedFiles: files, status: { ...prev.status, isLoading: false, message: 'Generation complete!' }, currentStep: 5 }));
+            // Auto-save immediately so a reload can never lose a finished build.
+            let savedId: string | null = null;
+            try {
+                const saved = buildStorage.saveBuild({
+                    name: builderState.plan?.projectName || 'Untitled build',
+                    idea: builderState.idea,
+                    plan: builderState.plan,
+                    theme: builderState.theme,
+                    generatedFiles: files,
+                });
+                savedId = saved.id;
+                setSavedBuilds(buildStorage.getSavedBuilds());
+            } catch (saveError: any) {
+                setGlobalError(`Build generated, but could not be saved to your library: ${saveError.message}`);
+            }
+            setBuilderState(prev => ({ ...prev, generatedFiles: files, savedBuildId: savedId, status: { ...prev.status, isLoading: false, message: 'Generation complete!' }, currentStep: 5 }));
         } catch (e: any) {
             setGlobalError(`Failed to generate code: ${e.message}`);
             setBuilderState(prev => ({ ...prev, status: { ...prev.status, isLoading: false, message: 'An error occurred during code generation.' }}));
@@ -450,6 +525,52 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         await createProjectZip(builderState.generatedFiles, builderState.plan.projectName);
     };
 
+    // Saved build library
+    const saveCurrentBuild = (name: string, asCopy = false) => {
+        if (!builderState.generatedFiles) return;
+        try {
+            const saved = buildStorage.saveBuild({
+                name: name.trim() || 'Untitled build',
+                idea: builderState.idea,
+                plan: builderState.plan,
+                theme: builderState.theme,
+                generatedFiles: builderState.generatedFiles,
+            }, asCopy ? null : builderState.savedBuildId);
+            setSavedBuilds(buildStorage.getSavedBuilds());
+            setBuilderState(prev => ({ ...prev, savedBuildId: saved.id, status: { ...prev.status, message: `Saved as "${saved.name}"` } }));
+        } catch (e: any) {
+            setGlobalError(e.message);
+        }
+    };
+
+    const loadSavedBuild = (id: string) => {
+        const build = buildStorage.getSavedBuilds().find(b => b.id === id);
+        if (!build) { setGlobalError('That saved build could no longer be found.'); return; }
+        setBuilderState({
+            ...initialBuilderState,
+            isActive: true,
+            currentStep: 5,
+            idea: build.idea ?? '',
+            plan: build.plan,
+            theme: build.theme ?? initialBuilderState.theme,
+            generatedFiles: build.generatedFiles,
+            savedBuildId: build.id,
+            status: { isLoading: false, log: [], message: `Loaded "${build.name}"` },
+        });
+        setActiveTab('tools');
+    };
+
+    const removeSavedBuild = (id: string) => {
+        setSavedBuilds(buildStorage.deleteSavedBuild(id));
+        setBuilderState(prev => prev.savedBuildId === id ? { ...prev, savedBuildId: null } : prev);
+    };
+
+    const exportSavedBuild = async (id: string) => {
+        const build = buildStorage.getSavedBuilds().find(b => b.id === id);
+        if (!build) { setGlobalError('That saved build could no longer be found.'); return; }
+        await createProjectZip(build.generatedFiles, build.name);
+    };
+
     const value = {
         projects, selectedProjectIds, filesByProject, activeProjectView, editingProject, isProjectPanelCollapsed, analyzingProjects,
         activeTab, setActiveTab,
@@ -465,6 +586,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         agents, activeAgentId, handleAddAgent, handleUpdateAgent, handleDeleteAgent, handleSelectAgent,
         globalError, setGlobalError,
         builderState, setBuilderState, startWebAppBuild, resetWebAppBuild, generateWebAppPlan, generateWebAppCode, loadGeneratedProjectIntoIDE, exportGeneratedProject,
+        savedBuilds, saveCurrentBuild, loadSavedBuild, removeSavedBuild, exportSavedBuild,
     };
 
     return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
