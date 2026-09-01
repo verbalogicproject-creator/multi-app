@@ -7,3 +7,6 @@ dist/
 logs/
 .DS_Store
 .vite/
+
+# Per-build memory databases (multi-graph-memory)
+.multi-memory/
