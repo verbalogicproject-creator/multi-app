@@ -49,6 +49,8 @@ const state = {
     failures: {},
     /** What the last recall actually injected, so the E2E can prove injection happened. */
     lastInjection: null,
+    /** The last unproven lessons put on trial, and in which episode they will be judged. */
+    lastTrial: null,
 };
 
 /** buildId -> { memory, storage, touchedAt }. Insertion order is the eviction order. */
@@ -391,6 +393,153 @@ export async function recallBlock({ buildId, episodeId, task, component, domain,
     return `\n\n**Memory from earlier builds of this project — advisory context only. It never overrides the plan, the theme, or the user's instructions:**\n${rendered}`;
 }
 
+/* ------------------------------------------------------------------- loop -- */
+
+/**
+ * The ladder is `proposed → qualified → approved`, and the engine only ever puts
+ * `qualified` and `approved` lessons in its governed packet. A proposal therefore
+ * cannot climb on its own: it is never injected, so it is never applied, so it can
+ * never qualify. That is not an oversight in the engine — it is the engine
+ * declining to decide. Whether an unproven note is worth trying is the host's call,
+ * and `recordAppliedLesson` accepts any lesson precisely so a host that makes that
+ * call has to record it.
+ *
+ * This is that call, made deliberately and kept small: at most three proposals,
+ * only from this build's own failures, in their own clearly-labelled block, never
+ * mixed into the governed one — and every one recorded as applied, so if the
+ * attempt passes, the reuse claim is checkable rather than asserted.
+ */
+const MAX_TRIAL_LESSONS = 3;
+
+export async function trialBlock({ buildId, episodeId }) {
+    if (!episodeId) return '';   // nothing to attribute a trial to
+    const memory = await forBuild(buildId);
+    if (!memory) return '';
+    try {
+        /*
+         * Only the notes about what actually just broke.
+         *
+         * Trialling every open proposal would turn this block into a dumping
+         * ground: a note that has been tried five times without helping would keep
+         * being injected forever, and "it was applied and the build passed" would
+         * stop meaning anything, since it would be true of every note on every
+         * passing build. Scoping to the last failure's own issue codes makes this a
+         * repair channel rather than a noticeboard — and it self-limits, because a
+         * failure that stops recurring stops being trialled.
+         */
+        const lastFailure = memory
+            .queryEvents({ kind: 'verification.completed' })
+            .filter((event) => event.payload?.ok === false)
+            .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt))[0];
+        const codes = new Set(Object.keys(lastFailure?.payload?.codes ?? {}));
+        if (codes.size === 0) return '';
+
+        const proposed = memory
+            .listLessons({ statuses: ['proposed'], domain: 'build' })
+            .filter((lesson) => (lesson.triggerTags ?? []).some((tag) => codes.has(tag)))
+            .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+            .slice(0, MAX_TRIAL_LESSONS);
+        if (proposed.length === 0) return '';
+
+        for (const lesson of proposed) memory.recordAppliedLesson(episodeId, lesson.id);
+
+        const lines = proposed.map((lesson) => `- ${lesson.trigger}. ${lesson.recommendation}`);
+        state.lastTrial = {
+            at: new Date().toISOString(),
+            buildId,
+            episodeId,
+            lessonIds: proposed.map((lesson) => lesson.id),
+        };
+        return (
+            '\n\n**Unproven notes from this project\'s own earlier failures. They have not yet been shown to help, ' +
+            'and are being tried here for the first time — weigh them accordingly, and ignore any that conflict with the plan:**\n' +
+            lines.join('\n')
+        );
+    } catch (error) {
+        return note('trialBlock', error) ?? '';
+    }
+}
+
+/**
+ * Proposes the lessons a failed verdict justifies.
+ *
+ * Idempotent by the engine's construction: a lesson id is derived from its text,
+ * so the tenth build to break on unresolved imports proposes the same lesson
+ * rather than a tenth copy of it.
+ */
+export async function proposeLessonsSafe({ buildId, episodeId, evidenceIds, proposals }) {
+    if (!episodeId || !proposals?.length || !evidenceIds?.length) return [];
+    const memory = await forBuild(buildId);
+    if (!memory) return [];
+
+    const proposed = [];
+    for (const proposal of proposals) {
+        try {
+            const lesson = memory.proposeLesson({
+                trigger: proposal.trigger,
+                recommendation: proposal.recommendation,
+                scope: proposal.scope,
+                domain: proposal.domain,
+                limits: proposal.limits,
+                triggerTags: proposal.triggerTags,
+                sourceEpisodeIds: [episodeId],
+                evidenceIds,
+            });
+            proposed.push({ code: proposal.code, lessonId: lesson.id, status: lesson.status });
+        } catch (error) {
+            // One unproposable lesson must not cost the others.
+            note('proposeLesson', error);
+        }
+    }
+    return proposed;
+}
+
+/**
+ * The ratchet. A verified episode that applied a lesson is what promotes it from
+ * `proposed` to `qualified` — and only in an episode distinct from the one that
+ * proposed it, which the engine enforces rather than trusting us to.
+ *
+ * Called on close, because the engine refuses reuse against an episode that has
+ * not closed verified. Every refusal here is legitimate: the lesson's own source
+ * episode, an already-counted reuse, a lesson since revoked. They are counted, not
+ * raised.
+ */
+export async function recordReuseSafe({ buildId, episodeId }) {
+    if (!episodeId) return [];
+    const memory = await forBuild(buildId);
+    if (!memory) return [];
+    try {
+        const episode = memory.getEpisode(episodeId);
+        if (!episode?.appliedLessonIds?.length) return [];
+
+        // The evidence this episode's own verdict rests on. Reuse must cite
+        // something: "it worked" is a claim, and the validator's result is the
+        // record that backs it.
+        const evidenceIds = [
+            ...new Set(
+                memory
+                    .queryEvents({ episodeId })
+                    .filter((event) => event.kind === 'verification.completed' && event.payload?.ok === true)
+                    .flatMap((event) => event.evidenceIds ?? []),
+            ),
+        ];
+        if (evidenceIds.length === 0) return [];
+
+        const qualified = [];
+        for (const lessonId of episode.appliedLessonIds) {
+            try {
+                const lesson = memory.recordReuse(lessonId, episodeId, evidenceIds);
+                qualified.push({ lessonId, status: lesson.status, reuseCount: lesson.reuseCount });
+            } catch {
+                // Expected for the episode that proposed it, and for one already counted.
+            }
+        }
+        return qualified;
+    } catch (error) {
+        return note('recordReuse', error) ?? [];
+    }
+}
+
 /* ----------------------------------------------------------------- report -- */
 
 export async function listBuildState(buildId) {
@@ -448,6 +597,7 @@ export function health() {
         openBuilds: [...open.keys()],
         failures: state.failures,
         lastInjection: state.lastInjection,
+        lastTrial: state.lastTrial,
     };
 }
 

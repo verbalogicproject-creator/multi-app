@@ -12,6 +12,7 @@ Builder-specific modules worth knowing before changing that flow:
 - `context/AppContext.tsx` — builder state machine, candidate promotion, the evidence trail, and the client-side memory taps.
 - `services/memoryService.ts` — the client's only route to memory. Every function answers `null` rather than throwing.
 - `memory/bridge.js` / `memory/routes.js` — the server's side: one `GraphMemory` per build, and the `/api/memory/*` surface.
+- `memory/proposals.js` — the declared table mapping validator issue codes to lessons. **Adding a validator check means adding a row here or to `NOT_A_LESSON`**; a code in neither is logged as an open question, which is the whole point of the table being data.
 
 Provider layer (`providers/`): `server.js` routes every model call through one interface — `streamChat`, `streamJson`, `generateJson`, `generateText`, each yielding normalized `{text, thinking, toolCalls, usage}` events. **Adding a model is one entry in `providers/catalog.js`**; adding a provider is one adapter plus a line in `providers/index.js`. Capability flags in the catalog (`efforts`, `thinkingStyle`, `maxOutput`, `tools`, `jsonMode`) exist because provider behaviour is genuinely not uniform — an unsupported thinking level, an over-large `max_tokens`, or the wrong reasoning parameter is a hard 400, not a graceful degrade. Verify a new model with `npm run smoke:providers -- <model-id>` before adding it; do not infer capabilities from a sibling model.
 
@@ -23,7 +24,8 @@ Invariants to preserve:
 - **`builderState.memory.episodeId` is non-null only while an episode is open.** Every close path clears it, which is what makes an id still present at startup unambiguously an episode a reload cut short.
 - **Read the memory link from `memoryRef.current`, never from `builderState.memory`, and write it only through `setMemory`.** A handler closes over the state of the render that created it, and a generation opens its episode *during* that handler — so a handler reading state sees the episode id from before it existed. That is not theoretical: it made a verified build fail to close its own episode, which the next reload then recorded as `abandoned`. The same hazard applies to `evidence`, which is why `promoteFiles` takes an `evidenceBase` from the generation that called it.
 - **An event's `domain` must come from the engine's declared vocabulary** (`MemoryDomain` in `services/memoryService.ts`, mirroring the engine's `LESSON_DOMAINS`). An undeclared domain fails schema validation and the whole event is refused — the bridge can only report that as a count, so the union is the thing that catches it.
-- **A verdict is recorded by stable issue `code`, never by message.** Events are immutable; rewording a check must not read downstream as a new kind of failure.
+- **A verdict is recorded by stable issue `code`, never by message.** Events are immutable; rewording a check must not read downstream as a new kind of failure. The codes are also what `memory/proposals.js` keys on and what scopes the trial block, so changing one silently retires a lesson.
+- **Unproven lessons go in their own block, never the governed one.** The engine deliberately excludes `proposed` lessons from its recall; the trial channel in `bridge.trialBlock` is the host choosing to try one anyway, and it is only legitimate because it is bounded, labelled as unproven in the prompt, scoped to the failure that just happened, and recorded via `recordAppliedLesson`. Widening it without keeping all four is how a note nobody verified becomes doctrine.
 
 ## Build, Test, and Development Commands
 
@@ -41,7 +43,7 @@ Follow the existing TypeScript/React style: four-space indentation, semicolons, 
 
 ## Testing Guidelines
 
-There is no test runner wired into `package.json` yet. Before submitting changes, run `npx tsc --noEmit` and `npm run build`, then exercise the affected chat, upload, streaming or builder flows with both processes running.
+There is no test runner wired into `package.json` yet, but `npm run check:memory-loop` is a real check and should stay green: it drives the whole learning ladder on a throwaway database with no model, no server and no key. Before submitting changes, run `npx tsc --noEmit` and `npm run build`, then exercise the affected chat, upload, streaming or builder flows with both processes running.
 
 The pure modules (`utils/validateBuild.ts`, `utils/palettes.ts`, `utils/designContract.ts`, `services/buildStorage.ts`) are deliberately dependency-free and have been verified by bundling them with the local `esbuild` binary and running assertions under Node with a `localStorage` shim — a practical pattern on this device, where a browser test runner is impractical. If you add a runner, prefer colocated `*.test.ts` files and add the command here.
 
