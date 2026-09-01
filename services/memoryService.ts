@@ -194,20 +194,61 @@ export const record = (
     void post('/api/memory/events', { buildId: id, episodeId, events, evidence });
 };
 
+/**
+ * The engine's records, as the panel needs to read them. Mirrored rather than
+ * imported: the engine is a server-side dependency and the browser never loads
+ * it, so this is the seam where its shapes become this app's problem.
+ */
+export type LessonStatus = 'proposed' | 'qualified' | 'approved' | 'contradicted' | 'revoked';
+
+export interface Lesson {
+    id: string;
+    status: LessonStatus;
+    trigger: string;
+    recommendation: string;
+    domain: MemoryDomain;
+    scope: string[];
+    limits: string[];
+    sourceEpisodeIds: string[];
+    reuseEpisodeId?: string;
+    evidenceIds: string[];
+    contradictionIds: string[];
+    reuseCount: number;
+    createdAt: string;
+    approvedBy?: string;
+    approvedByHumanAt?: string;
+    revokedAt?: string;
+    revokedReason?: string;
+}
+
+export interface Episode {
+    id: string;
+    objective: string;
+    outcome?: EpisodeOutcome;
+    provider?: string;
+    model?: string;
+    openedAt: string;
+    closedAt?: string;
+    appliedLessonIds: string[];
+}
+
+export interface MemoryHealth {
+    available: boolean;
+    probed: boolean;
+    reason: string | null;
+    databaseDir: string;
+    openBuilds: string[];
+    failures: Record<string, { message: string; at: string }>;
+    lastInjection: unknown;
+    lastTrial: unknown;
+}
+
 export interface MemoryStateResponse {
-    health: {
-        available: boolean;
-        probed: boolean;
-        reason: string | null;
-        databaseDir: string;
-        openBuilds: string[];
-        failures: unknown[];
-        lastInjection: unknown;
-    };
+    health: MemoryHealth;
     build: {
         buildId: string;
-        episodes: unknown[];
-        lessons: unknown[];
+        episodes: Episode[];
+        lessons: Lesson[];
         evidenceCount: number;
         eventCount: number;
     } | null;
@@ -226,4 +267,45 @@ export const getState = async (buildId?: string | null): Promise<MemoryStateResp
     } finally {
         clearTimeout(timer);
     }
+};
+
+const APPROVER_KEY = 'multi_memory_approver';
+
+/** The approver's name. The engine requires one and never defaults it. */
+export const getApprover = (): string => {
+    try { return localStorage.getItem(APPROVER_KEY) ?? ''; } catch { return ''; }
+};
+
+export const setApprover = (name: string): void => {
+    try { localStorage.setItem(APPROVER_KEY, name.trim()); } catch { /* private mode */ }
+};
+
+export interface ApprovalResult {
+    ok: boolean;
+    lesson?: Lesson;
+    message?: string;
+}
+
+/**
+ * The human gate, and the only call in this module that is awaited for its answer.
+ *
+ * A refusal is not a fault: the engine declines to approve a lesson that has not
+ * qualified, and says why. That sentence is the answer to a legitimate question,
+ * so it is returned rather than swallowed like the fire-and-forget taps.
+ */
+export const approveLesson = async (
+    buildId: string | null,
+    lessonId: string,
+    approvedBy: string,
+): Promise<ApprovalResult> => {
+    const id = usableBuildId(buildId);
+    if (!id) return { ok: false, message: 'Memory is unavailable for this build.' };
+    const name = approvedBy.trim();
+    if (!name) return { ok: false, message: 'An approver name is required.' };
+
+    const result = await post<ApprovalResult>(
+        `/api/memory/lessons/${encodeURIComponent(lessonId)}/approve`,
+        { buildId: id, approvedBy: name },
+    );
+    return result ?? { ok: false, message: 'Memory did not answer. Nothing was approved.' };
 };
