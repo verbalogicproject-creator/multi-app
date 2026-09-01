@@ -4,6 +4,7 @@ import * as storageService from '../services/geminiService';
 import * as apiService from '../services/apiService';
 import * as buildStorage from '../services/buildStorage';
 import type { SavedBuild } from '../services/buildStorage';
+import { DEFAULT_PALETTE, sanitizeColors, type ArtDirection, type ThemeColors } from '../utils/palettes';
 import { generateUniqueId } from '../utils/common';
 import { createProjectZip } from '../utils/export';
 
@@ -16,8 +17,10 @@ export interface WebAppBuilderState {
     theme: {
         palette: string;
         typography: string;
+        colors?: ThemeColors;      // concrete tokens; absent on builds saved before the token picker
     };
     generatedFiles: Record<string, string> | null;
+    artDirections: ArtDirection[] | null;
     savedBuildId: string | null;   // links this build to its entry in the saved library
     status: {
         message: string;
@@ -31,8 +34,9 @@ const initialBuilderState: WebAppBuilderState = {
     currentStep: 0,
     idea: '',
     plan: null,
-    theme: { palette: 'Modern & Minimal', typography: 'Sans-serif & Friendly' },
+    theme: { palette: DEFAULT_PALETTE.name, typography: 'Sans-serif & Friendly', colors: DEFAULT_PALETTE.colors },
     generatedFiles: null,
+    artDirections: null,
     savedBuildId: null,
     status: { message: '', isLoading: false, log: [] },
 };
@@ -57,6 +61,14 @@ const restoreBuilderState = (): WebAppBuilderState => {
     return {
         ...initialBuilderState,
         ...persisted,
+        // Stored tokens are re-validated: a hand-edited or truncated value must not
+        // reach the preview or the code generator.
+        theme: {
+            ...initialBuilderState.theme,
+            ...persisted.theme,
+            colors: persisted.theme?.colors ? sanitizeColors(persisted.theme.colors) : initialBuilderState.theme.colors,
+        },
+        artDirections: Array.isArray(persisted.artDirections) ? persisted.artDirections : null,
         savedBuildId: persisted.savedBuildId ?? null,
         currentStep: interrupted ? 3 : persisted.currentStep,
         status: {
@@ -162,6 +174,7 @@ interface AppContextType {
     resetWebAppBuild: () => void;
     generateWebAppPlan: () => Promise<void>;
     refineWebAppPlan: (currentPlan: any, feedback: string) => Promise<void>;
+    suggestArtDirections: () => Promise<void>;
     generateWebAppCode: () => Promise<void>;
     loadGeneratedProjectIntoIDE: () => Promise<void>;
     exportGeneratedProject: () => Promise<void>;
@@ -211,7 +224,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     // not trigger a localStorage write per chunk.
     const { isActive: builderIsActive, currentStep: builderStep, idea: builderIdea,
             plan: builderPlan, theme: builderTheme, generatedFiles: builderFiles,
-            savedBuildId: builderSavedId } = builderState;
+            artDirections: builderDirections, savedBuildId: builderSavedId } = builderState;
     useEffect(() => {
         const failure = buildStorage.saveBuilderState({
             isActive: builderIsActive,
@@ -220,10 +233,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             plan: builderPlan,
             theme: builderTheme,
             generatedFiles: builderFiles,
+            artDirections: builderDirections,
             savedBuildId: builderSavedId,
         });
         if (failure) setGlobalError(failure);
-    }, [builderIsActive, builderStep, builderIdea, builderPlan, builderTheme, builderFiles, builderSavedId]);
+    }, [builderIsActive, builderStep, builderIdea, builderPlan, builderTheme, builderFiles, builderDirections, builderSavedId]);
 
     useEffect(() => {
         const loadInitialData = async () => {
@@ -470,6 +484,29 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             setBuilderState(prev => ({ ...prev, status: { ...prev.status, isLoading: false, message: 'An error occurred.' }}));
         }
     };
+    /** Asks Gemini for three distinct visual directions for the current project. */
+    const suggestArtDirections = async () => {
+        setBuilderState(prev => ({ ...prev, status: { ...prev.status, isLoading: true, message: 'Exploring art directions…' } }));
+        try {
+            const raw = await apiService.suggestArtDirections(
+                builderState.idea,
+                builderState.plan,
+                selectedModel === 'auto' ? undefined : selectedModel,
+            );
+            // Model output is untrusted: every colour is re-validated as hex before use.
+            const artDirections: ArtDirection[] = raw.slice(0, 3).map((d: any) => ({
+                name: String(d?.name ?? 'Untitled direction'),
+                rationale: String(d?.rationale ?? ''),
+                typography: String(d?.typography ?? 'Sans-serif & Friendly'),
+                colors: sanitizeColors(d?.colors),
+            }));
+            setBuilderState(prev => ({ ...prev, artDirections, status: { ...prev.status, isLoading: false, message: '' } }));
+        } catch (e: any) {
+            setGlobalError(`Failed to suggest art directions: ${e.message}`);
+            setBuilderState(prev => ({ ...prev, status: { ...prev.status, isLoading: false, message: '' } }));
+        }
+    };
+
     /** Sends the current (possibly hand-edited) plan back to Gemini with change requests. */
     const refineWebAppPlan = async (currentPlan: any, feedback: string) => {
         setBuilderState(prev => ({ ...prev, status: { ...prev.status, isLoading: true, message: 'Revising the blueprint…' } }));
@@ -602,7 +639,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         activePersona, setActivePersona,
         agents, activeAgentId, handleAddAgent, handleUpdateAgent, handleDeleteAgent, handleSelectAgent,
         globalError, setGlobalError,
-        builderState, setBuilderState, startWebAppBuild, resetWebAppBuild, generateWebAppPlan, refineWebAppPlan, generateWebAppCode, loadGeneratedProjectIntoIDE, exportGeneratedProject,
+        builderState, setBuilderState, startWebAppBuild, resetWebAppBuild, generateWebAppPlan, refineWebAppPlan, suggestArtDirections, generateWebAppCode, loadGeneratedProjectIntoIDE, exportGeneratedProject,
         savedBuilds, saveCurrentBuild, loadSavedBuild, removeSavedBuild, exportSavedBuild,
     };
 

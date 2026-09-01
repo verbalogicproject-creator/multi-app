@@ -85,6 +85,17 @@ export const updateProjectDependencies = async (project: Project, files: Project
 };
 
 // Web App Builder API Calls
+export const suggestArtDirections = async (idea: string, plan: any, model?: string): Promise<any[]> => {
+    const response = await fetch('/api/builder/directions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idea, plan, model }),
+    });
+    if (!response.ok) { const error = await response.json().catch(() => ({})); throw new Error(error.message || 'Failed to suggest art directions.'); }
+    const data = await response.json();
+    return Array.isArray(data?.directions) ? data.directions : [];
+};
+
 export const generateWebAppPlan = async (idea: string, model?: string, refine?: { previousPlan: any; feedback: string }): Promise<any> => {
     const response = await fetch('/api/builder/plan', {
         method: 'POST',
