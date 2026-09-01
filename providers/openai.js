@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import { normalizeEffort } from './effort.js';
+import { maxOutputFor } from './catalog.js';
 
 // OpenAI adapter, built on the Responses API (the current surface for reasoning
 // and tool use). Verified live: `text.format` json_schema strict and `tools` may
@@ -70,7 +71,7 @@ export const createOpenAIProvider = ({ apiKey, baseURL, id = 'openai' }) => {
 
     const requestFor = (model, effort, maxOutputTokens, extra = {}) => ({
         model,
-        max_output_tokens: maxOutputTokens,
+        max_output_tokens: maxOutputFor(model, maxOutputTokens),
         // `none` is a real effort level here, so it passes through unclamped.
         reasoning: { effort: normalizeEffort(effort), summary: 'auto' },
         ...extra,

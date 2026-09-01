@@ -1,6 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
 import { geminiThinking, clampEffort } from './effort.js';
-import { supportedEfforts } from './catalog.js';
+import { supportedEfforts, maxOutputFor } from './catalog.js';
 
 // Google adapter. Behaviour is deliberately identical to the pre-adapter server:
 // same chat/stream calls, same tool declarations, same JSON config — only the
@@ -44,7 +44,7 @@ export const createGoogleProvider = ({ apiKey }) => {
 
     const configFor = (model, effort, maxOutputTokens, extra = {}) => {
         const config = { ...extra };
-        if (maxOutputTokens) config.maxOutputTokens = maxOutputTokens;
+        if (maxOutputTokens) config.maxOutputTokens = maxOutputFor(model, maxOutputTokens);
         const normalized = clampEffort(effort, supportedEfforts(model));
         const thinking = geminiThinking(normalized);
         // includeThoughts is only valid while thinking is on: asking for thought

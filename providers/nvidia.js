@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import { nvidiaReasoning, normalizeEffort } from './effort.js';
+import { maxOutputFor } from './catalog.js';
 
 // NVIDIA NIM adapter. The endpoint is OpenAI-compatible, so it reuses the OpenAI
 // SDK with a base-URL swap — but it speaks Chat Completions, not the Responses
@@ -68,7 +69,8 @@ export const createNvidiaProvider = ({ apiKey }) => {
         const { enableThinking, maxTokens } = nvidiaReasoning(normalizeEffort(effort), maxOutputTokens);
         return {
             model,
-            max_tokens: maxTokens,
+            // The reasoning headroom must still respect the model's hard ceiling.
+            max_tokens: maxOutputFor(model, maxTokens),
             chat_template_kwargs: { thinking: enableThinking, enable_thinking: enableThinking },
             ...extra,
         };

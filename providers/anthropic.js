@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { anthropicEffort, anthropicBudget, clampEffort } from './effort.js';
-import { thinkingStyle } from './catalog.js';
+import { thinkingStyle, maxOutputFor } from './catalog.js';
 
 // Anthropic adapter.
 //
@@ -77,7 +77,8 @@ export const createAnthropicProvider = ({ apiKey }) => {
     };
 
     /** Merges reasoning config with any output_config the caller needs (e.g. a schema). */
-    const buildRequest = (model, effort, maxTokens, extra = {}) => {
+    const buildRequest = (model, effort, requestedTokens, extra = {}) => {
+        const maxTokens = maxOutputFor(model, requestedTokens);
         const reasoning = reasoningFor(model, effort, maxTokens);
         const outputConfig = { ...(reasoning.output_config ?? {}), ...(extra.output_config ?? {}) };
         return {
