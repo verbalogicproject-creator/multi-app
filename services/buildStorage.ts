@@ -17,6 +17,7 @@ export interface PersistedBuilderState {
     candidateFiles?: Record<string, string> | null;
     validation?: any | null;
     artDirections?: any[] | null;
+    evidence?: { ts: number; event: string }[];
     savedBuildId?: string | null;
 }
 
@@ -29,6 +30,8 @@ export interface SavedBuild {
     theme: any;
     generatedFiles: Record<string, string>;
     evidence?: { ts: number; event: string }[];
+    /** Verdict recorded when the build was saved, so the shelf can show it. */
+    validation?: { ok: boolean; issues: { severity: string; message: string; file?: string }[]; checked: number } | null;
 }
 
 const isQuotaError = (e: unknown): boolean =>
@@ -105,7 +108,7 @@ const writeSavedBuilds = (builds: SavedBuild[]): SavedBuild[] => {
 
 /** Creates a new saved build (or updates the one matching `existingId`). */
 export const saveBuild = (
-    input: { name: string; idea: string; plan: any; theme: any; generatedFiles: Record<string, string>; evidence?: { ts: number; event: string }[] },
+    input: { name: string; idea: string; plan: any; theme: any; generatedFiles: Record<string, string>; evidence?: { ts: number; event: string }[]; validation?: SavedBuild['validation'] },
     existingId?: string | null,
 ): SavedBuild => {
     const builds = getSavedBuilds();

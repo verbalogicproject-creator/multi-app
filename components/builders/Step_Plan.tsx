@@ -31,7 +31,7 @@ const removeBtnClass = "px-2 text-gray-500 hover:text-red-400 text-lg leading-no
 const addBtnClass = "mt-2 w-full py-1.5 border border-dashed border-gray-600 text-gray-400 text-xs rounded-md hover:border-sky-500 hover:text-sky-400";
 
 const Step_Plan: React.FC = () => {
-    const { builderState, setBuilderState, refineWebAppPlan } = useAppContext();
+    const { builderState, setBuilderState, refineWebAppPlan, recordEvidence } = useAppContext();
     const { plan, status } = builderState;
 
     const [draft, setDraft] = useState<DraftPlan>(() => toDraft(plan));
@@ -54,6 +54,8 @@ const Step_Plan: React.FC = () => {
         update({ components: draft.components.map((c, i) => i === index ? { ...c, ...patch } : c) });
 
     const handleApprove = () => {
+        if (isDirty) recordEvidence('Blueprint hand-edited before approval');
+        recordEvidence(`Blueprint approved — ${draft.pages.length} pages, ${draft.components.length} components, ${draft.acceptanceCriteria.length} acceptance criteria`);
         setBuilderState(prev => ({
             ...prev,
             plan: { ...prev.plan, ...draft },
