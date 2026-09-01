@@ -41,6 +41,8 @@ export interface Message {
     toolCall?: ToolCall;
     toolResponse?: ToolResponse;
     groundingMetadata?: GroundingMetadata[];
+    /** Reasoning summary streamed by providers that expose one. */
+    thinking?: string;
     // For regenerating video with the same seed/params
     regenerationData?: any;
 }

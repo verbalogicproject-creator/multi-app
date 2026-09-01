@@ -115,6 +115,7 @@ export const useChat = (
         
         let currentResponse: Message | null = null;
         let accumulatedText = '';
+        let accumulatedThinking = '';
         let accumulatedFunctionCalls: ToolCall[] = [];
 
         const handleChunkLine = (jsonChunk: string) => {
@@ -132,6 +133,11 @@ export const useChat = (
 
                 if(chunk.functionCalls) {
                     accumulatedFunctionCalls.push(...chunk.functionCalls);
+                }
+
+                if (chunk.thinking) {
+                    accumulatedThinking += chunk.thinking;
+                    currentResponse.thinking = accumulatedThinking;
                 }
 
                 if (chunk.groundingMetadata) {
