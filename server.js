@@ -354,6 +354,12 @@ app.post('/api/analyze-dependencies', async (req, res) => {
 // Transient-failure resilience: retry with backoff on 429/503, then fall back to the
 // next model in the list. Used by the builder endpoints (3.7-flash spikes under demand).
 const TRANSIENT_STATUSES = new Set([429, 503]);
+// NVIDIA reports capacity exhaustion as a plain Error with no status field
+// ("ResourceExhausted: Worker local total request limit reached"), so matching on
+// status alone would treat a retryable condition as fatal.
+const TRANSIENT_MESSAGE = /resourceexhausted|worker local total request limit|temporarily unavailable|overloaded|capacity/i;
+const isTransient = (error) =>
+    TRANSIENT_STATUSES.has(error?.status) || TRANSIENT_MESSAGE.test(String(error?.message ?? ''));
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 async function withModelFallback(models, attempt) {
     let lastError;
@@ -367,8 +373,8 @@ async function withModelFallback(models, attempt) {
                 return result;
             } catch (error) {
                 lastError = error;
-                if (!TRANSIENT_STATUSES.has(error?.status)) throw error;
-                console.warn(`Transient ${error.status} from ${model} (attempt ${tryNo + 1}), backing off...`);
+                if (!isTransient(error)) throw error;
+                console.warn(`Transient failure from ${model} (attempt ${tryNo + 1}): ${String(error.message).slice(0, 80)} — backing off...`);
                 await sleep(2000 * (tryNo + 1));
             }
         }
@@ -377,8 +383,8 @@ async function withModelFallback(models, attempt) {
 }
 const builderModelChain = (requested) => modelChain(pickModel(requested, MODELS.builder), MODELS.coding);
 const friendlyProviderError = (error, fallbackMessage) =>
-    TRANSIENT_STATUSES.has(error?.status)
-        ? `The model is temporarily overloaded (HTTP ${error.status}). Please try again in a minute.`
+    isTransient(error)
+        ? `The model is temporarily overloaded${error?.status ? ` (HTTP ${error.status})` : ''}. Please try again in a minute, or pick a different model.`
         : fallbackMessage;
 
 // Web App Builder - Step 1: Plan
