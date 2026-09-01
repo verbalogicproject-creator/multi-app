@@ -191,9 +191,11 @@ node bin/multi-memory.ts --build <buildId> events --limit 20
 node bin/multi-memory.ts --build <buildId> attribution
 ```
 
-`--build` creates a cluster it does not find, so a mistyped id answers "No
-episodes recorded" rather than "no such build". Check the id against
-`.multi-memory/` before concluding a run recorded nothing.
+A build id with no database is refused by name and lists the ids that do exist,
+so "No episodes recorded" always means a build that genuinely recorded nothing.
+The server prints its database directory at boot for the same reason — the port
+may already be taken, and the process answering your requests is then not the one
+you started.
 
 ## Roadmap
 

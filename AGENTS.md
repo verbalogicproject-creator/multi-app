@@ -46,7 +46,9 @@ The pure modules (`utils/validateBuild.ts`, `utils/palettes.ts`, `utils/designCo
 
 When touching generation, verify against the live API rather than trusting types: check that acceptance criteria and theme tokens actually appear in generated output, and that the validator does not fire on real (good) model output.
 
-The memory lifecycle needs **no model and no key** to verify: `/api/memory/*` calls no provider. Start the backend on a spare port with a scratch database directory (`PORT=8177 MEMORY_DB_DIR=/tmp/scratch npm start` — check the port is free, since `EADDRINUSE` silently sends your requests to whichever server already owns it and whatever database *it* was started with), replay the open → events → close sequence over HTTP, then read it back with `multi-memory --build <id> episode list`. A refused event returns a reason in `rejected`, and the bridge's last failure is on `/api/memory/state`.
+The memory lifecycle needs **no model and no key** to verify: `/api/memory/*` calls no provider. Start the backend on a spare port with a scratch database directory (`PORT=8177 MEMORY_DB_DIR=/tmp/scratch npm start`), replay the open → events → close sequence over HTTP, then read it back with `multi-memory --build <id> episode list`.
+
+Read the two boot lines before trusting a run. A second server on an occupied port dies with `EADDRINUSE` while the one already there keeps answering — writing to whatever database *it* was started with — so the server prints `Memory databases: <dir>` alongside its port, and `/api/memory/state` reports the same `databaseDir`. A refused event comes back with the engine's own reason in `rejected[].reason`, naming the field it rejected and the vocabulary it wanted; the bridge's last failure is also on `/api/memory/state`.
 
 ## Commit & Pull Request Guidelines
 

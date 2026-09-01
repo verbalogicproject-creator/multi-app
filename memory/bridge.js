@@ -54,8 +54,10 @@ const state = {
 /** buildId -> { memory, storage, touchedAt }. Insertion order is the eviction order. */
 const open = new Map();
 
+const reasonOf = (error) => String(error?.message ?? error).slice(0, 300);
+
 const note = (operation, error) => {
-    const message = String(error?.message ?? error).slice(0, 300);
+    const message = reasonOf(error);
     state.failures[operation] = { message, at: new Date().toISOString() };
     console.warn(`[memory] ${operation} failed: ${message}`);
     return null;
@@ -235,10 +237,18 @@ export async function closeEpisodeSafe({ buildId, episodeId, outcome, attributio
     }
 }
 
-/** Appends one event. `kind` and the identity fields are the caller's responsibility. */
+/**
+ * Appends one event. `kind` and the identity fields are the caller's responsibility.
+ *
+ * Answers `{ event, reason }` rather than the event or null, because a refusal is
+ * the interesting case and a null discards the only explanation of it. The engine
+ * says which field it rejected and what it would have accepted; that sentence is
+ * worth carrying back to whoever posted the event. Callers that do not care
+ * (the server's own fire-and-forget taps) simply ignore the answer.
+ */
 export async function appendEventSafe({ buildId, episodeId, kind, payload, evidenceIds, ...rest }) {
     const memory = await forBuild(buildId);
-    if (!memory) return null;
+    if (!memory) return { event: null, reason: `memory is unavailable for build "${buildId}"` };
     try {
         const result = memory.appendEvent({
             kind,
@@ -263,9 +273,10 @@ export async function appendEventSafe({ buildId, episodeId, kind, payload, evide
             payload: payload ?? {},
             evidenceIds: evidenceIds ?? [],
         });
-        return result.event;
+        return { event: result.event, reason: null };
     } catch (error) {
-        return note('appendEvent', error);
+        note('appendEvent', error);
+        return { event: null, reason: reasonOf(error) };
     }
 }
 
