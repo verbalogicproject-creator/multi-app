@@ -38,7 +38,7 @@ const ImageEditorPane: React.FC<ImageEditorPaneProps> = (props) => {
 
   return (
     <form onSubmit={onSubmit} className="flex flex-col items-center gap-4">
-      <div className="text-sm text-gray-400">
+      <div className="text-sm text-metal-300">
         Style Presets:
         <div className="flex flex-wrap gap-2 mt-1">
           {stylePresets.map(style => (
@@ -46,7 +46,7 @@ const ImageEditorPane: React.FC<ImageEditorPaneProps> = (props) => {
               key={style.name}
               type="button"
               onClick={() => applyStyle(style.prompt)}
-              className="px-3 py-1 bg-gray-700 text-gray-300 rounded-md text-xs hover:bg-sky-600 transition-colors"
+              className="px-3 py-1 bg-metal-700 text-metal-300 rounded-md text-xs md:hover:bg-[#33333a] transition-colors"
             >
               {style.name}
             </button>
@@ -68,13 +68,13 @@ const ImageEditorPane: React.FC<ImageEditorPaneProps> = (props) => {
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             placeholder="Describe your edits..."
-            className="w-full p-3 bg-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
+            className="w-full p-3 bg-metal-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-accent"
             disabled={isLoading}
           />
           <button
             type="submit"
             disabled={isLoading || !prompt.trim() || !(uploadedFile || externalPreviewUrl)}
-            className="bg-sky-600 text-white p-3 rounded-lg hover:bg-sky-500 disabled:bg-gray-600 transition-colors"
+            className="bg-raised text-metal-100 p-3 rounded-lg md:hover:bg-[#33333a] disabled:bg-metal-700 transition-colors"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
           </button>
