@@ -361,7 +361,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const { buildId, episodeId } = getRestoredBuilderState().memory;
         if (!buildId || !episodeId) return;
         memoryService.closeEpisode(buildId, episodeId, 'abandoned');
-        setBuilderState(prev => ({ ...prev, memory: { ...prev.memory, episodeId: null, lastOutcome: 'abandoned' } }));
+        setMemory({ episodeId: null, lastOutcome: 'abandoned' });
     }, []);
 
     useEffect(() => {
@@ -618,26 +618,53 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         return entry ? { provider: entry.provider, model: entry.id } : { model };
     };
 
+    /**
+     * The memory link, mirrored where an async handler can actually read it.
+     *
+     * A handler closes over the `builderState` of the render that created it. A
+     * generation opens its episode *during* that handler — after that render — so
+     * `promoteFiles`, called at the end of the very generation that opened the
+     * episode, would read the id from before it existed and close nothing. A
+     * successful build would leave its episode open, to be found and marked
+     * `abandoned` by the next reload: the exact inverse of what it was.
+     *
+     * Every tap therefore reads the ref, and the ref is written at the same moment
+     * the state is.
+     */
+    const memoryRef = useRef(builderState.memory);
+
+    /** Writes the link to the ref (read now) and to state (rendered, persisted). */
+    const setMemory = (patch: Partial<WebAppBuilderState['memory']>) => {
+        memoryRef.current = { ...memoryRef.current, ...patch };
+        setBuilderState(prev => ({ ...prev, memory: { ...prev.memory, ...patch } }));
+    };
+
+    // Deliberately NOT synchronised back from state by an effect. Every write to the
+    // link goes through `setMemory`, or through an explicit assignment beside a
+    // wholesale replacement, so the ref is never behind — and an effect copying
+    // state over it would run after the orphan closer on mount and restore the very
+    // episode id that closer had just cleared.
+
     /** Records events against whatever episode this build currently has open. */
     const recordMemory = (events: MemoryEvent[], evidence: MemoryEvidence[] = []) => {
-        memoryService.record(builderState.memory.buildId, builderState.memory.episodeId, events, evidence);
+        memoryService.record(memoryRef.current.buildId, memoryRef.current.episodeId, events, evidence);
     };
 
     /** Abandons an episode this build left open, if any. A no-op when there is none. */
     const abandonOpenEpisode = () => {
-        const { buildId, episodeId, servingModel } = builderState.memory;
+        const { buildId, episodeId, servingModel } = memoryRef.current;
         memoryService.closeEpisode(buildId, episodeId, 'abandoned', attributionFor(servingModel));
     };
 
     const startWebAppBuild = () => {
         abandonOpenEpisode();   // starting over abandons whatever the last build left open
-        setBuilderState({
-            ...initialBuilderState, isActive: true, currentStep: 1,
-            memory: { buildId: memoryService.newBuildId(), episodeId: null, lastOutcome: null, servingModel: null },
-        });
+        const memory = { buildId: memoryService.newBuildId(), episodeId: null, lastOutcome: null, servingModel: null };
+        memoryRef.current = memory;
+        setBuilderState({ ...initialBuilderState, isActive: true, currentStep: 1, memory });
     };
     const resetWebAppBuild = () => {
         abandonOpenEpisode();
+        memoryRef.current = initialBuilderState.memory;
         setBuilderState(initialBuilderState);
     };
     const generateWebAppPlan = async () => {
@@ -647,7 +674,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 builderState.idea,
                 selectedModel === 'auto' ? undefined : selectedModel,
                 undefined,
-                builderState.memory,
+                memoryRef.current,
             );
             bumpQuotaTick();
             setBuilderState(prev => ({
@@ -668,7 +695,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 builderState.idea,
                 builderState.plan,
                 selectedModel === 'auto' ? undefined : selectedModel,
-                builderState.memory,
+                memoryRef.current,
             );
             // Model output is untrusted: every colour is re-validated as hex before use.
             const artDirections: ArtDirection[] = raw.slice(0, 3).map((d: any) => ({
@@ -697,7 +724,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 builderState.idea,
                 selectedModel === 'auto' ? undefined : selectedModel,
                 { previousPlan: currentPlan, feedback },
-                builderState.memory,
+                memoryRef.current,
             );
             bumpQuotaTick();
             setBuilderState(prev => ({
@@ -737,15 +764,23 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     /**
      * Adopts a file set as the build: saves it and advances to export.
      *
-     * `servedModelId` is passed in by the generation that produced these files,
-     * because state written moments earlier is not yet visible in this closure. The
-     * stored value is the fallback for the other caller, where the decision is a
-     * human one taken later — possibly after a reload.
+     * `servedModelId` and `evidenceBase` are passed in by the generation that
+     * produced these files, because state written moments earlier is not visible in
+     * this closure. Without the base, the "Generation requested — style X" line this
+     * very run had just added was overwritten here and lost from the saved build.
+     * Both fall back to state for the other caller, where the decision is a human
+     * one taken later — possibly after a reload.
      */
-    const promoteFiles = (files: Record<string, string>, validation: BuildValidation, note: string, servedModelId?: string | null) => {
-        const evidence = withEvidence(builderState.evidence, note);
-        const { buildId, episodeId } = builderState.memory;
-        const model = servedModelId ?? builderState.memory.servingModel;
+    const promoteFiles = (
+        files: Record<string, string>,
+        validation: BuildValidation,
+        note: string,
+        servedModelId?: string | null,
+        evidenceBase?: BuildEvent[],
+    ) => {
+        const evidence = withEvidence(evidenceBase ?? builderState.evidence, note);
+        const { buildId, episodeId } = memoryRef.current;
+        const model = servedModelId ?? memoryRef.current.servingModel;
         let savedId: string | null = null;
         try {
             const saved = buildStorage.saveBuild({
@@ -786,6 +821,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         }]);
         memoryService.closeEpisode(buildId, episodeId, outcome, attributionFor(model));
 
+        setMemory({ episodeId: null, lastOutcome: outcome, servingModel: model });
         setBuilderState(prev => ({
             ...prev,
             generatedFiles: files,
@@ -793,7 +829,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             validation,
             evidence,
             savedBuildId: savedId,
-            memory: { ...prev.memory, episodeId: null, lastOutcome: outcome, servingModel: model },
             status: { ...prev.status, isLoading: false, message: 'Generation complete!' },
             currentStep: 5,
         }));
@@ -816,7 +851,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     /** Throws away a failed candidate and returns to the theme step. */
     const discardCandidate = () => {
-        const { buildId, episodeId, servingModel } = builderState.memory;
+        const { buildId, episodeId, servingModel } = memoryRef.current;
         const validation = builderState.validation;
         memoryService.record(buildId, episodeId, [{
             kind: 'human.decision',
@@ -831,23 +866,26 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         }]);
         memoryService.closeEpisode(buildId, episodeId, 'failed', attributionFor(servingModel));
 
+        setMemory({ episodeId: null, lastOutcome: 'failed' });
         setBuilderState(prev => ({
             ...prev,
             candidateFiles: null,
             validation: null,
             currentStep: 3,
             evidence: withEvidence(prev.evidence, 'Candidate discarded; previous build left untouched'),
-            memory: { ...prev.memory, episodeId: null, lastOutcome: 'failed' },
             status: { ...prev.status, isLoading: false, message: 'Candidate discarded. Your previous build is untouched.' },
         }));
     };
 
     const generateWebAppCode = async () => {
         const theme = builderState.theme;
-        const { buildId, lastOutcome } = builderState.memory;
+        const { buildId, lastOutcome } = memoryRef.current;
+        // Kept, because promoteFiles cannot see state written after this render and
+        // would otherwise write a trail with this line missing.
+        const requested = withEvidence(builderState.evidence, `Generation requested — style "${theme.palette}" / ${theme.typography}`);
         setBuilderState(prev => ({
             ...prev, currentStep: 4, candidateFiles: null, validation: null,
-            evidence: withEvidence(prev.evidence, `Generation requested — style "${theme.palette}" / ${theme.typography}`),
+            evidence: requested,
             status: { isLoading: true, message: 'Contacting Gemini…', log: [] },
         }));
 
@@ -862,7 +900,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             `generate ${builderState.plan?.projectName ?? 'a web application'} — style "${theme.palette}" / ${theme.typography}`,
             builderState.savedBuildId,
         );
-        setBuilderState(prev => ({ ...prev, memory: { ...prev.memory, episodeId } }));
+        setMemory({ episodeId });
 
         // A generation that follows a failed or discarded one is a repair, and saying
         // so is the only thing that later distinguishes a first try from a retry.
@@ -935,27 +973,27 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             if (!validation.ok) {
                 // The episode stays open: a held candidate is a decision still pending,
                 // and it is that decision — keep or discard — that closes it.
+                setMemory({ servingModel: servedModelId });
                 setBuilderState(prev => ({
                     ...prev,
                     candidateFiles: files,
                     validation,
                     evidence: withEvidence(prev.evidence, `${servingModel} wrote ${fileCount} files — validation failed with ${errors} error${errors === 1 ? '' : 's'}, held for review`),
-                    memory: { ...prev.memory, servingModel: servedModelId },
                     status: { ...prev.status, isLoading: false, message: 'Generation finished, but the result did not pass validation.' },
                 }));
                 return;
             }
             const warnings = validation.issues.length;
-            promoteFiles(files, validation, `${servingModel} wrote ${fileCount} files — validation passed${warnings ? ` with ${warnings} warning${warnings === 1 ? '' : 's'}` : ''}`, servedModelId);
+            promoteFiles(files, validation, `${servingModel} wrote ${fileCount} files — validation passed${warnings ? ` with ${warnings} warning${warnings === 1 ? '' : 's'}` : ''}`, servedModelId, requested);
         } catch (e: any) {
             setGlobalError(`Failed to generate code: ${e.message}`);
             // An attempt that threw is over, and an episode left open would be joined
             // by the next one rather than starting it.
             memoryService.closeEpisode(buildId, episodeId, 'failed', attributionFor(servedModelId));
+            setMemory({ episodeId: null, lastOutcome: 'failed', servingModel: servedModelId });
             setBuilderState(prev => ({
                 ...prev,
                 evidence: withEvidence(prev.evidence, `Generation failed: ${e.message}`),
-                memory: { ...prev.memory, episodeId: null, lastOutcome: 'failed', servingModel: servedModelId },
                 status: { ...prev.status, isLoading: false, message: 'An error occurred during code generation.' },
             }));
         }
@@ -989,8 +1027,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 generatedFiles: builderState.generatedFiles,
                 evidence: builderState.evidence,
                 validation: builderState.validation,
-                ...(builderState.memory.buildId
-                    ? { memory: { buildId: builderState.memory.buildId, episodeId: builderState.memory.episodeId } }
+                ...(memoryRef.current.buildId
+                    ? { memory: { buildId: memoryRef.current.buildId, episodeId: memoryRef.current.episodeId } }
                     : {}),
             }, asCopy ? null : builderState.savedBuildId);
             setSavedBuilds(buildStorage.getSavedBuilds());
@@ -1008,6 +1046,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const build = buildStorage.getSavedBuilds().find(b => b.id === id);
         if (!build) { setGlobalError('That saved build could no longer be found.'); return; }
         abandonOpenEpisode();   // whatever was in progress is being left behind
+        // Reopening a build resumes its memory cluster, so further work lands beside
+        // the history that produced it. A build saved before memory existed gets a
+        // cluster of its own from here on.
+        const memory = {
+            buildId: build.memory?.buildId ?? memoryService.newBuildId(),
+            episodeId: null,
+            lastOutcome: null,
+            servingModel: null,
+        };
+        memoryRef.current = memory;
         setBuilderState({
             ...initialBuilderState,
             isActive: true,
@@ -1019,15 +1067,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             evidence: Array.isArray(build.evidence) ? build.evidence : [],
             validation: (build.validation as BuildValidation | undefined) ?? null,
             savedBuildId: build.id,
-            // Reopening a build resumes its memory cluster, so further work lands
-            // beside the history that produced it. A build saved before memory
-            // existed gets a cluster of its own from here on.
-            memory: {
-                buildId: build.memory?.buildId ?? memoryService.newBuildId(),
-                episodeId: null,
-                lastOutcome: null,
-                servingModel: null,
-            },
+            memory,
             status: { isLoading: false, log: [], message: `Loaded "${build.name}"` },
         });
         setActiveTab('tools');
