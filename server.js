@@ -649,6 +649,14 @@ ${Array.isArray(plan?.acceptanceCriteria) && plan.acceptanceCriteria.length > 0
             surface: 'builder.generate',
         });
 
+        // Notes this project's own failures produced, which have not yet been shown
+        // to help. The engine will not put them in its governed packet, and is right
+        // not to -- deciding an unproven note is worth trying is the host's call, not
+        // the engine's. Kept in a separate, separately-labelled block for that reason,
+        // and recorded as applied so that if this attempt passes, the claim that they
+        // helped is checkable instead of assumed.
+        const trialled = await memory.trialBlock({ buildId, episodeId });
+
         let servingModel = null;
         const accumulated = await withModelFallback(builderModelChain(requestedModel), async (model) => {
             res.write(JSON.stringify({ phase: 'thinking', model }) + '\n');
@@ -659,7 +667,7 @@ ${Array.isArray(plan?.acceptanceCriteria) && plan.acceptanceCriteria.length > 0
             for await (const event of provider.streamJson({
                 model,
                 system: builderPreamble(getModel(model).provider),
-                prompt: prompt + recalled,
+                prompt: prompt + recalled + trialled,
                 schema: GENERATE_SCHEMA,
                 effort: 'medium',
                 maxOutputTokens: 65536,

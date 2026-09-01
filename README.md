@@ -164,6 +164,35 @@ failure.
 behaves identically and records nothing. One call is awaited — opening an
 episode — because a null episode id is what makes every later tap a no-op.
 
+**How a build teaches the next one.** A failed verdict proposes a lesson through
+a declared table in `memory/proposals.js` — one entry per validator issue code,
+no model anywhere in the decision. Proposing is idempotent, because the engine
+derives a lesson's id from its own text, so the tenth build to break the same way
+proposes the same lesson rather than a tenth copy.
+
+A proposal then has to earn its place:
+
+```
+proposed ──► qualified ──► approved
+   │             │             └─ a human said yes. Only from the CLI or the panel.
+   │             └─ tried in a LATER, DIFFERENT attempt, and that attempt passed.
+   └─ something broke once, and the table says what it teaches.
+```
+
+The engine only ever puts `qualified` and `approved` lessons in its governed
+recall, so a proposal cannot climb on its own — it would never be injected, so
+never applied, so never qualify. That is the engine declining to decide, not an
+oversight: whether an unproven note is worth trying is the host's call. This app
+makes that call in one bounded place. The **next** attempt after a failure carries
+at most three proposals — only those about the issue codes that actually just
+broke — in their own block, labelled as unproven, separate from the governed one.
+Each is recorded as applied, so if the attempt passes, "it helped" is checkable
+rather than asserted. A failure that stops recurring stops being trialled.
+
+Promotion itself is the engine's, not ours: it refuses reuse unless the episode
+is distinct from the one that proposed the lesson, actually recorded applying it,
+and closed `verified`.
+
 Approval of a lesson is human-only and lives at
 `POST /api/memory/lessons/:id/approve`. It is declared in no tool schema and
 reachable from no prompt, which is a structural property rather than a check.
@@ -174,6 +203,12 @@ reachable from no prompt, which is a structural property rather than a check.
 npm run typecheck        # strict tsc, zero errors expected
 npm run build            # production bundle
 npm run smoke            # backend health (server must be running)
+
+# The learning loop end to end on a throwaway database: a failure proposes a
+# lesson, the next attempt trials it, passing promotes it to qualified. No model,
+# no server, no key — every rung is enforced by the engine, so a break here is a
+# real break rather than a flaky test.
+npm run check:memory-loop
 
 # Live provider contract tests: streaming + usage, tool call, tool-result
 # round-trip, and schema-constrained JSON. Costs a few cheap requests.

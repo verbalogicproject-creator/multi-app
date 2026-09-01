@@ -17,6 +17,7 @@
 
 import express from 'express';
 import * as bridge from './bridge.js';
+import * as proposals from './proposals.js';
 
 export const memoryRouter = express.Router();
 
@@ -50,7 +51,15 @@ memoryRouter.post('/episodes/close', async (req, res) => {
         ? { ...(provider ? { provider } : {}), ...(model ? { model } : {}) }
         : undefined;
     const episode = await bridge.closeEpisodeSafe({ buildId, episodeId, outcome, attribution });
-    res.json({ closed: Boolean(episode) });
+
+    // The ratchet, and it has to be here rather than on the verdict: the engine
+    // refuses reuse against an episode that has not closed verified, so a lesson
+    // can only be promoted once the attempt that used it is genuinely over.
+    const qualified = episode && outcome === 'verified'
+        ? await bridge.recordReuseSafe({ buildId, episodeId })
+        : [];
+
+    res.json({ closed: Boolean(episode), qualified });
 });
 
 /**
@@ -84,6 +93,8 @@ memoryRouter.post('/events', async (req, res) => {
 
     const accepted = [];
     const rejected = [];
+    /** Lessons a verdict justified, held until every event in the batch is recorded. */
+    const pending = [];
     for (const [index, event] of (Array.isArray(events) ? events.slice(0, 32) : []).entries()) {
         if (!CLIENT_EVENT_KINDS.has(event?.kind)) {
             rejected.push({ index, kind: event?.kind ?? null, reason: 'unknown event kind' });
@@ -110,7 +121,26 @@ memoryRouter.post('/events', async (req, res) => {
             ...(event.triggerTags ? { triggerTags: event.triggerTags } : {}),
         });
 
-        if (appended.event) accepted.push({ index, id: appended.event.id });
+        if (appended.event) {
+            accepted.push({ index, id: appended.event.id });
+
+            // A failed verdict is the only thing that justifies a lesson, and the
+            // mapping from its issue codes is a declared table with no model in it.
+            // Proposing is idempotent -- the engine derives a lesson's id from its
+            // text -- so the tenth build to break the same way proposes the same
+            // lesson rather than a tenth copy of it.
+            if (event.kind === 'verification.completed') {
+                for (const proposal of proposals.proposalsFor(event.payload)) {
+                    pending.push({ proposal, episodeId: event.episodeId ?? episodeId, evidenceIds: cited });
+                }
+                // A code in neither the proposal table nor its stated exclusions is a
+                // question for that table, and silence is how it would stay one.
+                const unmapped = proposals.unmappedCodes(event.payload?.codes);
+                if (unmapped.length > 0) {
+                    console.warn(`[memory] validator codes with no declared proposal decision: ${unmapped.join(', ')}`);
+                }
+            }
+        }
         // A rejection here is the engine refusing the record. Saying which one and
         // why is the difference between a diagnosable gap and a silent hole -- and
         // "refused by the memory engine" was not why. The engine names the field it
@@ -119,7 +149,16 @@ memoryRouter.post('/events', async (req, res) => {
         else rejected.push({ index, kind: event.kind, reason: appended.reason ?? 'refused by the memory engine' });
     }
 
-    res.json({ accepted: accepted.length, accepted_ids: accepted, rejected, evidenceIds });
+    // After the events, not during: a lesson cites the verdict that motivated it,
+    // and that verdict has to be in the record before it can be cited.
+    const proposed = [];
+    for (const { proposal, episodeId: forEpisode, evidenceIds: cited } of pending) {
+        proposed.push(...await bridge.proposeLessonsSafe({
+            buildId, episodeId: forEpisode, evidenceIds: cited, proposals: [proposal],
+        }));
+    }
+
+    res.json({ accepted: accepted.length, accepted_ids: accepted, rejected, evidenceIds, proposed });
 });
 
 memoryRouter.get('/state', async (req, res) => {
