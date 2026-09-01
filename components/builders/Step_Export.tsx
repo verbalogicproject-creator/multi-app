@@ -3,7 +3,7 @@ import { useAppContext } from '../../context/AppContext';
 
 const Step_Export: React.FC = () => {
     const { builderState, loadGeneratedProjectIntoIDE, exportGeneratedProject, resetWebAppBuild, saveCurrentBuild, savedBuilds } = useAppContext();
-    const { plan, generatedFiles, savedBuildId, status } = builderState;
+    const { plan, generatedFiles, savedBuildId, status, validation } = builderState;
     const [buildName, setBuildName] = useState<string>(
         () => savedBuilds.find(b => b.id === savedBuildId)?.name || plan?.projectName || 'Untitled build'
     );
@@ -55,6 +55,29 @@ const Step_Export: React.FC = () => {
                 </div>
                 {status.message && <p className="mt-2 text-xs text-gray-400">{status.message}</p>}
             </div>
+
+            {validation && (
+                <div className="mt-4 text-left text-sm">
+                    {validation.issues.length === 0 ? (
+                        <p className="text-green-400">✓ Passed all {validation.checked} file checks (imports resolve, no truncated or placeholder files).</p>
+                    ) : (
+                        <details className="p-3 bg-gray-800/60 border border-gray-700 rounded-lg">
+                            <summary className="cursor-pointer text-amber-400">
+                                {validation.ok ? 'Passed with' : 'Kept despite'} {validation.issues.length} note{validation.issues.length === 1 ? '' : 's'} — tap to review
+                            </summary>
+                            <ul className="mt-2 space-y-1 text-xs">
+                                {validation.issues.map((issue, index) => (
+                                    <li key={index} className={issue.severity === 'error' ? 'text-red-300' : 'text-gray-400'}>
+                                        <span className="uppercase text-[10px] mr-1">{issue.severity}</span>
+                                        {issue.file && <span className="font-mono mr-1">{issue.file}</span>}
+                                        {issue.message}
+                                    </li>
+                                ))}
+                            </ul>
+                        </details>
+                    )}
+                </div>
+            )}
 
             {generatedFiles['preview.html'] && (
                 <div className="mt-8 text-left">

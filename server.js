@@ -4,6 +4,7 @@ import cors from 'cors';
 import multer from 'multer';
 import { GoogleGenAI, Modality, Type } from '@google/genai';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 
 const app = express();
@@ -36,6 +37,49 @@ const MODELS = {
     image: process.env.MODEL_IMAGE || 'gemini-3.1-flash-image',
     video: process.env.MODEL_VIDEO || 'veo-3.1-generate-preview',
 };
+
+// =========================================================================================
+// Daily quota governor
+// =========================================================================================
+// Free-tier daily request ceilings. Approximate by design — they exist so the UI can warn
+// before a run fails, not to be authoritative. Override with QUOTA_LIMITS as JSON.
+const DEFAULT_QUOTA_LIMITS = {
+    'gemini-3.7-flash': 20,
+    'gemini-3.5-flash': 250,
+    'gemini-3.5-flash-lite': 1000,
+    'gemini-3.1-pro-preview': 25,
+};
+const QUOTA_LIMITS = (() => {
+    try {
+        return process.env.QUOTA_LIMITS ? { ...DEFAULT_QUOTA_LIMITS, ...JSON.parse(process.env.QUOTA_LIMITS) } : DEFAULT_QUOTA_LIMITS;
+    } catch {
+        console.warn('QUOTA_LIMITS is not valid JSON; using defaults.');
+        return DEFAULT_QUOTA_LIMITS;
+    }
+})();
+
+const QUOTA_FILE = path.join(__dirname, 'logs', 'quota.json');
+const today = () => new Date().toISOString().slice(0, 10);
+
+let quotaState = { date: today(), counts: {} };
+try {
+    const saved = JSON.parse(fs.readFileSync(QUOTA_FILE, 'utf8'));
+    if (saved?.date === quotaState.date && saved.counts) quotaState = saved;   // a new day starts clean
+} catch { /* first run, or unreadable — start fresh */ }
+
+/** Counts a served request against today's per-model budget. Never throws. */
+const recordModelCall = (model) => {
+    if (quotaState.date !== today()) quotaState = { date: today(), counts: {} };
+    quotaState.counts[model] = (quotaState.counts[model] ?? 0) + 1;
+    fs.promises.mkdir(path.dirname(QUOTA_FILE), { recursive: true })
+        .then(() => fs.promises.writeFile(QUOTA_FILE, JSON.stringify(quotaState)))
+        .catch(e => console.warn('Could not persist quota counts:', e.message));
+};
+
+app.get('/api/quota', (req, res) => {
+    if (quotaState.date !== today()) quotaState = { date: today(), counts: {} };
+    res.json({ date: quotaState.date, counts: quotaState.counts, limits: QUOTA_LIMITS, models: MODELS });
+});
 
 // Models the UI may request per-call; anything else falls back to the defaults above.
 const SELECTABLE_MODELS = new Set([
@@ -222,9 +266,11 @@ No project is loaded. You are in a general chat mode and cannot access or modify
         // The last message is the user's current prompt; the rest is prior history,
         // which must be passed at creation time (assigning chat.history later is a no-op).
         const lastMessage = contents.pop();
-        const chat = ai.chats.create({ model: pickModel(model, MODELS.coding), config, history: contents });
+        const codingModel = pickModel(model, MODELS.coding);
+        const chat = ai.chats.create({ model: codingModel, config, history: contents });
 
         const result = await chat.sendMessageStream({ message: lastMessage.parts });
+        recordModelCall(codingModel);
         return result;
     },
 };
@@ -242,8 +288,10 @@ app.post('/api/chat-stream', async (req, res) => {
             return res.status(400).json({ message: 'Prompt is required.' });
         }
 
-        const chat = ai.chats.create({ model: pickModel(model, MODELS.chat) });
+        const chatModel = pickModel(model, MODELS.chat);
+        const chat = ai.chats.create({ model: chatModel });
         const result = await chat.sendMessageStream({ message: prompt });
+        recordModelCall(chatModel);
         
         res.setHeader('Content-Type', 'text/plain');
         for await (const chunk of result) {
@@ -402,6 +450,7 @@ app.post('/api/analyze-dependencies', async (req, res) => {
         const fileContents = files.map((f) => f.content).join('\n\n');
         const prompt = `Analyze the following code and provide a brief summary of the main dependencies, libraries, and frameworks used. List only the names, separated by commas. For example: "React, TailwindCSS, Express.js". If there are no clear dependencies, say "No major dependencies identified".\n\n${fileContents}`;
         const response = await ai.models.generateContent({ model: MODELS.coding, contents: prompt });
+        recordModelCall(MODELS.coding);
         res.json({ summary: response.text.trim() });
     } catch (error) {
         console.error('Dependency analysis error:', error);
@@ -418,7 +467,9 @@ async function withModelFallback(models, attempt) {
     for (const model of models) {
         for (let tryNo = 0; tryNo < 2; tryNo++) {
             try {
-                return await attempt(model);
+                const result = await attempt(model);
+                recordModelCall(model);   // only served requests count against the budget
+                return result;
             } catch (error) {
                 lastError = error;
                 if (!TRANSIENT_STATUSES.has(error?.status)) throw error;
