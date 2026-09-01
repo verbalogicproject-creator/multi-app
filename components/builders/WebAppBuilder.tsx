@@ -8,8 +8,33 @@ import Step_Generate from './Step_Generate';
 import Step_Export from './Step_Export';
 
 const WebAppBuilder: React.FC = () => {
-    const { builderState, startWebAppBuild, resetWebAppBuild } = useAppContext();
+    const { builderState, startWebAppBuild, resetWebAppBuild, savedBuilds, loadSavedBuild, removeSavedBuild, exportSavedBuild } = useAppContext();
     const { isActive, currentStep } = builderState;
+
+    const savedBuildList = savedBuilds.length > 0 && (
+        <div className="mt-12 text-left">
+            <h3 className="text-sm font-semibold text-gray-300 mb-3">Saved builds</h3>
+            <ul className="space-y-2">
+                {savedBuilds.map(build => (
+                    <li key={build.id} className="flex items-center gap-3 p-3 bg-gray-800/60 border border-gray-700 rounded-lg">
+                        <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-gray-100 truncate">{build.name}</p>
+                            <p className="text-xs text-gray-500">
+                                {Object.keys(build.generatedFiles).length} files · {new Date(build.savedAt).toLocaleString()}
+                            </p>
+                        </div>
+                        <button onClick={() => loadSavedBuild(build.id)} className="px-3 py-1.5 bg-sky-700 text-white text-xs font-semibold rounded-md hover:bg-sky-600">Open</button>
+                        <button onClick={() => exportSavedBuild(build.id)} className="px-3 py-1.5 bg-gray-600 text-gray-100 text-xs font-semibold rounded-md hover:bg-gray-500">ZIP</button>
+                        <button
+                            onClick={() => { if (confirm(`Delete saved build "${build.name}"? This cannot be undone.`)) removeSavedBuild(build.id); }}
+                            className="px-2 py-1.5 text-gray-500 hover:text-red-400 text-lg leading-none"
+                            title="Delete build"
+                        >&times;</button>
+                    </li>
+                ))}
+            </ul>
+        </div>
+    );
 
     const renderCurrentStep = () => {
         switch (currentStep) {
@@ -26,12 +51,13 @@ const WebAppBuilder: React.FC = () => {
                         </svg>
                         <h2 className="mt-4 text-2xl font-bold text-white">Build a Web App with AI</h2>
                         <p className="mt-2 text-lg text-gray-400">Go from a simple idea to a complete, downloadable React project in minutes.</p>
-                        <button 
-                            onClick={startWebAppBuild} 
+                        <button
+                            onClick={startWebAppBuild}
                             className="mt-8 px-8 py-3 bg-sky-600 text-white font-semibold rounded-lg shadow-lg hover:bg-sky-500 transition-transform transform hover:scale-105"
                         >
                             Get Started
                         </button>
+                        {savedBuildList}
                     </div>
                 );
         }

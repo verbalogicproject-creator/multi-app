@@ -1,14 +1,17 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useAppContext } from '../../context/AppContext';
 
 const Step_Export: React.FC = () => {
-    const { builderState, loadGeneratedProjectIntoIDE, exportGeneratedProject, resetWebAppBuild } = useAppContext();
-    const { plan, generatedFiles } = builderState;
+    const { builderState, loadGeneratedProjectIntoIDE, exportGeneratedProject, resetWebAppBuild, saveCurrentBuild, savedBuilds } = useAppContext();
+    const { plan, generatedFiles, savedBuildId, status } = builderState;
+    const [buildName, setBuildName] = useState<string>(
+        () => savedBuilds.find(b => b.id === savedBuildId)?.name || plan?.projectName || 'Untitled build'
+    );
 
     if (!plan || !generatedFiles) {
         return <div className="text-center text-red-400">Something went wrong. Please start over.</div>;
     }
-    
+
     const fileCount = Object.keys(generatedFiles).length;
 
     return (
@@ -20,6 +23,38 @@ const Step_Export: React.FC = () => {
             </div>
             <h2 className="mt-4 text-3xl font-bold text-white">"{plan.projectName}" is ready!</h2>
             <p className="mt-2 text-gray-400">The AI successfully generated {fileCount} files for your new project.</p>
+
+            <div className="mt-6 p-4 bg-gray-800/60 border border-gray-700 rounded-lg text-left">
+                <p className="text-sm text-gray-300">
+                    {savedBuildId
+                        ? <><span className="text-green-400">✓ Saved to your library.</span> It will survive a page reload.</>
+                        : <span className="text-amber-400">Not saved yet — save it so a reload cannot lose it.</span>}
+                </p>
+                <div className="mt-3 flex flex-col sm:flex-row gap-2">
+                    <input
+                        type="text"
+                        value={buildName}
+                        onChange={e => setBuildName(e.target.value)}
+                        placeholder="Build name"
+                        className="flex-1 p-2 bg-gray-700 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-sky-500"
+                    />
+                    <button
+                        onClick={() => saveCurrentBuild(buildName)}
+                        className="px-4 py-2 bg-sky-700 text-white text-sm font-semibold rounded-md hover:bg-sky-600"
+                    >
+                        {savedBuildId ? 'Update saved build' : 'Save build'}
+                    </button>
+                    {savedBuildId && (
+                        <button
+                            onClick={() => saveCurrentBuild(buildName, true)}
+                            className="px-4 py-2 bg-gray-600 text-gray-100 text-sm font-semibold rounded-md hover:bg-gray-500"
+                        >
+                            Save as copy
+                        </button>
+                    )}
+                </div>
+                {status.message && <p className="mt-2 text-xs text-gray-400">{status.message}</p>}
+            </div>
 
             {generatedFiles['preview.html'] && (
                 <div className="mt-8 text-left">
