@@ -53,46 +53,101 @@ A five-step wizard, reachable from **AI Tools**:
   what is left and generation asks for confirmation when the budget is nearly spent.
 - **Approval before effects.** Model-generated Python (Pyodide) runs only after you click **Run**.
 
-## Configuration
+## Providers and models
+
+Four providers are supported. A provider whose API key is absent from `.env` is
+hidden entirely — no errors, its models simply do not appear in the picker.
+
+| Provider | Models exposed | Notes |
+|----------|----------------|-------|
+| Google Gemini | 3.5 Flash, 3.5 Flash-Lite, 3.7 Flash, 3.1 Pro (preview) | Free tier with daily request ceilings; the default for chat and the builder |
+| Anthropic Claude | Haiku 4.5, Sonnet 5, Opus 5, Fable 5 | Paid per token |
+| OpenAI | GPT-5.6 Luna, Terra, Sol | Paid per token |
+| NVIDIA NIM | Llama 3.2 11B, Nemotron Nano 3, Nemotron Lightning, MiniMax M3, Kimi K3 | Free credits; OpenAI-compatible endpoint |
+
+Every model in the catalog was confirmed with a live call on this account. That
+matters most for NVIDIA, whose `/v1/models` advertises 83 models but returns
+`404 Not found for account`, `410 end-of-life`, or a timeout for many of them —
+only models that actually answered are listed.
+
+Pick a model per request with the **Model** dropdown (Auto uses the defaults
+below). Free-tier models show requests left; paid models show approximate spend
+today, and generating a full project on a paid model asks for confirmation with
+a cost estimate first.
+
+### Configuration
 
 | Env var | Purpose | Default |
 |---------|---------|---------|
-| `GEMINI_API_KEY` | Gemini API key (required; `API_KEY` accepted as legacy fallback) | — |
+| `GEMINI_API_KEY` | Google key (required; `API_KEY` accepted as legacy fallback) | — |
+| `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `NVIDIA_API_KEY` | Optional; each unlocks that provider's models | — |
 | `PORT` | Backend port | `8080` |
-| `MODEL_CHAT` / `MODEL_CODING` | Chat + coding models | `gemini-3.5-flash` |
-| `MODEL_BUILDER` | Builder codegen model | `gemini-3.7-flash` |
-| `MODEL_IMAGE` / `MODEL_VIDEO` | Media models (features currently flagged off) | `gemini-3.1-flash-image` / `veo-3.1-generate-preview` |
-| `QUOTA_LIMITS` | JSON overriding the assumed daily per-model limits | see `server.js` |
+| `MODEL_CHAT` / `MODEL_CODING` | Chat + coding defaults | `gemini-3.5-flash` |
+| `MODEL_BUILDER` | Builder codegen default | `gemini-3.7-flash` |
+| `MODEL_IMAGE` / `MODEL_VIDEO` | Media models (features flagged off) | `gemini-3.1-flash-image` / `veo-3.1-generate-preview` |
+| `QUOTA_LIMITS` | JSON overriding assumed daily free-tier request limits | see `server.js` |
+| `MODEL_PRICES` | JSON overriding per-1M token prices used for spend estimates | see `providers/catalog.js` |
 
-The model picker in the UI overrides these per request (Auto, 3.5 Flash-Lite, 3.7 Flash,
-3.1 Pro preview). Builder requests retry on transient 429/503 and fall back to the coding model.
+Feature flags live in `utils/features.ts`. Image editing, video generation and
+live audio are **off** pending re-verification against current models.
 
-Feature flags live in `utils/features.ts`. Image editing, video generation and live audio are
-**off** until each is re-verified against current models.
+### How the provider layer works
+
+`server.js` never talks to a model SDK directly (except the flagged-off media
+features). Everything goes through `providers/`:
+
+- **`catalog.js`** — the single source of truth. Adding a model is one entry:
+  its id, provider, capabilities, price, output ceiling and fallback chain.
+- **`google.js` / `anthropic.js` / `openai.js` / `nvidia.js`** — adapters
+  implementing one interface (`streamChat`, `streamJson`, `generateJson`,
+  `generateText`) that yields normalized events (`text`, `thinking`,
+  `toolCalls`, `usage`).
+- **`schemas.js` / `tools.js`** — declared once in the strict dialect every
+  provider accepts, then translated per provider.
+- **`prompts.js`** — a system prompt per provider, written in each vendor's
+  documented house style rather than one shared lowest common denominator.
+- **`effort.js`** — one internal reasoning scale mapped to four different
+  provider mechanisms, with per-model clamping.
+
+The differences the adapters absorb are not cosmetic. Gemini 3.x rejects the
+legacy `thinkingBudget` and its models disagree about which thinking levels
+exist; Anthropic 5-gen models need adaptive thinking plus `effort` while
+Haiku 4.5 rejects `effort` and needs a token budget; OpenAI uses the Responses
+API; NVIDIA emits reasoning before content and will starve the answer without
+extra headroom, and cannot constrain output to a schema at all. Each of those
+was found by a failing live call, not by reading a doc.
 
 ## Checks
 
 ```sh
-npm run typecheck   # strict tsc, zero errors expected
-npm run build       # production bundle
-npm run smoke       # backend health (server must be running)
+npm run typecheck        # strict tsc, zero errors expected
+npm run build            # production bundle
+npm run smoke            # backend health (server must be running)
+
+# Live provider contract tests: streaming + usage, tool call, tool-result
+# round-trip, and schema-constrained JSON. Costs a few cheap requests.
+npm run smoke:providers -- gemini-3.5-flash-lite claude-haiku-4-5 gpt-5.6-luna meta/llama-3.2-11b-vision-instruct
 ```
 
 ## Roadmap
 
 Next cycles, in the order chosen:
 
-1. **Agent link (SAG-lite)** — a localhost-only, token-gated channel where the running app
+1. **Memory** — recall, RAG and a human-in-the-loop loop that ingests fixes so
+   each build improves (see `/root/hybrid-graph-memory`), scoped per project
+   with provider attribution.
+2. **Agent link (SAG-lite)** — a localhost-only, token-gated channel where the running app
    publishes bounded context (active project, current step, selection, diagnostics) and accepts
    typed directives, each answered with an effect receipt describing what actually happened. Lets a
    terminal agent drive the app instead of guessing at it.
-2. **Real running preview** — execute generated React in the preview iframe (esbuild-wasm or
+3. **Real running preview** — execute generated React in the preview iframe (esbuild-wasm or
    Sucrase with import maps) instead of a static snapshot, keeping today's static preview as the
    fallback.
-3. **Git-backed history and a repair loop** — `isomorphic-git` over IndexedDB for real diffs,
+4. **Git-backed history and a repair loop** — `isomorphic-git` over IndexedDB for real diffs,
    revert and branch-per-candidate (also escaping the ~5 MB localStorage ceiling), then use
    validator output to regenerate only the broken file instead of the whole project.
-4. **Project memory and skill personas** — a per-project record of decisions and failures injected
+5. **Skill personas** — personas upgraded from a prose blob to a structured
+   contract (purpose, anti-patterns, allowed tools, output shape) — a per-project record of decisions and failures injected
    into prompts (inspectable, pinnable, forgettable), and personas upgraded from a prose blob to a
    structured contract (purpose, anti-patterns, allowed tools, output shape).
 
