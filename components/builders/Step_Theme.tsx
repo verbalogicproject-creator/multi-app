@@ -25,20 +25,30 @@ const cardClass = (selected: boolean) =>
     `p-3 border-2 rounded-lg cursor-pointer transition-all text-left ${selected ? 'border-sky-500 ring-2 ring-sky-500/40' : 'border-gray-700 hover:border-gray-500'}`;
 
 const Step_Theme: React.FC = () => {
-    const { builderState, setBuilderState, generateWebAppCode, suggestArtDirections, selectedModel } = useAppContext();
+    const { builderState, setBuilderState, generateWebAppCode, suggestArtDirections, selectedModel, catalog, modelDefaults } = useAppContext();
     const { theme, plan, status, artDirections } = builderState;
 
-    // Generation is the most expensive action here; warn before spending the last
-    // requests of a small daily budget.
+    // Generation is by far the most expensive action here: it is the one call that
+    // can run to tens of thousands of output tokens. Warn either when a free-tier
+    // budget is nearly spent, or when the run will actually cost money.
     const handleGenerate = async () => {
         const quota = await apiService.getQuota();
-        const model = modelForSurface(quota, selectedModel, 'builder');
-        const left = remainingFor(quota, model);
-        if (left !== null && left <= 2) {
-            const message = left === 0
-                ? `Today's free-tier budget for ${model} looks used up, so this will probably fail. Try anyway?`
-                : `Only ${left} free-tier request${left === 1 ? '' : 's'} left today for ${model}. Generate anyway?`;
-            if (!window.confirm(message)) return;
+        const modelId = modelForSurface(modelDefaults, selectedModel, 'builder');
+        const entry = catalog.find(m => m.id === modelId);
+
+        if (entry?.paid) {
+            // A full project generation is typically 50-80K output tokens.
+            const estimate = (70000 / 1e6) * entry.priceOut + (4000 / 1e6) * entry.priceIn;
+            const shown = estimate >= 0.01 ? `about $${estimate.toFixed(2)}` : 'under $0.01';
+            if (!window.confirm(`${entry.label} is a paid model. Generating a full project will cost ${shown} (rough estimate). Continue?`)) return;
+        } else {
+            const left = remainingFor(quota, modelId);
+            if (left !== null && left <= 2) {
+                const message = left === 0
+                    ? `Today's free-tier budget for ${modelId} looks used up, so this will probably fail. Try anyway?`
+                    : `Only ${left} free-tier request${left === 1 ? '' : 's'} left today for ${modelId}. Generate anyway?`;
+                if (!window.confirm(message)) return;
+            }
         }
         generateWebAppCode();
     };
