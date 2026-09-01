@@ -89,9 +89,14 @@ const planResponseSchema = {
                 },
                 required: ['name', 'description']
             }
+        },
+        acceptanceCriteria: {
+            type: Type.ARRAY,
+            description: "3-6 concrete, checkable statements describing what the finished app must do for it to be considered complete.",
+            items: { type: Type.STRING }
         }
     },
-    required: ['projectName', 'projectDescription', 'pages', 'components']
+    required: ['projectName', 'projectDescription', 'pages', 'components', 'acceptanceCriteria']
 };
 
 
@@ -436,11 +441,25 @@ const friendlyProviderError = (error, fallbackMessage) =>
 // Web App Builder - Step 1: Plan
 app.post('/api/builder/plan', async (req, res) => {
     try {
-        const { idea, model: requestedModel } = req.body;
-        const prompt = `You are a senior web architect. A user wants to build a web application.
+        const { idea, model: requestedModel, previousPlan, feedback } = req.body;
+        const isRefinement = previousPlan && typeof feedback === 'string' && feedback.trim() !== '';
+
+        const prompt = isRefinement
+            ? `You are a senior web architect revising an existing project plan.
+
+Original idea: "${idea}"
+
+Current plan:
+${JSON.stringify(previousPlan, null, 2)}
+
+The user asks for these changes:
+"${feedback.trim()}"
+
+Apply the requested changes to the plan. Keep everything the feedback does not touch exactly as it is — same project name, same page names, paths, descriptions, components and acceptance criteria — so the user can see precisely what changed. Add, remove or reword only what the feedback calls for, and keep the plan coherent (for example, if a page is removed, remove components only used by it).`
+            : `You are a senior web architect. A user wants to build a web application.
 User's Idea: "${idea}"
 
-Analyze the user's idea and create a logical project plan for a standard React (Vite) + TailwindCSS application. The plan should include a project name, description, a list of pages, and a list of reusable components.`;
+Analyze the user's idea and create a logical project plan for a standard React (Vite) + TailwindCSS application. The plan should include a project name, description, a list of pages, a list of reusable components, and acceptance criteria that state what the finished app must do.`;
 
         const response = await withModelFallback(builderModelChain(requestedModel), (model) => ai.models.generateContent({
             model,
@@ -482,7 +501,9 @@ app.post('/api/builder/generate', async (req, res) => {
 
 **Project Plan:**
 ${JSON.stringify(plan, null, 2)}
-
+${Array.isArray(plan?.acceptanceCriteria) && plan.acceptanceCriteria.length > 0
+    ? `\n**Acceptance criteria — the generated app MUST satisfy every one of these:**\n${plan.acceptanceCriteria.map((c, i) => `${i + 1}. ${c}`).join('\n')}\n`
+    : ''}
 **Design contract (mandatory):**
 - Palette: ${paletteSpec}
 - Typography: ${typeSpec}

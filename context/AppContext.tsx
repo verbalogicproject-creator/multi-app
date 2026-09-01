@@ -161,6 +161,7 @@ interface AppContextType {
     startWebAppBuild: () => void;
     resetWebAppBuild: () => void;
     generateWebAppPlan: () => Promise<void>;
+    refineWebAppPlan: (currentPlan: any, feedback: string) => Promise<void>;
     generateWebAppCode: () => Promise<void>;
     loadGeneratedProjectIntoIDE: () => Promise<void>;
     exportGeneratedProject: () => Promise<void>;
@@ -469,6 +470,22 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             setBuilderState(prev => ({ ...prev, status: { ...prev.status, isLoading: false, message: 'An error occurred.' }}));
         }
     };
+    /** Sends the current (possibly hand-edited) plan back to Gemini with change requests. */
+    const refineWebAppPlan = async (currentPlan: any, feedback: string) => {
+        setBuilderState(prev => ({ ...prev, status: { ...prev.status, isLoading: true, message: 'Revising the blueprint…' } }));
+        try {
+            const plan = await apiService.generateWebAppPlan(
+                builderState.idea,
+                selectedModel === 'auto' ? undefined : selectedModel,
+                { previousPlan: currentPlan, feedback },
+            );
+            setBuilderState(prev => ({ ...prev, plan, status: { ...prev.status, isLoading: false, message: 'Blueprint revised.' } }));
+        } catch (e: any) {
+            setGlobalError(`Failed to revise plan: ${e.message}`);
+            setBuilderState(prev => ({ ...prev, status: { ...prev.status, isLoading: false, message: '' } }));
+        }
+    };
+
     const generateWebAppCode = async () => {
         setBuilderState(prev => ({ ...prev, currentStep: 4, status: { isLoading: true, message: 'Contacting Gemini…', log: [] } }));
         try {
@@ -585,7 +602,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         activePersona, setActivePersona,
         agents, activeAgentId, handleAddAgent, handleUpdateAgent, handleDeleteAgent, handleSelectAgent,
         globalError, setGlobalError,
-        builderState, setBuilderState, startWebAppBuild, resetWebAppBuild, generateWebAppPlan, generateWebAppCode, loadGeneratedProjectIntoIDE, exportGeneratedProject,
+        builderState, setBuilderState, startWebAppBuild, resetWebAppBuild, generateWebAppPlan, refineWebAppPlan, generateWebAppCode, loadGeneratedProjectIntoIDE, exportGeneratedProject,
         savedBuilds, saveCurrentBuild, loadSavedBuild, removeSavedBuild, exportSavedBuild,
     };
 
