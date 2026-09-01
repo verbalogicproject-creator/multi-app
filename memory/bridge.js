@@ -67,12 +67,28 @@ const note = (operation, error) => {
  * Loads the engine once. A failure here is expected and survivable: the package
  * may be absent, or present but unbuilt.
  */
+/** How long a failed load is trusted before the next call tries again. */
+const ENGINE_RETRY_MS = 30_000;
+let engineFailedAt = 0;
+
 async function loadEngine() {
     if (engine) return engine;
+
+    // A failure is remembered, but not forever. The expected cause is "not built
+    // yet", which a person fixes while the server keeps running -- so caching the
+    // failure for the life of the process would mean every later build runs
+    // unadvised until someone thinks to restart. A transient cause (a momentary
+    // filesystem or memory failure during the dynamic import, which this device
+    // is not immune to) deserves a retry for the same reason.
+    if (!enginePromise && engineFailedAt > 0 && Date.now() - engineFailedAt < ENGINE_RETRY_MS) {
+        return null;
+    }
+
     if (!enginePromise) {
         enginePromise = import('multi-graph-memory')
             .then((loaded) => {
                 engine = loaded;
+                engineFailedAt = 0;
                 state.available = true;
                 state.reason = null;
                 return loaded;
@@ -84,6 +100,10 @@ async function loadEngine() {
                         ? 'multi-graph-memory is not installed, or its dist/ build is missing — run `npm run build` in /root/multi-graph-memory'
                         : String(error?.message ?? error).slice(0, 300);
                 console.warn(`[memory] disabled: ${state.reason}`);
+                // Clear the cached promise so the next call past the cooldown
+                // retries, rather than replaying this failure indefinitely.
+                enginePromise = null;
+                engineFailedAt = Date.now();
                 return null;
             });
     }
@@ -99,9 +119,11 @@ async function loadEngine() {
  */
 const VALID_BUILD_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 
-function evictIfNeeded() {
+/** Never evicts `keep`, so the build a request is actively using cannot be closed under it. */
+function evictIfNeeded(keep) {
     while (open.size > MAX_OPEN_BUILDS) {
-        const oldest = open.keys().next().value;
+        const oldest = [...open.keys()].find((id) => id !== keep);
+        if (oldest === undefined) return;
         const entry = open.get(oldest);
         open.delete(oldest);
         try {
@@ -111,6 +133,18 @@ function evictIfNeeded() {
         }
     }
 }
+
+/**
+ * Opens in flight, keyed by build.
+ *
+ * The cache check and the open are separated by an `await`, so two requests for
+ * the same never-before-opened build (a plan call and a directions call fired
+ * together, say) would both miss the cache and both construct a SQLite handle on
+ * the same file. The second `open.set` would then overwrite the first, leaking a
+ * native handle that eviction can no longer see because it is no longer in the
+ * map. Sharing the in-flight promise makes the second caller wait for the first.
+ */
+const opening = new Map();
 
 /** The GraphMemory for one build, or null. Never throws. */
 export async function forBuild(buildId) {
@@ -124,31 +158,59 @@ export async function forBuild(buildId) {
         return cached.memory;
     }
 
-    const loaded = await loadEngine();
-    if (!loaded) return null;
+    const inFlight = opening.get(buildId);
+    if (inFlight) return inFlight;
 
-    try {
-        const storage = new loaded.SqliteStorageAdapter({ path: path.join(DB_DIR, `${buildId}.db`) });
-        storage.open();
-        const memory = new loaded.GraphMemory({ storage, scope: { workspace: WORKSPACE, projectId: buildId } });
-        open.set(buildId, { memory, storage });
-        evictIfNeeded();
-        return memory;
-    } catch (error) {
-        return note('forBuild', error);
-    }
+    const attempt = (async () => {
+        const loaded = await loadEngine();
+        if (!loaded) return null;
+        try {
+            // Re-check: another caller may have finished while the engine loaded.
+            const existing = open.get(buildId);
+            if (existing) return existing.memory;
+
+            const storage = new loaded.SqliteStorageAdapter({ path: path.join(DB_DIR, `${buildId}.db`) });
+            storage.open();
+            const memory = new loaded.GraphMemory({ storage, scope: { workspace: WORKSPACE, projectId: buildId } });
+            open.set(buildId, { memory, storage });
+            evictIfNeeded(buildId);
+            return memory;
+        } catch (error) {
+            return note('forBuild', error);
+        }
+    })().finally(() => opening.delete(buildId));
+
+    opening.set(buildId, attempt);
+    return attempt;
 }
 
 /* ------------------------------------------------------------------ write -- */
 
-/** Opens an episode. Returns its id, or null — a null id makes every later tap a no-op. */
+/**
+ * Opens an episode. Returns its id, or null — a null id makes every later tap a no-op.
+ *
+ * Reuses an episode that is still open for the same objective on the same base
+ * revision, rather than opening a second one. The engine derives an episode id
+ * partly from its open timestamp, so two requests a millisecond apart are two
+ * different episodes to it -- which is right for two genuine attempts and wrong
+ * for a double-tap, a retry, or a reload. Five identical requests produced five
+ * episodes before this. An attempt that is still open IS the attempt; a genuinely
+ * new one starts after the previous is closed.
+ */
 export async function openEpisodeSafe({ buildId, objective, baseRevisionId, attribution }) {
     const memory = await forBuild(buildId);
     if (!memory) return null;
+    const cleanObjective = String(objective ?? 'build').slice(0, 2_000);
+    const cleanBase = String(baseRevisionId ?? 'rev-1').slice(0, 512);
     try {
+        const alreadyOpen = memory
+            .listEpisodes()
+            .find((e) => e.closedAt === undefined && e.objective === cleanObjective && e.baseRevisionId === cleanBase);
+        if (alreadyOpen) return alreadyOpen.id;
+
         const episode = memory.openEpisode({
-            objective: String(objective ?? 'build').slice(0, 2_000),
-            baseRevisionId: String(baseRevisionId ?? 'rev-1').slice(0, 512),
+            objective: cleanObjective,
+            baseRevisionId: cleanBase,
             ...(attribution ? { attribution } : {}),
         });
         return episode.id;
@@ -185,12 +247,19 @@ export async function appendEventSafe({ buildId, episodeId, kind, payload, evide
             cycleId: buildId,
             phaseId: rest.phaseId ?? 'builder',
             ...(episodeId ? { episodeId } : {}),
-            ...(rest.provider ? { provider: rest.provider } : {}),
-            ...(rest.model ? { model: rest.model } : {}),
-            ...(rest.surface ? { surface: rest.surface } : {}),
-            ...(rest.component ? { component: rest.component } : {}),
+            // Bounded like every other free-text field reaching the engine. The
+            // engine caps identifiers at 512 and REFUSES beyond that, and a
+            // refusal here would silently drop the whole event over one long
+            // string -- with only a count returned to the caller, that failure is
+            // close to undiagnosable.
+            ...(rest.provider ? { provider: String(rest.provider).slice(0, 512) } : {}),
+            ...(rest.model ? { model: String(rest.model).slice(0, 512) } : {}),
+            ...(rest.surface ? { surface: String(rest.surface).slice(0, 512) } : {}),
+            ...(rest.component ? { component: String(rest.component).slice(0, 512) } : {}),
             ...(rest.domain ? { domain: rest.domain } : {}),
-            ...(rest.triggerTags?.length ? { triggerTags: rest.triggerTags.slice(0, 64) } : {}),
+            ...(rest.triggerTags?.length
+                ? { triggerTags: rest.triggerTags.slice(0, 64).map((tag) => String(tag).slice(0, 200)) }
+                : {}),
             payload: payload ?? {},
             evidenceIds: evidenceIds ?? [],
         });
@@ -286,10 +355,17 @@ export async function recallBlock({ buildId, episodeId, task, component, domain,
 
     // Recording which lessons were applied is what later makes a reuse claim
     // checkable: a lesson cannot be "reused" in an episode that never saw it.
+    //
+    // Deliberately NOT awaited. Recall sits in front of the model call, so every
+    // millisecond here is a millisecond before the user sees anything — and these
+    // are real SQLite writes with a 2s lock timeout each, which under contention
+    // could add seconds to a plan the user is waiting on. The read half is bounded
+    // by RECALL_TIMEOUT_MS for exactly this reason; the write half is moved off
+    // the path instead. It completes long before the model does.
     const lessonIds = packet.items.filter((item) => item.sourceKind === 'lesson').map((item) => item.id);
-    for (const lessonId of lessonIds) {
-        await recordAppliedLessonSafe({ buildId, episodeId, lessonId });
-    }
+    void Promise.all(
+        lessonIds.map((lessonId) => recordAppliedLessonSafe({ buildId, episodeId, lessonId })),
+    );
 
     state.lastInjection = {
         at: new Date().toISOString(),

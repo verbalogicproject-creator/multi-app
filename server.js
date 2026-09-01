@@ -715,6 +715,20 @@ app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
+/**
+ * Close the memory databases on the way out.
+ *
+ * WAL makes an unclean exit safe, so this is not about data loss -- it is that a
+ * killed process never checkpoints, so the -wal files grow and a copied database
+ * is a stale one. Closing merges them back.
+ */
+for (const signal of ['SIGINT', 'SIGTERM']) {
+    process.on(signal, () => {
+        try { memory.closeAll(); } catch { /* shutting down anyway */ }
+        process.exit(0);
+    });
+}
+
 app.listen(port, () => {
     console.log(`Server listening at http://localhost:${port}`);
 });

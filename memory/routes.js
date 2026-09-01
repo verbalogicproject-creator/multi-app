@@ -57,40 +57,66 @@ memoryRouter.post('/episodes/close', async (req, res) => {
  * A batch, because the client often learns several things at once (a verdict,
  * its evidence, and the decision that followed) and one request keeps them
  * together in time.
+ *
+ * Evidence is addressed, never shared. Each submitted evidence item carries a
+ * `key`, and an event cites evidence by listing keys in `evidenceKeys`. An
+ * earlier version attached the whole batch's evidence to every event in it,
+ * which quietly cited a failing-test result against an unrelated human decision.
+ * Events are immutable, so that kind of corruption is permanent and invisible --
+ * and the evidence trail is the thing every later reuse claim is checked against.
  */
 memoryRouter.post('/events', async (req, res) => {
     const { buildId, episodeId, events = [], evidence = [] } = req.body ?? {};
 
+    const byKey = new Map();
     const evidenceIds = [];
-    for (const item of Array.isArray(evidence) ? evidence.slice(0, 32) : []) {
+    for (const [index, item] of (Array.isArray(evidence) ? evidence.slice(0, 32) : []).entries()) {
         const recorded = await bridge.recordEvidenceSafe({
             buildId,
             kind: item?.kind ?? 'note',
             ref: item?.ref ?? 'client://unspecified',
             summary: item?.summary,
         });
-        if (recorded) evidenceIds.push(recorded.id);
+        if (!recorded) continue;
+        evidenceIds.push(recorded.id);
+        byKey.set(String(item?.key ?? index), recorded.id);
     }
 
-    let accepted = 0;
-    for (const event of Array.isArray(events) ? events.slice(0, 32) : []) {
-        if (!CLIENT_EVENT_KINDS.has(event?.kind)) continue;
+    const accepted = [];
+    const rejected = [];
+    for (const [index, event] of (Array.isArray(events) ? events.slice(0, 32) : []).entries()) {
+        if (!CLIENT_EVENT_KINDS.has(event?.kind)) {
+            rejected.push({ index, kind: event?.kind ?? null, reason: 'unknown event kind' });
+            continue;
+        }
+
+        // Only the evidence this event actually names. An event that names none
+        // cites none -- silence is not an invitation to attach the batch.
+        const cited = Array.isArray(event.evidenceKeys)
+            ? event.evidenceKeys.map((key) => byKey.get(String(key))).filter(Boolean)
+            : [];
+
         const appended = await bridge.appendEventSafe({
             buildId,
             episodeId: event.episodeId ?? episodeId,
             kind: event.kind,
             payload: event.payload ?? {},
-            evidenceIds,
+            evidenceIds: cited,
             ...(event.provider ? { provider: event.provider } : {}),
             ...(event.model ? { model: event.model } : {}),
             ...(event.surface ? { surface: event.surface } : {}),
             ...(event.component ? { component: event.component } : {}),
+            ...(event.domain ? { domain: event.domain } : {}),
             ...(event.triggerTags ? { triggerTags: event.triggerTags } : {}),
         });
-        if (appended) accepted += 1;
+
+        if (appended) accepted.push({ index, id: appended.id });
+        // A rejection here is the engine refusing the record. Saying which one and
+        // why is the difference between a diagnosable gap and a silent hole.
+        else rejected.push({ index, kind: event.kind, reason: 'refused by the memory engine' });
     }
 
-    res.json({ accepted, evidenceIds });
+    res.json({ accepted: accepted.length, accepted_ids: accepted, rejected, evidenceIds });
 });
 
 memoryRouter.get('/state', async (req, res) => {
