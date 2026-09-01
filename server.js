@@ -13,6 +13,8 @@ import { getModel, modelChain, pickModel } from './providers/catalog.js';
 import { toolsForRequest } from './providers/tools.js';
 import { PLAN_SCHEMA, DIRECTIONS_SCHEMA, GENERATE_SCHEMA, filesArrayToRecord } from './providers/schemas.js';
 import { buildSystemPrompt, builderPreamble } from './providers/prompts.js';
+import { memoryRouter } from './memory/routes.js';
+import * as memory from './memory/bridge.js';
 
 const app = express();
 const port = process.env.PORT || 8080;
@@ -26,6 +28,10 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.static(path.join(__dirname, 'dist')));
 
 const upload = multer({ storage: multer.memoryStorage() });
+
+// Memory is mounted before the model routes so its availability is a fact the
+// UI can read, never something a builder request has to discover by failing.
+app.use('/api/memory', memoryRouter);
 
 // Initialize Google GenAI
 const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
@@ -361,7 +367,13 @@ const TRANSIENT_MESSAGE = /resourceexhausted|worker local total request limit|te
 const isTransient = (error) =>
     TRANSIENT_STATUSES.has(error?.status) || TRANSIENT_MESSAGE.test(String(error?.message ?? ''));
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-async function withModelFallback(models, attempt) {
+/**
+ * `onServed` reports which model actually answered. Only the fallback loop knows
+ * it: the caller asked for a chain, and under a transient failure the model that
+ * served is not the one requested. Memory attribution is only worth recording if
+ * it names the model that really ran.
+ */
+async function withModelFallback(models, attempt, onServed) {
     let lastError;
     for (const model of models) {
         for (let tryNo = 0; tryNo < 2; tryNo++) {
@@ -370,6 +382,7 @@ async function withModelFallback(models, attempt) {
                 // Only served requests count; usage is recorded by the caller when
                 // the provider reports it.
                 recordModelCall(model, result?.usage);
+                onServed?.(model);
                 return result;
             } catch (error) {
                 lastError = error;
@@ -387,10 +400,13 @@ const friendlyProviderError = (error, fallbackMessage) =>
         ? `The model is temporarily overloaded${error?.status ? ` (HTTP ${error.status})` : ''}. Please try again in a minute, or pick a different model.`
         : fallbackMessage;
 
+/** Splits a catalog model id into the attribution the memory engine records. */
+const attributionFor = (model) => (model ? { provider: getModel(model)?.provider, model } : {});
+
 // Web App Builder - Step 1: Plan
 app.post('/api/builder/plan', async (req, res) => {
     try {
-        const { idea, model: requestedModel, previousPlan, feedback } = req.body;
+        const { idea, model: requestedModel, previousPlan, feedback, buildId, episodeId } = req.body;
         const isRefinement = previousPlan && typeof feedback === 'string' && feedback.trim() !== '';
 
         const prompt = isRefinement
@@ -410,17 +426,50 @@ User's Idea: "${idea}"
 
 Analyze the user's idea and create a logical project plan for a standard React (Vite) + TailwindCSS application. The plan should include a project name, description, a list of pages, a list of reusable components, and acceptance criteria that state what the finished app must do.`;
 
-        const { object } = await withModelFallback(builderModelChain(requestedModel), (model) =>
-            providerForModel(model).generateJson({
-                model,
-                system: builderPreamble(getModel(model).provider),
-                prompt,
-                schema: PLAN_SCHEMA,
-                effort: 'medium',
-                maxOutputTokens: 8192,
-            }));
+        // Recall is appended to the user prompt, not to the system prompt: one
+        // wording then reaches all four providers and providers/prompts.js stays
+        // the only place house style is decided.
+        const recalled = await memory.recallBlock({
+            buildId,
+            episodeId,
+            task: `plan a web application: ${String(idea ?? '').slice(0, 400)}`,
+            surface: isRefinement ? 'builder.refine' : 'builder.plan',
+        });
+
+        let servingModel = null;
+        const { object } = await withModelFallback(
+            builderModelChain(requestedModel),
+            (model) =>
+                providerForModel(model).generateJson({
+                    model,
+                    system: builderPreamble(getModel(model).provider),
+                    prompt: prompt + recalled,
+                    schema: PLAN_SCHEMA,
+                    effort: 'medium',
+                    maxOutputTokens: 8192,
+                }),
+            (model) => { servingModel = model; },
+        );
 
         res.json(object);
+
+        // Recorded after the response: memory must never be on the critical path
+        // between a finished plan and the user seeing it.
+        memory.appendEventSafe({
+            buildId,
+            episodeId,
+            kind: isRefinement ? 'contract.delta' : 'planning.answer',
+            surface: isRefinement ? 'builder.refine' : 'builder.plan',
+            ...attributionFor(servingModel),
+            payload: {
+                idea: String(idea ?? '').slice(0, 500),
+                ...(isRefinement ? { feedback: feedback.trim().slice(0, 500) } : {}),
+                pages: Array.isArray(object?.pages) ? object.pages.length : 0,
+                components: Array.isArray(object?.components) ? object.components.length : 0,
+                acceptanceCriteria: Array.isArray(object?.acceptanceCriteria) ? object.acceptanceCriteria.length : 0,
+                memoryInjected: recalled !== '',
+            },
+        });
 
     } catch (error) {
         console.error('Builder plan error:', error);
@@ -433,7 +482,7 @@ const TYPOGRAPHY_NAMES = ['Sans-serif & Friendly', 'Serif & Professional', 'Mono
 
 app.post('/api/builder/directions', async (req, res) => {
     try {
-        const { idea, plan, model: requestedModel } = req.body;
+        const { idea, plan, model: requestedModel, buildId, episodeId } = req.body;
         const prompt = `You are an art director proposing visual directions for a web product.
 
 Product idea: "${idea ?? ''}"
@@ -447,17 +496,46 @@ For each direction give hex values for all six roles. Requirements:
 - The accent must differ from the primary in hue, not just lightness.
 - Typography must be exactly one of: ${TYPOGRAPHY_NAMES.join(' | ')}.`;
 
-        const { object } = await withModelFallback(builderModelChain(requestedModel), (model) =>
-            providerForModel(model).generateJson({
-                model,
-                system: builderPreamble(getModel(model).provider),
-                prompt,
-                schema: DIRECTIONS_SCHEMA,
-                effort: 'medium',
-                maxOutputTokens: 4096,
-            }));
+        // `directionGeneration` engages the engine's art-direction bar: taste,
+        // layout, copy and art-direction lessons are excluded from the CANDIDATE
+        // set, not merely from the result. Past builds may inform correctness;
+        // they may not decide what the next one is allowed to look like.
+        const recalled = await memory.recallBlock({
+            buildId,
+            episodeId,
+            task: `propose art directions for: ${String(idea ?? '').slice(0, 400)}`,
+            directionGeneration: true,
+            surface: 'builder.directions',
+        });
+
+        let servingModel = null;
+        const { object } = await withModelFallback(
+            builderModelChain(requestedModel),
+            (model) =>
+                providerForModel(model).generateJson({
+                    model,
+                    system: builderPreamble(getModel(model).provider),
+                    prompt: prompt + recalled,
+                    schema: DIRECTIONS_SCHEMA,
+                    effort: 'medium',
+                    maxOutputTokens: 4096,
+                }),
+            (model) => { servingModel = model; },
+        );
 
         res.json(object);
+
+        memory.appendEventSafe({
+            buildId,
+            episodeId,
+            kind: 'planning.answer',
+            surface: 'builder.directions',
+            ...attributionFor(servingModel),
+            payload: {
+                directions: (object?.directions ?? []).map((d) => String(d?.name ?? '').slice(0, 120)),
+                memoryInjected: recalled !== '',
+            },
+        });
     } catch (error) {
         console.error('Builder directions error:', error);
         res.status(500).json({ message: friendlyProviderError(error, 'Error suggesting art directions.') });
@@ -501,7 +579,7 @@ const describePalette = (theme) => {
 
 app.post('/api/builder/generate', async (req, res) => {
     try {
-        const { plan, theme, model: requestedModel } = req.body;
+        const { plan, theme, model: requestedModel, buildId, episodeId } = req.body;
         const paletteSpec = describePalette(theme);
         const typeSpec = BUILDER_TYPE_TOKENS[theme?.typography] || BUILDER_TYPE_TOKENS['Sans-serif & Friendly'];
         const prompt = `You are a senior product engineer and designer. Generate the complete, production-quality code for a web application from the plan and theme below. The result must look like a designed product, not a template.
@@ -542,6 +620,18 @@ ${Array.isArray(plan?.acceptanceCriteria) && plan.acceptanceCriteria.length > 0
         // Matches the value of each "path" field as it streams in. Provider-neutral:
         // the files array shape is identical whichever model produced it.
         const FILE_PATH_RE = /"path"\s*:\s*"([^"\\]{1,160})"/g;
+
+        // Correctness territory: build/dependency/environment lessons are exactly
+        // what a code-generation turn should hear about.
+        const recalled = await memory.recallBlock({
+            buildId,
+            episodeId,
+            task: `generate a React application: ${String(plan?.projectName ?? '').slice(0, 200)}`,
+            domain: 'build',
+            surface: 'builder.generate',
+        });
+
+        let servingModel = null;
         const accumulated = await withModelFallback(builderModelChain(requestedModel), async (model) => {
             res.write(JSON.stringify({ phase: 'thinking', model }) + '\n');
             const provider = providerForModel(model);
@@ -551,7 +641,7 @@ ${Array.isArray(plan?.acceptanceCriteria) && plan.acceptanceCriteria.length > 0
             for await (const event of provider.streamJson({
                 model,
                 system: builderPreamble(getModel(model).provider),
-                prompt,
+                prompt: prompt + recalled,
                 schema: GENERATE_SCHEMA,
                 effort: 'medium',
                 maxOutputTokens: 65536,
@@ -572,7 +662,7 @@ ${Array.isArray(plan?.acceptanceCriteria) && plan.acceptanceCriteria.length > 0
                 }
             }
             return { text: acc, usage };
-        });
+        }, (model) => { servingModel = model; });
 
         try {
             // The client protocol is unchanged: the files array becomes the
@@ -580,6 +670,22 @@ ${Array.isArray(plan?.acceptanceCriteria) && plan.acceptanceCriteria.length > 0
             const files = filesArrayToRecord(JSON.parse(accumulated.text).files);
             if (Object.keys(files).length === 0) throw new Error('no files in response');
             res.write(JSON.stringify({ files }) + '\n');
+
+            // A candidate exists. Whether it is any GOOD is the validator's
+            // verdict, which the client reports separately as
+            // verification.completed — this event is deliberately not that claim.
+            memory.appendEventSafe({
+                buildId,
+                episodeId,
+                kind: 'candidate.created',
+                surface: 'builder.generate',
+                ...attributionFor(servingModel),
+                payload: {
+                    fileCount: Object.keys(files).length,
+                    bytes: accumulated.text.length,
+                    memoryInjected: recalled !== '',
+                },
+            });
         } catch (parseError) {
             console.error('Builder generate: model returned malformed JSON', parseError.message);
             res.write(JSON.stringify({ error: 'The model returned malformed JSON. Please try again.' }) + '\n');
