@@ -110,10 +110,13 @@ memoryRouter.post('/events', async (req, res) => {
             ...(event.triggerTags ? { triggerTags: event.triggerTags } : {}),
         });
 
-        if (appended) accepted.push({ index, id: appended.id });
+        if (appended.event) accepted.push({ index, id: appended.event.id });
         // A rejection here is the engine refusing the record. Saying which one and
-        // why is the difference between a diagnosable gap and a silent hole.
-        else rejected.push({ index, kind: event.kind, reason: 'refused by the memory engine' });
+        // why is the difference between a diagnosable gap and a silent hole -- and
+        // "refused by the memory engine" was not why. The engine names the field it
+        // rejected and the vocabulary it wanted; that sentence goes back to the
+        // caller, who is the only one positioned to fix it.
+        else rejected.push({ index, kind: event.kind, reason: appended.reason ?? 'refused by the memory engine' });
     }
 
     res.json({ accepted: accepted.length, accepted_ids: accepted, rejected, evidenceIds });

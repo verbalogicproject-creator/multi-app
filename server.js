@@ -750,4 +750,9 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
 
 app.listen(port, () => {
     console.log(`Server listening at http://localhost:${port}`);
+    // Which databases this process will write to, said out loud at boot.
+    // A second server on an occupied port dies with EADDRINUSE, so requests keep
+    // being answered -- by the one already there, writing wherever IT was told to.
+    // That cost a whole verification run before the two lines below existed.
+    console.log(`Memory databases: ${memory.health().databaseDir}`);
 });

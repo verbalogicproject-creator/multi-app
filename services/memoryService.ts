@@ -80,13 +80,41 @@ export interface Attribution {
 }
 
 /**
- * A build id names one memory cluster — one database file. The server refuses an
- * id outside this alphabet rather than sanitizing it, because silently rewriting
- * one would split a build's memory across two databases. `generateUniqueId` is
- * NOT usable here: it contains a `.`.
+ * The alphabet a build id must be in — the server's `VALID_BUILD_ID`, mirrored.
+ *
+ * A build id names one memory cluster, which is one database file. The server
+ * refuses an id outside this set rather than sanitizing it, because silently
+ * rewriting one would split a build's memory across two databases.
+ * `generateUniqueId()` is NOT usable here: it contains a `.`.
  */
+const VALID_BUILD_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+
 export const newBuildId = (): string =>
     `build-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+
+const warned = new Set<string>();
+
+/**
+ * The id if the server can use it, `null` otherwise.
+ *
+ * Absent is a normal state — memory off, or a build that predates it — and says
+ * nothing. Present but malformed is a bug on this side, and would otherwise
+ * present as every tap quietly doing nothing for the rest of the build: the
+ * server refuses the id, each call returns 200 with a null, and the wizard runs
+ * to completion recording not one thing. Once per bad id is enough to find it.
+ */
+const usableBuildId = (buildId: string | null): string | null => {
+    if (!buildId) return null;
+    if (VALID_BUILD_ID.test(buildId)) return buildId;
+    if (!warned.has(buildId)) {
+        warned.add(buildId);
+        console.error(
+            `[memory] build id "${buildId}" is not one the server will accept, so nothing will be ` +
+            `recorded for this build. Ids must match ${VALID_BUILD_ID}; use newBuildId().`,
+        );
+    }
+    return null;
+};
 
 const post = async <T>(path: string, body: unknown): Promise<T | null> => {
     const controller = new AbortController();
@@ -120,9 +148,10 @@ export const openEpisode = async (
     objective: string,
     baseRevisionId?: string | null,
 ): Promise<string | null> => {
-    if (!buildId) return null;
+    const id = usableBuildId(buildId);
+    if (!id) return null;
     const result = await post<{ episodeId: string | null }>('/api/memory/episodes/open', {
-        buildId,
+        buildId: id,
         objective,
         ...(baseRevisionId ? { baseRevisionId } : {}),
     });
@@ -141,8 +170,9 @@ export const closeEpisode = (
     outcome: EpisodeOutcome,
     attribution?: Attribution,
 ): void => {
-    if (!buildId || !episodeId) return;
-    void post('/api/memory/episodes/close', { buildId, episodeId, outcome, ...attribution });
+    const id = usableBuildId(buildId);
+    if (!id || !episodeId) return;
+    void post('/api/memory/episodes/close', { buildId: id, episodeId, outcome, ...attribution });
 };
 
 /**
@@ -159,8 +189,9 @@ export const record = (
     events: MemoryEvent[],
     evidence: MemoryEvidence[] = [],
 ): void => {
-    if (!buildId || events.length === 0) return;
-    void post('/api/memory/events', { buildId, episodeId, events, evidence });
+    const id = usableBuildId(buildId);
+    if (!id || events.length === 0) return;
+    void post('/api/memory/events', { buildId: id, episodeId, events, evidence });
 };
 
 export interface MemoryStateResponse {
