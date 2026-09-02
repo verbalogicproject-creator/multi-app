@@ -30,7 +30,7 @@ const CustomStyleEditor: React.FC<{
           <div><label htmlFor="styleName" className="block text-sm font-medium text-metal-300 mb-1">Style Name</label><input id="styleName" type="text" value={name} onChange={e => setName(e.target.value)} className="w-full p-2 bg-metal-700 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-accent" placeholder="e.g., Socratic Tutor" /></div>
           <div><label htmlFor="styleInstructions" className="block text-sm font-medium text-metal-300 mb-1">Instructions</label><textarea id="styleInstructions" value={instructions} onChange={e => setInstructions(e.target.value)} className="w-full h-40 p-2 bg-metal-700 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-accent" placeholder="Describe how the AI should behave with this style..."></textarea></div>
         </main>
-        <footer className="p-4 border-t border-white/[0.06] flex justify-end gap-2"><button type="button" onClick={onCancel} className="px-4 py-2 bg-metal-700 rounded-md md:hover:bg-[#33333a] transition-colors text-sm font-semibold">Cancel</button><button type="submit" className="px-4 py-2 bg-raised rounded-md md:hover:bg-[#33333a] transition-colors text-sm font-semibold">Save Style</button></footer>
+        <footer className="p-4 border-t border-white/[0.06] flex justify-end gap-2"><button type="button" onClick={onCancel} className="tap px-4 bg-metal-700 rounded-lg md:hover:bg-[#33333a] transition-colors text-sm font-medium">Cancel</button><button type="submit" className="tap px-4 bg-raised rounded-lg md:hover:bg-[#33333a] transition-colors text-sm font-medium">Save Style</button></footer>
       </form></div>
     </div>
   );
@@ -106,7 +106,7 @@ const AiControls: React.FC = () => {
     <div className="bg-surface hairline rounded-lg p-3 space-y-4">
       {showStyleEditor && <CustomStyleEditor style={editingStyle} onSave={handleSaveStyle} onCancel={() => setShowStyleEditor(false)} existingNames={customAiStyles.filter(s => !s.isDefault).map(s => s.name)} />}
       <div className="pb-3 border-b border-white/[0.06]">
-        <button onClick={() => setIsManagingStyles(!isManagingStyles)} className="w-full flex justify-between items-center text-left text-sm font-semibold text-metal-300 hover:text-metal-100">Manage Style Blocks<svg xmlns="http://www.w3.org/2000/svg" className={`h-5 w-5 transition-transform ${isManagingStyles ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg></button>
+        <button onClick={() => setIsManagingStyles(!isManagingStyles)} className="tap w-full flex justify-between items-center text-left text-sm font-medium text-metal-300 md:hover:text-metal-100">Manage Style Blocks<svg xmlns="http://www.w3.org/2000/svg" className={`h-5 w-5 transition-transform ${isManagingStyles ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg></button>
         {isManagingStyles && (<div className="mt-3 space-y-2">
             <div className="max-h-40 overflow-y-auto pr-2 space-y-2">
                 {customAiStyles.length === 0 && <p className="text-xs text-metal-400 italic text-center">No styles created yet.</p>}
@@ -128,14 +128,14 @@ const AiControls: React.FC = () => {
         <div className="flex-1 w-full space-y-2">
             <label htmlFor="persona-select" className="block text-xs font-semibold text-metal-300">Load Persona</label>
             <div className="flex gap-2">
-              <select id="persona-select" value={selectedPersonaId || ''} onChange={e => onSelectPersona(e.target.value || null)} className="flex-1 p-2 bg-metal-700 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-accent"><option value="">✨ New Persona (Unsaved)</option>{personas.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+              <select id="persona-select" value={selectedPersonaId || ''} onChange={e => onSelectPersona(e.target.value || null)} className="tap flex-1 min-w-0 px-3 bg-metal-700 rounded-lg text-sm focus:outline-none"><option value="">✨ New Persona (Unsaved)</option>{personas.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
               {selectedPersonaId && (<button onClick={() => handleDeletePersona(selectedPersonaId)} className="tap p-2 rounded-md bg-metal-700 text-accent md:hover:bg-[#33333a]" title="Delete persona"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>)}
             </div>
         </div>
         <div className="w-full sm:w-auto h-px sm:h-auto bg-metal-700 sm:w-px sm:h-10"></div>
         <div className="flex items-center justify-around w-full sm:w-auto gap-6">
-            <div className="flex flex-col items-center"><label className="block text-xs font-semibold text-metal-300 mb-2">Web Search</label><button onClick={() => onWebSearchToggle(!useWebSearch)} className={`relative inline-flex items-center h-6 rounded-full w-11 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-ground focus:ring-accent ${useWebSearch ? 'bg-metal-300' : 'bg-metal-700'}`}><span className={`inline-block w-4 h-4 transform rounded-full transition-transform ${useWebSearch ? "bg-ground" : "bg-metal-400"} ${useWebSearch ? 'translate-x-6' : 'translate-x-1'}`} /></button></div>
-            <div className="flex flex-col items-center"><label className="block text-xs font-semibold text-metal-300 mb-2" title="Disables 'thinking' for gemini-2.5-flash for faster responses.">Low Latency</label><button onClick={() => onLowLatencyModeToggle(!lowLatencyMode)} className={`relative inline-flex items-center h-6 rounded-full w-11 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-ground focus:ring-accent ${lowLatencyMode ? 'bg-metal-300' : 'bg-metal-700'}`}><span className={`inline-block w-4 h-4 transform rounded-full transition-transform ${lowLatencyMode ? "bg-ground" : "bg-metal-400"} ${lowLatencyMode ? 'translate-x-6' : 'translate-x-1'}`} /></button></div>
+            <div className="tap flex flex-col items-center justify-center"><label className="block text-xs font-medium text-metal-300 mb-2">Web Search</label><button aria-label="Web search" aria-pressed={useWebSearch} onClick={() => onWebSearchToggle(!useWebSearch)} className="tap flex items-center justify-center focus:outline-none"><span aria-hidden className={`relative inline-flex items-center h-6 rounded-full w-11 transition-colors duration-200 ease-fluid ${useWebSearch ? 'bg-metal-300' : 'bg-metal-700'}`}><span className={`inline-block w-4 h-4 transform rounded-full transition-transform duration-200 ease-fluid ${useWebSearch ? "bg-ground" : "bg-metal-400"} ${useWebSearch ? 'translate-x-6' : 'translate-x-1'}`} /></span></button></div>
+            <div className="tap flex flex-col items-center justify-center"><label className="block text-xs font-medium text-metal-300 mb-2" title="Disables 'thinking' for gemini-2.5-flash for faster responses.">Low Latency</label><button aria-label="Low latency" aria-pressed={lowLatencyMode} onClick={() => onLowLatencyModeToggle(!lowLatencyMode)} className="tap flex items-center justify-center focus:outline-none"><span aria-hidden className={`relative inline-flex items-center h-6 rounded-full w-11 transition-colors duration-200 ease-fluid ${lowLatencyMode ? 'bg-metal-300' : 'bg-metal-700'}`}><span className={`inline-block w-4 h-4 transform rounded-full transition-transform duration-200 ease-fluid ${lowLatencyMode ? "bg-ground" : "bg-metal-400"} ${lowLatencyMode ? 'translate-x-6' : 'translate-x-1'}`} /></span></button></div>
         </div>
       </div>
        {useWebSearch && <p className="text-center text-xs text-metal-300 pt-2 border-t border-white/[0.06]">Note: Web Search disables other tools like `runPython` for the query.</p>}
@@ -145,23 +145,28 @@ const AiControls: React.FC = () => {
         <div><label className="block text-xs font-semibold text-metal-300 mb-1">Composed Styles (Primary is first)</label>
           <div className="space-y-2 p-2 bg-black/20 rounded-md">
               {activePersona.composedStyles.map((style, index) => (<div key={index} className="flex items-center gap-2 bg-metal-700 p-2 rounded">
-                  <div className="flex flex-col"><button onClick={() => handleMoveStyle(index, 'up')} disabled={index === 0} className="disabled:opacity-20 hover:text-metal-200">&#9650;</button><button onClick={() => handleMoveStyle(index, 'down')} disabled={index === activePersona.composedStyles.length - 1} className="disabled:opacity-20 hover:text-metal-200">&#9660;</button></div>
+                  {/* Side by side, not stacked. Stacked, each arrow was 22px tall inside a
+                      44px column — the pair met the rule and neither half did.
+                      Horizontal gives each a real 44x44 without doubling the row. */}
+                  <div className="flex shrink-0"><button onClick={() => handleMoveStyle(index, 'up')} disabled={index === 0} aria-label="Move up" className="tap flex items-center justify-center rounded-lg text-xs text-metal-300 transition-colors duration-200 ease-fluid disabled:opacity-20 md:hover:text-metal-100 md:hover:bg-[#33333a]">&#9650;</button><button onClick={() => handleMoveStyle(index, 'down')} disabled={index === activePersona.composedStyles.length - 1} aria-label="Move down" className="tap flex items-center justify-center rounded-lg text-xs text-metal-300 transition-colors duration-200 ease-fluid disabled:opacity-20 md:hover:text-metal-100 md:hover:bg-[#33333a]">&#9660;</button></div>
                   <span className="font-semibold text-sm flex-1 truncate" title={style.name}>{style.name}</span>
                   <input type="range" min="0" max="1" step="0.05" value={style.weight} onChange={e => handleUpdateComposedStyle(index, { weight: Number(e.target.value) })} className="w-20 h-11 accent-metal-300" />
                   <span className="text-xs w-8 text-center">{Math.round(style.weight * 100)}%</span>
-                  <button onClick={() => handleRemoveComposedStyle(index)} className="text-metal-400 hover:text-accent-soft font-bold p-1 text-lg">&times;</button>
+                  <button onClick={() => handleRemoveComposedStyle(index)} aria-label="Remove style"
+                    className="tap flex items-center justify-center shrink-0 rounded-lg text-metal-300 text-lg leading-none
+                               transition-colors duration-200 ease-fluid md:hover:text-accent md:hover:bg-metal-700"><span aria-hidden>&times;</span></button>
               </div>))}
               {activePersona.composedStyles.length === 0 && <p className="text-center text-xs text-metal-400 italic py-2">No styles added. Add a style to begin composing.</p>}
           </div>
           <div className="flex gap-2 mt-2">
-            <select value={styleToAdd} onChange={e => setStyleToAdd(e.target.value)} className="flex-1 p-2 bg-metal-700 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-accent">{availableStyles.map(s => <option key={s} value={s}>{s}</option>)}</select>
-            <button onClick={handleAddComposedStyle} className="px-4 py-2 bg-metal-700 rounded-md hover:bg-metal-700 text-sm">Add Style</button>
+            <select value={styleToAdd} onChange={e => setStyleToAdd(e.target.value)} className="tap flex-1 min-w-0 px-3 bg-metal-700 rounded-lg text-sm focus:outline-none">{availableStyles.map(s => <option key={s} value={s}>{s}</option>)}</select>
+            <button onClick={handleAddComposedStyle} className="tap px-4 bg-metal-700 rounded-lg md:hover:bg-[#33333a] text-sm font-medium">Add Style</button>
           </div>
         </div>
         <div className="flex flex-wrap justify-end gap-2 pt-3 border-t border-white/[0.06]">
-            <button onClick={() => fileImportRef.current?.click()} className="px-3 py-1 bg-metal-700 text-metal-200 text-xs font-semibold rounded-md md:hover:bg-[#33333a]">Import</button><input type="file" ref={fileImportRef} onChange={handleFileImport} accept=".json" className="hidden" />
-            <button onClick={handleExport} className="px-3 py-1 bg-metal-700 text-metal-200 text-xs font-semibold rounded-md md:hover:bg-[#33333a]">Export</button>
-            <button onClick={handleSaveCurrentPersona} className="px-4 py-1.5 bg-raised text-metal-100 text-sm font-semibold rounded-md md:hover:bg-[#33333a]">{selectedPersonaId ? 'Update Persona' : 'Save as New Persona'}</button>
+            <button onClick={() => fileImportRef.current?.click()} className="tap px-4 bg-metal-700 text-metal-200 text-xs font-medium rounded-lg md:hover:bg-[#33333a]">Import</button><input type="file" ref={fileImportRef} onChange={handleFileImport} accept=".json" className="hidden" />
+            <button onClick={handleExport} className="tap px-4 bg-metal-700 text-metal-200 text-xs font-medium rounded-lg md:hover:bg-[#33333a]">Export</button>
+            <button onClick={handleSaveCurrentPersona} className="tap px-4 bg-raised text-metal-100 text-sm font-medium rounded-lg md:hover:bg-[#33333a]">{selectedPersonaId ? 'Update Persona' : 'Save as New Persona'}</button>
         </div>
       </div>
     </div>

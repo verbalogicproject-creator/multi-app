@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Project, ProjectFile } from '../types/index';
 
 interface ProjectSettingsModalProps {
@@ -10,6 +10,12 @@ interface ProjectSettingsModalProps {
   onDeleteFile: (fileId: string, projectId: string) => void;
 }
 
+/**
+ * A centred dialog from `md:` up, a bottom sheet on a phone — the same
+ * mechanism the Memory drawer uses, so the app has one modal idiom rather than
+ * three. `dvh`, never `vh`: iOS Safari's collapsing toolbar makes `vh` jump
+ * mid-scroll and a modal sized in `vh` grows a scrollbar it does not need.
+ */
 const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
   project,
   files,
@@ -20,53 +26,104 @@ const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
 }) => {
   const [projectName, setProjectName] = useState(project.name);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    closeRef.current?.focus();
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
 
   const handleSave = () => {
     if (projectName.trim() && projectName.trim() !== project.name) {
       onRenameProject(project.id, projectName.trim());
     }
   };
-  
+
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (event.target.files) {
       Array.from(event.target.files).forEach(file => onAddFile(project.id, file));
     }
   };
 
+  const renameDisabled = !projectName.trim() || projectName.trim() === project.name;
+
   return (
-    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-      <div className="bg-gray-800 rounded-lg shadow-xl w-full max-w-2xl border border-gray-700 flex flex-col max-h-[90vh]">
-        <header className="p-4 border-b border-gray-700 flex justify-between items-center">
-          <h2 className="text-xl font-bold text-sky-400">Settings for "{project.name}"</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-white text-2xl">&times;</button>
+    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
+      <div aria-hidden onClick={onClose} className="absolute inset-0 bg-black/70" />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Settings for ${project.name}`}
+        className="relative w-full md:max-w-2xl flex flex-col max-h-[92dvh] md:max-h-[85dvh]
+                   bg-surface rounded-t-shell md:rounded-shell
+                   shadow-[inset_0_1px_0_rgb(255_255_255/0.10)]"
+      >
+        <header className="shrink-0 flex justify-between items-center gap-2 px-4 md:px-6 py-2
+                           shadow-[inset_0_-1px_0_rgb(255_255_255/0.06)]">
+          <h2 className="font-display text-lg md:text-xl tracking-[-0.02em] text-metal-100 truncate">
+            Settings — <span className="meta text-base">{project.name}</span>
+          </h2>
+          <button ref={closeRef} onClick={onClose} aria-label="Close settings"
+            className="tap flex items-center justify-center shrink-0 rounded-lg text-metal-300 text-xl leading-none
+                       transition-colors duration-200 ease-fluid md:hover:text-metal-100 md:hover:bg-metal-700">
+            <span aria-hidden>&times;</span>
+          </button>
         </header>
 
-        <main className="p-6 overflow-y-auto">
+        <main className="flex-1 min-h-0 overflow-y-auto p-4 md:p-6">
           <div className="mb-6">
-            <label htmlFor="projectName" className="block text-sm font-medium text-gray-300 mb-2">Project Name</label>
+            <label htmlFor="projectName" className="block text-xs font-medium uppercase tracking-[0.12em] text-metal-300 mb-2">
+              Project name
+            </label>
             <div className="flex gap-2">
-                <input id="projectName" type="text" value={projectName} onChange={(e) => setProjectName(e.target.value)} className="flex-1 p-2 bg-gray-700 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-sky-500" />
-                <button onClick={handleSave} disabled={!projectName.trim() || projectName.trim() === project.name} className="p-2 bg-sky-600 rounded-md hover:bg-sky-500 transition-colors text-sm font-semibold disabled:bg-gray-600 disabled:cursor-not-allowed">Rename</button>
+                <input id="projectName" type="text" value={projectName} onChange={(e) => setProjectName(e.target.value)}
+                  className="tap flex-1 min-w-0 px-3 bg-raised rounded-lg text-sm text-metal-100 hairline focus:outline-none" />
+                <button onClick={handleSave} disabled={renameDisabled}
+                  className="tap shrink-0 px-4 rounded-lg bg-metal-700 text-metal-100 text-sm font-medium
+                             shadow-[inset_0_1px_0_rgb(255_255_255/0.06)]
+                             transition-[background-color,transform] duration-200 ease-fluid
+                             md:hover:bg-[#33333a] active:scale-[0.98]
+                             disabled:opacity-35 disabled:active:scale-100 disabled:md:hover:bg-metal-700">
+                  Rename
+                </button>
             </div>
           </div>
 
           <div>
-            <h3 className="text-lg font-semibold text-gray-200 mb-3">Manage Files</h3>
-            <button onClick={() => fileInputRef.current?.click()} className="w-full text-center p-2 mb-4 bg-gray-600 hover:bg-sky-700 rounded-md text-sm transition-colors">Add More Files</button>
+            <h3 className="text-xs font-medium uppercase tracking-[0.12em] text-metal-300 mb-3">Files</h3>
+            <button onClick={() => fileInputRef.current?.click()}
+              className="tap w-full rounded-lg text-sm text-metal-300 mb-4
+                         shadow-[inset_0_0_0_1px_rgb(255_255_255/0.08)]
+                         transition-colors duration-200 ease-fluid md:hover:text-metal-100 md:hover:bg-white/[0.04]">
+              Add files
+            </button>
             <input type="file" multiple ref={fileInputRef} onChange={handleFileChange} className="hidden" />
-            <ul className="text-sm space-y-2">
+            <ul className="space-y-2">
               {files.length > 0 ? files.map(file => (
-                <li key={file.id} className="flex justify-between items-center bg-gray-900 p-2 rounded-md">
-                  <span className="truncate" title={file.path}>{file.path}</span>
-                  <button onClick={() => onDeleteFile(file.id, project.id)} className="text-gray-500 hover:text-red-400 font-bold px-2">&times;</button>
+                <li key={file.id} className="flex justify-between items-center gap-2 bg-raised rounded-lg pl-3">
+                  <span className="meta text-xs truncate" title={file.path}>{file.path}</span>
+                  {/* The one control here that loses something, and always
+                      reachable: a hover-only affordance is invisible to a thumb. */}
+                  <button onClick={() => onDeleteFile(file.id, project.id)} aria-label={`Delete ${file.path}`}
+                    className="tap flex items-center justify-center shrink-0 rounded-lg text-metal-300 text-lg leading-none
+                               transition-colors duration-200 ease-fluid md:hover:text-accent md:hover:bg-metal-700">
+                    <span aria-hidden>&times;</span>
+                  </button>
                 </li>
-              )) : ( <p className="text-gray-500 text-center italic text-sm">This project has no files.</p> )}
+              )) : ( <p className="text-sm text-metal-300 text-center">This project has no files.</p> )}
             </ul>
           </div>
         </main>
-        
-        <footer className="p-4 border-t border-gray-700 text-right">
-            <button onClick={onClose} className="px-4 py-2 bg-gray-600 rounded-md hover:bg-gray-500 transition-colors text-sm font-semibold">Close</button>
+
+        <footer className="shrink-0 px-4 md:px-6 py-2 text-right safe-b md:pb-2
+                           shadow-[inset_0_1px_0_rgb(255_255_255/0.06)]">
+            <button onClick={onClose}
+              className="tap px-5 rounded-lg bg-transparent text-metal-300 text-sm font-medium hairline
+                         transition-colors duration-200 ease-fluid md:hover:text-metal-100">
+              Close
+            </button>
         </footer>
       </div>
     </div>
