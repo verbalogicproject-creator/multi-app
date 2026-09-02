@@ -219,6 +219,38 @@ const AUDIT = () => {
         }
     }
 
+    // --- unreachable: content above a scroll container's origin --------------
+    //
+    // A scroll container that also centres its children pushes overflow ABOVE
+    // scrollTop 0, where no gesture can reach it. The export screen lost its own
+    // heading this way, and the clipping check above waved it through because
+    // the container *could* scroll — just never far enough up.
+    for (const c of document.querySelectorAll('body *')) {
+        const s = getComputedStyle(c);
+        if (s.overflowY !== 'auto' && s.overflowY !== 'scroll') continue;
+        if (c.scrollTop !== 0) continue;                 // only judge at the origin
+        const cr = c.getBoundingClientRect();
+        // Descendants, not children. The first version of this compared only
+        // direct children and missed the real case entirely: the wrapper began
+        // at the origin while everything inside it sat 191px above, because a
+        // flex child had been shrunk to its min-height and then centred its
+        // overflow in both directions. Report the worst offender only — one
+        // mis-set container makes every element inside it a finding.
+        let worst = null;
+        for (const d of c.querySelectorAll('*')) {
+            if (!visible(d)) continue;
+            const pos = getComputedStyle(d).position;
+            if (pos === 'fixed' || pos === 'sticky') continue;
+            const top = d.getBoundingClientRect().top;
+            if (top < cr.top - 2 && (!worst || top < worst.top)) worst = { el: d, top };
+        }
+        if (worst) {
+            findings.clipping.push(
+                `${label(worst.el)} sits ${Math.round(cr.top - worst.top)}px above the scroll origin of ` +
+                `${label(c)} — unreachable by scrolling`);
+        }
+    }
+
     // --- overflow: the page itself must never scroll sideways ----------------
     const de = document.documentElement;
     if (de.scrollWidth > de.clientWidth + 1) {
@@ -240,7 +272,7 @@ const run = async () => {
     for (const [profileName, profile] of [['phone', PHONE], ['desktop', DESKTOP]]) {
         for (const surface of SURFACES) {
             if (!surface[profileName]) continue;
-            const { context, page } = await openPage(browser, profile, URL);
+            const { context, page } = await openPage(browser, profile, URL, surface.seed);
             const where = `${profileName}/${surface.name}`;
             try {
                 await surface.reach(page);

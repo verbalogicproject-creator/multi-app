@@ -26,9 +26,22 @@ const toDraft = (plan: any): DraftPlan => ({
         : [],
 });
 
-const inputClass = "w-full p-2 bg-gray-700 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-sky-500 disabled:opacity-60";
-const removeBtnClass = "px-2 text-gray-500 hover:text-red-400 text-lg leading-none shrink-0";
-const addBtnClass = "mt-2 w-full py-1.5 border border-dashed border-gray-600 text-gray-400 text-xs rounded-md hover:border-sky-500 hover:text-sky-400";
+const inputClass =
+    "tap w-full px-3 bg-raised rounded-lg text-sm text-metal-100 placeholder:text-metal-400 " +
+    "hairline focus:outline-none disabled:opacity-40";
+/* Destructive, and reachable by thumb: an opacity-0-until-hover control is a
+   control a touch screen cannot find. Metal at rest, accent on the glyph only
+   when you are about to use it. */
+const removeBtnClass =
+    "tap flex items-center justify-center shrink-0 rounded-lg text-metal-300 text-lg leading-none " +
+    "transition-colors duration-200 ease-fluid md:hover:text-accent md:hover:bg-metal-700";
+const addBtnClass =
+    "tap mt-2 w-full rounded-lg text-metal-300 text-xs " +
+    "shadow-[inset_0_0_0_1px_rgb(255_255_255/0.08)] " +
+    "transition-colors duration-200 ease-fluid md:hover:text-metal-100 md:hover:bg-white/[0.04] " +
+    "disabled:opacity-40";
+const panelClass = "p-4 md:p-5 bg-surface rounded-card hairline";
+const panelHeading = "text-xs font-medium uppercase tracking-[0.12em] text-metal-300";
 
 const Step_Plan: React.FC = () => {
     const { builderState, setBuilderState, refineWebAppPlan, recordEvidence } = useAppContext();
@@ -41,7 +54,7 @@ const Step_Plan: React.FC = () => {
     useEffect(() => { setDraft(toDraft(plan)); }, [plan]);
 
     if (!plan) {
-        return <div className="text-center text-gray-400">Generating plan...</div>;
+        return <div className="text-center text-sm text-metal-300">Generating plan…</div>;
     }
 
     const isBusy = status.isLoading;
@@ -71,30 +84,32 @@ const Step_Plan: React.FC = () => {
     };
 
     return (
-        <div className="w-full max-w-3xl mx-auto bg-gray-800/50 border border-gray-700 rounded-lg p-4 md:p-6">
-            <h2 className="text-2xl font-bold text-sky-400 text-center">Project Blueprint</h2>
-            <p className="mt-1 text-center text-gray-400 text-sm">
+        <div className="w-full max-w-3xl mx-auto bg-surface rounded-card hairline p-4 md:p-6">
+            <h2 className="font-display text-2xl md:text-3xl tracking-[-0.03em] text-metal-100 text-center">
+                Project blueprint
+            </h2>
+            <p className="mt-2 text-center text-metal-300 text-sm">
                 Edit anything directly, or ask the AI to revise it. Nothing is built until you approve.
             </p>
 
             {/* Identity */}
-            <div className="mt-6 p-4 bg-gray-900 rounded-md space-y-3">
+            <div className="mt-6 p-4 md:p-5 bg-raised rounded-card space-y-3">
                 <div>
-                    <label className="block text-xs text-gray-400 mb-1">Project name</label>
+                    <label className="block text-xs text-metal-300 mb-2">Project name</label>
                     <input type="text" value={draft.projectName} disabled={isBusy}
                         onChange={e => update({ projectName: e.target.value })} className={inputClass} />
                 </div>
                 <div>
-                    <label className="block text-xs text-gray-400 mb-1">Description</label>
+                    <label className="block text-xs text-metal-300 mb-2">Description</label>
                     <textarea value={draft.projectDescription} disabled={isBusy} rows={2}
                         onChange={e => update({ projectDescription: e.target.value })} className={inputClass} />
                 </div>
             </div>
 
-            <div className="mt-4 grid md:grid-cols-2 gap-4">
+            <div className="mt-4 grid md:grid-cols-2 gap-4 md:gap-5">
                 {/* Pages */}
-                <div className="p-4 bg-gray-900 rounded-md">
-                    <h3 className="font-semibold text-gray-200 mb-2 border-b border-gray-700 pb-2 text-sm">Pages</h3>
+                <div className={panelClass}>
+                    <h3 className={`${panelHeading} mb-3 pb-3 shadow-[inset_0_-1px_0_rgb(255_255_255/0.06)]`}>Pages</h3>
                     <ul className="space-y-3">
                         {draft.pages.map((page, index) => (
                             <li key={index} className="space-y-1">
@@ -118,8 +133,8 @@ const Step_Plan: React.FC = () => {
                 </div>
 
                 {/* Components */}
-                <div className="p-4 bg-gray-900 rounded-md">
-                    <h3 className="font-semibold text-gray-200 mb-2 border-b border-gray-700 pb-2 text-sm">Components</h3>
+                <div className={panelClass}>
+                    <h3 className={`${panelHeading} mb-3 pb-3 shadow-[inset_0_-1px_0_rgb(255_255_255/0.06)]`}>Components</h3>
                     <ul className="space-y-3">
                         {draft.components.map((component, index) => (
                             <li key={index} className="space-y-1">
@@ -142,13 +157,13 @@ const Step_Plan: React.FC = () => {
             </div>
 
             {/* Acceptance criteria */}
-            <div className="mt-4 p-4 bg-gray-900 rounded-md">
-                <h3 className="font-semibold text-gray-200 mb-1 text-sm">Acceptance criteria</h3>
-                <p className="text-xs text-gray-500 mb-2">What the finished app must do. These are sent to the code generator as requirements.</p>
+            <div className={`mt-4 ${panelClass}`}>
+                <h3 className={panelHeading}>Acceptance criteria</h3>
+                <p className="text-xs text-metal-300 mt-2 mb-3">What the finished app must do. These are sent to the code generator as requirements.</p>
                 <ul className="space-y-2">
                     {draft.acceptanceCriteria.map((criterion, index) => (
                         <li key={index} className="flex items-center gap-2">
-                            <span className="text-gray-600 text-xs shrink-0">{index + 1}.</span>
+                            <span aria-hidden className="meta text-xs shrink-0 w-4 text-right">{index + 1}</span>
                             <input type="text" value={criterion} disabled={isBusy}
                                 onChange={e => update({ acceptanceCriteria: draft.acceptanceCriteria.map((c, i) => i === index ? e.target.value : c) })}
                                 className={inputClass} />
@@ -164,9 +179,9 @@ const Step_Plan: React.FC = () => {
             </div>
 
             {/* AI refine */}
-            <div className="mt-4 p-4 bg-gray-900 rounded-md">
-                <h3 className="font-semibold text-gray-200 mb-1 text-sm">Ask the AI to revise this blueprint</h3>
-                <p className="text-xs text-gray-500 mb-2">
+            <div className={`mt-4 ${panelClass}`}>
+                <h3 className={panelHeading}>Ask the AI to revise this blueprint</h3>
+                <p className="text-xs text-metal-300 mt-2 mb-3">
                     Your manual edits above are included. Costs one model request; untouched parts are kept as-is.
                 </p>
                 <textarea
@@ -180,24 +195,32 @@ const Step_Plan: React.FC = () => {
                 <button
                     onClick={handleRefine}
                     disabled={isBusy || !feedback.trim()}
-                    className="mt-2 px-5 py-2 bg-gray-700 text-white text-sm font-semibold rounded-md hover:bg-gray-600 disabled:opacity-50 disabled:hover:bg-gray-700"
+                    className="tap mt-3 px-5 rounded-lg bg-metal-700 text-metal-100 text-sm font-medium
+                               shadow-[inset_0_1px_0_rgb(255_255_255/0.06)]
+                               transition-[background-color,transform] duration-200 ease-fluid
+                               md:hover:bg-[#33333a] active:scale-[0.98]
+                               disabled:opacity-40 disabled:active:scale-100"
                 >
                     {isBusy ? 'Revising…' : 'Refine with AI'}
                 </button>
-                {status.message && <span className="ml-3 text-xs text-gray-400">{status.message}</span>}
+                {status.message && <span className="ml-3 text-xs text-metal-300">{status.message}</span>}
             </div>
 
             <div className="mt-8 text-center">
                 <button
                     onClick={handleApprove}
                     disabled={isBusy}
-                    className="px-10 py-3 bg-sky-600 text-white font-semibold rounded-lg shadow-md hover:bg-sky-500 transition-all transform hover:scale-105 disabled:opacity-50 disabled:transform-none"
+                    className="tap w-full sm:w-auto px-10 rounded-xl bg-metal-700 text-metal-100 font-medium
+                               shadow-[inset_0_1px_0_rgb(255_255_255/0.08)]
+                               transition-[background-color,transform] duration-200 ease-fluid
+                               md:hover:bg-[#33333a] active:scale-[0.98]
+                               disabled:opacity-40 disabled:active:scale-100"
                 >
-                    Looks Good, Let's Add Style!
+                    Looks good — add style
                 </button>
                 {isDirty && (
                     <button onClick={() => setDraft(toDraft(plan))} disabled={isBusy}
-                        className="block mx-auto mt-3 text-xs text-gray-500 hover:text-gray-300">
+                        className="tap block mx-auto mt-2 px-3 text-xs text-metal-300 md:hover:text-metal-100">
                         Discard my edits
                     </button>
                 )}
