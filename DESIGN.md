@@ -26,6 +26,7 @@ used.
 | Phone vs desktop | **Two designs** — desktop keeps its split, the phone gets its own | One layout that recomposes at every width |
 | Chat identity | **Shape** — one raised bubble for you, flat text for the assistant | Indigo vs teal; two greys; the accent for your turn |
 | Counterpoint | **Mono is the machine's voice** | The hairline as a grid; concentric radii alone |
+| Preview runtime | **iframe over a server-bundled blob**, behind one seam | WebContainer now; deciding later |
 
 ### The glance test
 
@@ -210,6 +211,43 @@ with the memory drawer over the top. Only its colours moved onto tokens.
 **Surfaces are hidden, not unmounted.** `hidden` rather than a conditional
 render, so chat scroll position, an unsent message and terminal history all
 survive a trip to Code and back.
+
+### The preview runs in an iframe, and that is a decision about headers
+
+Generated React will render in an **iframe fed a self-contained document** that
+the server bundles with esbuild — not in a WebContainer.
+
+WebContainer is the better product: a real Node runtime in the tab, real
+`npm install`, real Vite, real HMR. It needs `SharedArrayBuffer`, which since
+Spectre is only exposed to a **cross-origin isolated** document, which requires
+both:
+
+```
+Cross-Origin-Opener-Policy:   same-origin
+Cross-Origin-Embedder-Policy: require-corp
+```
+
+`COEP: require-corp` is the expensive half. It makes the document **refuse** any
+cross-origin subresource that has not explicitly opted in with
+`Cross-Origin-Resource-Policy` or valid CORS. Not degrade — refuse, silently.
+And these are **document** headers: they cannot be scoped to the Code tab. Send
+them and every screen is isolated, including the ones that load generated images
+and video.
+
+So the choice is deferred rather than taken, and the app is shaped so it stays
+cheap to take later:
+
+- the preview lives behind **one seam** — a `PreviewHost` component and a
+  `buildPreview()` service — so swapping the runtime is two files, not the app;
+- **media loads through our own server, never a third-party URL.** This is the
+  expensive part of COEP compliance, it is good practice regardless, and doing it
+  during the wizard migration means the headers become a config line if
+  WebContainer is ever wanted.
+
+The rule that follows, and it binds the migration: **when a component that loads
+media is migrated, its media is proxied at the same time.** Doing the colours now
+and the origins later means touching those files twice, and the second pass is
+the one that can break them.
 
 ### IdeView is one component, two layouts
 
@@ -480,7 +518,8 @@ because *a check is only as good as its alphabet*.
 
 ```
 after the chat sweep     26 files   336 usages
-after the shell pass     13 files   205 usages
+after the shell pass     13 files   204 usages
+after the wizard          6 files    62 usages
 ```
 
 Done: `App` · `MobileTabBar` · `ProjectManager` · `AgentManager` · `ChatPanel` ·
@@ -489,9 +528,9 @@ Done: `App` · `MobileTabBar` · `ProjectManager` · `AgentManager` · `ChatPane
 `AiControls` · `AssistantMessage` · `ImageEditorPane` · `ModeSelector` ·
 `ToolMessage` · `Step_Theme`.
 
-Left, and all of it is the builder wizard plus four leaves: `Step_Plan` (37),
+Left, after the wizard landed — no coherent flow remains, only leaves: `Step_Plan` (37),
 `Step_Export` (36), `Step_Generate` (27), `BuildShelf` (24),
-`ProjectSettingsModal` (21), `VideoGeneratorPane` (18), `ImageUpload` (11),
+`ProjectSettingsModal` (21), `VideoGeneratorPane` (17), `ImageUpload` (11),
 `Step_Idea` (8), `StepIndicator` (8), `LiveChatPane` (6), `CodeBlock` (6),
 `WebAppBuilder` (2), `DesignContractPreview` (1 — deliberate: that surface
 renders the *generated* app and must not inherit this palette).

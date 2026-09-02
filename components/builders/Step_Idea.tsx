@@ -19,22 +19,33 @@ const Step_Idea: React.FC = () => {
     
     return (
         <div className="w-full max-w-2xl mx-auto text-center">
-            <h2 className="text-3xl font-bold text-white">Let's start with your big idea.</h2>
-            <p className="mt-2 text-gray-400">Describe the web app you want to build. What is its main purpose? Who is it for?</p>
+            <h2 className="font-display text-2xl md:text-3xl tracking-[-0.03em] text-metal-100">
+                Let's start with your big idea.
+            </h2>
+            <p className="mt-2 text-sm text-metal-300">
+                Describe the web app you want to build. What is its main purpose? Who is it for?
+            </p>
             <form onSubmit={handleSubmit} className="mt-6">
                 <textarea
                     value={idea}
                     onChange={handleChange}
-                    placeholder="e.g., A simple website for a local bakery that shows their menu, location, and a contact form."
-                    className="w-full h-40 p-4 bg-gray-800 border-2 border-gray-700 rounded-lg text-lg focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition-colors"
+                    aria-label="Your idea"
+                    placeholder="e.g. a simple site for a local bakery — menu, location, contact form"
+                    className="w-full h-40 p-4 bg-raised rounded-card text-base md:text-lg text-metal-100
+                               placeholder:text-metal-400 hairline focus:outline-none
+                               disabled:opacity-40 transition-colors duration-200 ease-fluid"
                     disabled={status.isLoading}
                 />
                 <button
                     type="submit"
                     disabled={!idea.trim() || status.isLoading}
-                    className="mt-6 px-10 py-3 bg-sky-600 text-white font-semibold rounded-lg shadow-md hover:bg-sky-500 disabled:bg-gray-600 disabled:cursor-not-allowed transition-all transform hover:scale-105 w-full md:w-auto"
+                    className="tap mt-6 w-full md:w-auto px-10 rounded-xl bg-metal-700 text-metal-100 font-medium
+                               shadow-[inset_0_1px_0_rgb(255_255_255/0.08)]
+                               transition-[background-color,transform] duration-200 ease-fluid
+                               md:hover:bg-[#33333a] active:scale-[0.98]
+                               disabled:opacity-40 disabled:active:scale-100"
                 >
-                    {status.isLoading ? <LoadingIndicator text="Analyzing Idea..." /> : "Create Project Blueprint"}
+                    {status.isLoading ? <LoadingIndicator text="Analysing idea…" /> : "Create project blueprint"}
                 </button>
             </form>
         </div>

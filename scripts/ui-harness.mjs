@@ -88,7 +88,46 @@ const bottomTab = async (page, name) => {
  * is meaningful — the bottom bar does not exist above md:, and the rail is not a
  * destination below it.
  */
+/**
+ * The wizard's five steps are only reachable from an in-progress build, so they
+ * are reached by seeding one rather than by clicking through five screens and a
+ * model call. Without this, auditing "the wizard" audits its front door: the
+ * shelf renders, every step behind it goes unseen, and a clean report means
+ * nothing about the four screens where the work actually happens.
+ */
+const PLAN = {
+    projectName: 'Harbour Dashboard',
+    projectDescription: 'Berth occupancy at a glance, for the harbourmaster.',
+    pages: [{ name: 'HomePage', path: '/', description: 'Live berth map and today\u2019s arrivals.' }],
+    components: [{ name: 'BerthChart', description: 'Occupancy over the last 24 hours.' }],
+    acceptanceCriteria: ['The berth chart updates without a reload.', 'Works on a phone in daylight.'],
+};
+const THEME = { palette: 'Charcoal', typography: 'Grotesk & Bold', colors: {
+    bg: '#0b0b0c', surface: '#161617', primary: '#ea580c', accent: '#fb923c', text: '#f4f4f5', muted: '#9a9aa2' } };
+const FILES = {
+    'src/App.tsx': "export default function App() { return <main>harbour</main>; }\n",
+    'preview.html': '<!doctype html><html><body style="font-family:system-ui;padding:2rem"><h1>Harbour Dashboard</h1><p>Berth occupancy at a glance.</p></body></html>',
+};
+const EVIDENCE = [
+    { ts: 1756700000000, event: 'Blueprint approved — 1 pages, 1 components, 2 acceptance criteria' },
+    { ts: 1756700060000, event: 'Direction selected — Charcoal' },
+];
+const wizard = extra => ({ gemini_builder_state: {
+    isActive: true, idea: 'A dashboard showing harbour berth occupancy.',
+    plan: PLAN, theme: THEME, generatedFiles: null, evidence: EVIDENCE, ...extra } });
+
 export const SURFACES = [
+    { name: 'wizard-1-idea',     phone: true, desktop: true, seed: wizard({ currentStep: 1 }),                        reach: async () => {} },
+    { name: 'wizard-2-plan',     phone: true, desktop: true, seed: wizard({ currentStep: 2 }),                        reach: async () => {} },
+    { name: 'wizard-3-theme',    phone: true, desktop: true, seed: wizard({ currentStep: 3 }),                        reach: async () => {} },
+    // Step 4 with a held candidate: the screen where a failed verdict waits for
+    // a decision. Without candidateFiles it is treated as an interrupted run.
+    { name: 'wizard-4-held',     phone: true, desktop: true, reach: async () => {},
+      seed: wizard({ currentStep: 4, candidateFiles: FILES, validation: { ok: false, checked: 2, issues: [
+          { severity: 'error', code: 'unresolved-import', message: 'src/App.tsx imports ./Chart, which was never emitted.', file: 'src/App.tsx' },
+          { severity: 'warning', code: 'placeholder-text', message: 'Lorem ipsum remains in the hero copy.', file: 'preview.html' },
+      ] } }) },
+    { name: 'wizard-5-export',   phone: true, desktop: true, seed: wizard({ currentStep: 5, generatedFiles: FILES, validation: { ok: true, checked: 2, issues: [] } }), reach: async () => {} },
     { name: 'projects',        phone: true,  desktop: true,  reach: async p => { await bottomTab(p, 'Projects'); await railTab(p, 'Projects'); } },
     { name: 'agents',          phone: true,  desktop: true,  reach: async p => { await bottomTab(p, 'Projects'); await railTab(p, 'Agents'); } },
     { name: 'ai-tools',        phone: true,  desktop: true,  reach: async p => { await bottomTab(p, 'Projects'); await railTab(p, 'AI Tools'); } },
@@ -137,15 +176,15 @@ export const SURFACES = [
     } },
 ];
 
-export const openPage = async (browser, profile, url) => {
+export const openPage = async (browser, profile, url, extraSeed = {}) => {
     const context = await browser.newContext(profile);
-    await context.addInitScript(([seed, convo, agentId]) => {
-        for (const [k, v] of Object.entries(seed)) {
+    await context.addInitScript(([seed, convo, agentId, extra]) => {
+        for (const [k, v] of Object.entries({ ...seed, ...extra })) {
             localStorage.setItem(k, typeof v === 'string' ? v : JSON.stringify(v));
         }
         localStorage.setItem(`gemini_messages_${agentId}`, JSON.stringify(convo));
         localStorage.setItem('gemini_messages_general', JSON.stringify(convo));
-    }, [SEED, CONVERSATION, AGENT_ID]);
+    }, [SEED, CONVERSATION, AGENT_ID, extraSeed]);
     const page = await context.newPage();
     await page.goto(url, { waitUntil: 'networkidle' });
     await page.waitForTimeout(900);

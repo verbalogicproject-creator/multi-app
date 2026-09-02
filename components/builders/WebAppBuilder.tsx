@@ -24,14 +24,34 @@ const WebAppBuilder: React.FC = () => {
     };
 
     return (
-        <div className="flex-1 flex flex-col bg-gray-900 h-full p-6 md:p-10 justify-center items-center relative overflow-y-auto">
+        /* The scroll container does NOT centre. `justify-center` on a scrollable
+           box pushes overflowing content above the scroll origin, where it
+           cannot be reached — the export screen's heading was simply gone. The
+           inner wrapper carries `min-h-full` and centres instead: it collapses
+           to the viewport when content is short, and grows when it is not. */
+        <div className="flex-1 flex flex-col bg-ground min-w-0 h-full relative overflow-y-auto">
             {isActive && (
-                <button onClick={resetWebAppBuild} className="absolute top-4 right-4 text-gray-500 hover:text-white">&times; Reset</button>
+                <button onClick={resetWebAppBuild}
+                    className="tap sticky top-0 self-end z-10 mr-2 md:mr-4 flex items-center gap-1 px-3 rounded-lg
+                               text-xs text-metal-300 bg-ground/85 backdrop-blur-sm
+                               transition-colors duration-200 ease-fluid
+                               md:hover:text-metal-100 md:hover:bg-metal-700">
+                    <span aria-hidden>&times;</span> Reset
+                </button>
             )}
-            <div className="w-full max-w-4xl mx-auto my-auto">
-                {isActive && <StepIndicator currentStep={currentStep} />}
-                <div className={`mt-8 transition-opacity duration-500 ${builderState.status.isLoading ? 'opacity-50' : 'opacity-100'}`}>
-                    {renderCurrentStep()}
+            {/* shrink-0 is load-bearing. As a flex child this box was being
+                compressed to its own min-height, and `justify-center` then
+                overflowed it in BOTH directions — putting the step indicator at
+                y = -191, above the scroll origin, where no gesture reaches it.
+                With shrink-0 it takes its content height and the centring is a
+                no-op whenever content is taller than the viewport. */}
+            <div className={`min-h-full shrink-0 flex flex-col justify-center px-4 md:px-6 pb-10 md:pb-14 safe-t
+                            ${isActive ? 'pt-2' : 'pt-10 md:pt-14'}`}>
+                <div className="w-full max-w-4xl mx-auto">
+                    {isActive && <StepIndicator currentStep={currentStep} />}
+                    <div className={`${isActive ? 'mt-8' : ''} transition-opacity duration-500 ease-fluid ${builderState.status.isLoading ? 'opacity-50' : 'opacity-100'}`}>
+                        {renderCurrentStep()}
+                    </div>
                 </div>
             </div>
         </div>
