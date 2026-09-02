@@ -528,12 +528,17 @@ Done: `App` · `MobileTabBar` · `ProjectManager` · `AgentManager` · `ChatPane
 `AiControls` · `AssistantMessage` · `ImageEditorPane` · `ModeSelector` ·
 `ToolMessage` · `Step_Theme`.
 
-Left, after the wizard landed — no coherent flow remains, only leaves: `Step_Plan` (37),
-`Step_Export` (36), `Step_Generate` (27), `BuildShelf` (24),
+Left, after the wizard landed — no coherent flow remains, only leaves:
 `ProjectSettingsModal` (21), `VideoGeneratorPane` (17), `ImageUpload` (11),
-`Step_Idea` (8), `StepIndicator` (8), `LiveChatPane` (6), `CodeBlock` (6),
-`WebAppBuilder` (2), `DesignContractPreview` (1 — deliberate: that surface
-renders the *generated* app and must not inherit this palette).
+`LiveChatPane` (6), `CodeBlock` (6), and `DesignContractPreview` (1 —
+deliberate: that surface renders the *generated* app and must not inherit this
+palette).
+
+**Two of those carry a second obligation.** `ImageUpload` and
+`VideoGeneratorPane` load media, so under the preview-runtime decision in §5
+their origins are proxied in the same pass that recolours them. Doing the
+colours now and the origins later means touching them twice, and the second
+pass is the one that can break them.
 
 ## 11. How this is checked
 
