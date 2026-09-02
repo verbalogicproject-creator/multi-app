@@ -55,14 +55,14 @@ const QuotaBadge: React.FC<QuotaBadgeProps> = ({ surface = 'chat', className }) 
     const modelId = modelForSurface(modelDefaults, selectedModel, surface);
     const entry = catalog.find(m => m.id === modelId);
     const label = entry?.label ?? modelId.replace(/^gemini-/, '').replace(/-preview$/, '');
-    const base = 'text-[11px] px-2 py-1 rounded-md border whitespace-nowrap';
+    const base = 'meta text-[11px] px-2 py-1 rounded-md whitespace-nowrap hairline inline-flex items-center gap-1.5';
 
     if (entry?.paid) {
         const spent = spentOn(quota, entry);
         const calls = quota.counts?.[modelId] ?? 0;
         return (
             <span
-                className={className ?? `${base} text-gray-400 border-gray-600`}
+                className={className ?? base}
                 title={`${calls} request${calls === 1 ? '' : 's'} today on ${modelId}, roughly ${money(spent)} at $${entry.priceIn}/$${entry.priceOut} per 1M tokens. Estimate only.`}
             >
                 {label} · ~{money(spent)} today
@@ -73,15 +73,18 @@ const QuotaBadge: React.FC<QuotaBadgeProps> = ({ surface = 'chat', className }) 
     const left = remainingFor(quota, modelId);
     if (left === null) return null;
 
-    const tone = left === 0 ? 'text-red-400 border-red-500/40'
-        : left <= 3 ? 'text-amber-400 border-amber-500/40'
-        : 'text-gray-400 border-gray-600';
+    // Running out is the definition of something needing you, so this is one of
+    // the few places chrome is allowed to turn orange. Spent is the accent
+    // itself; nearly spent is the same dot used everywhere else in the app.
+    const spent = left === 0;
+    const low = left > 0 && left <= 3;
 
     return (
         <span
-            className={className ?? `${base} ${tone}`}
+            className={className ?? `${base} ${spent ? 'text-accent' : 'text-metal-300'}`}
             title={`${quota.counts[modelId] ?? 0} of ~${quota.limits[modelId]} free-tier requests used today for ${modelId} (resets daily).`}
         >
+            {low && <span aria-hidden className="w-1.5 h-1.5 rounded-full bg-accent shrink-0" />}
             {label} · {left} left
         </span>
     );

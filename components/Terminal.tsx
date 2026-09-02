@@ -70,7 +70,7 @@ const Terminal: React.FC<TerminalProps> = ({ projectId }) => {
     };
 
     return (
-        <div className="flex-1 flex flex-col bg-[#1e1e1e] font-mono text-sm text-gray-300 p-2 overflow-hidden">
+        <div className="flex-1 flex flex-col min-h-0 bg-ground font-mono text-xs md:text-sm text-metal-200 p-2 overflow-hidden">
             <div className="flex-1 overflow-y-auto" onClick={() => document.getElementById('terminal-input')?.focus()}>
                 {history.map((line, index) => (
                     <pre key={index} className="whitespace-pre-wrap">{line}</pre>
@@ -78,14 +78,15 @@ const Terminal: React.FC<TerminalProps> = ({ projectId }) => {
                 <div ref={endOfHistoryRef} />
             </div>
             <div className="flex items-center">
-                <span className="text-green-400 mr-2">{'>'}</span>
+                <span aria-hidden className="text-metal-300 mr-2">{'>'}</span>
                 <input
                     id="terminal-input"
                     type="text"
                     value={input}
                     onChange={e => setInput(e.target.value)}
                     onKeyDown={handleKeyDown}
-                    className="flex-1 bg-transparent focus:outline-none"
+                    aria-label="Terminal input"
+                    className="flex-1 min-w-0 bg-transparent text-metal-100 focus:outline-none"
                     autoComplete="off"
                 />
             </div>

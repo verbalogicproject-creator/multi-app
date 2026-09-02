@@ -166,6 +166,16 @@
   box-shadow: inset 0 0 0 1px color-mix(in oklab, white 6%, transparent);
 }
 
+/* The counterpoint. Machine facts speak in mono — file paths, model ids, build
+   ids, token counts, timings, hex. Nothing else does, and that is the whole
+   point: it gives the eye a second axis to sort by that is not colour.
+   Size stays with the caller; the voice is what is declared here. */
+@utility meta {
+  font-family: var(--font-mono);
+  letter-spacing: -0.01em;
+  color: var(--color-metal-300);
+}
+
 /* 44px minimum touch target — on desktop too. A 32px icon button is a desktop
    habit that fails on the device this actually runs on. */
 @utility tap {

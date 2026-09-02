@@ -25,11 +25,11 @@ const ModelPicker: React.FC<{ compact?: boolean }> = ({ compact }) => {
 
     return (
         <label className={`flex items-center gap-2 ${compact ? '' : 'justify-center'}`} title={title}>
-            <span className="text-xs text-gray-400 whitespace-nowrap">Model</span>
+            <span className="text-xs text-metal-300 whitespace-nowrap">Model</span>
             <select
                 value={selectedModel}
                 onChange={e => setSelectedModel(e.target.value)}
-                className="bg-gray-800 border border-gray-600 text-gray-200 text-xs rounded-md px-2 py-1.5 max-w-[13rem] focus:outline-none focus:ring-1 focus:ring-sky-500"
+                className="bg-raised hairline text-metal-100 text-xs rounded-md px-2 py-1.5 max-w-[9rem] md:max-w-[13rem] focus:outline-none"
             >
                 <option value="auto" title={AUTO_HINT}>Auto</option>
                 {groups.map(group => (
