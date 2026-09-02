@@ -77,7 +77,7 @@ const Terminal: React.FC<TerminalProps> = ({ projectId }) => {
                 ))}
                 <div ref={endOfHistoryRef} />
             </div>
-            <div className="flex items-center">
+            <div className="tap flex items-center shrink-0">
                 <span aria-hidden className="text-metal-300 mr-2">{'>'}</span>
                 <input
                     id="terminal-input"

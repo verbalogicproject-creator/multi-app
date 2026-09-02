@@ -29,7 +29,7 @@ const ModelPicker: React.FC<{ compact?: boolean }> = ({ compact }) => {
             <select
                 value={selectedModel}
                 onChange={e => setSelectedModel(e.target.value)}
-                className="bg-raised hairline text-metal-100 text-xs rounded-md px-2 py-1.5 max-w-[9rem] md:max-w-[13rem] focus:outline-none"
+                className="tap bg-raised hairline text-metal-100 text-xs rounded-md px-2 max-w-[9rem] md:max-w-[13rem] focus:outline-none"
             >
                 <option value="auto" title={AUTO_HINT}>Auto</option>
                 {groups.map(group => (

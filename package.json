@@ -17,7 +17,9 @@
     "smoke:providers": "node scripts/smoke-providers.mjs",
     "check:memory-loop": "node scripts/check-memory-loop.mjs",
     "smoke:memory": "node scripts/smoke-memory.mjs",
-    "check:css": "node scripts/check-css.mjs"
+    "check:css": "node scripts/check-css.mjs",
+    "audit:ui": "npm run build && node scripts/audit-ui.mjs",
+    "shoot:ui": "npm run build && node scripts/audit-ui.mjs --shots /tmp/ui-shots"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.122.0",
@@ -37,6 +39,7 @@
     "@types/react-dom": "^19.1.1",
     "@vitejs/plugin-react": "^4.3.1",
     "jszip": "^3.10.1",
+    "playwright-core": "^1.62.1",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.4.5",
     "vite": "^5.2.13"
