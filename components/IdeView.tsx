@@ -23,10 +23,14 @@ interface IdeViewProps {
  * layouts get it.
  */
 const IdeView: React.FC<IdeViewProps> = ({ projectId }) => {
-    const { filesByProject, aiDeleteFile, handleSaveFileContent, aiCreateFile } = useAppContext();
+    const { filesByProject, aiDeleteFile, handleSaveFileContent, aiCreateFile, ensureProjectFiles } = useAppContext();
     const [activeFileId, setActiveFileId] = useState<string | null>(null);
     const [treeOpen, setTreeOpen] = useState(false);
     const [terminalOpen, setTerminalOpen] = useState(false);
+
+    // Without this the IDE opens on an empty tree for a project that has files:
+    // the map is filled lazily and nothing else fills it for this route.
+    useEffect(() => { void ensureProjectFiles(projectId); }, [projectId, ensureProjectFiles]);
 
     const files = filesByProject.get(projectId) || [];
     const activeFile = files.find(f => f.id === activeFileId);
@@ -83,6 +87,7 @@ const IdeView: React.FC<IdeViewProps> = ({ projectId }) => {
                     type="button"
                     onClick={() => setTreeOpen(true)}
                     aria-expanded={treeOpen}
+                    aria-label={activeFile ? `Choose file — currently ${activeFile.path}` : 'Choose file'}
                     className="tap md:hidden shrink-0 flex items-center gap-2 px-4 text-left
                                bg-surface shadow-[inset_0_-1px_0_rgb(255_255_255/0.06)]"
                 >
@@ -108,7 +113,7 @@ const IdeView: React.FC<IdeViewProps> = ({ projectId }) => {
                     tax on the editor. */}
                 <div className={`shrink-0 flex flex-col min-h-0
                                  shadow-[inset_0_1px_0_rgb(255_255_255/0.06)]
-                                 ${terminalOpen ? 'h-1/2' : 'h-11'} md:h-1/3`}>
+                                 ${terminalOpen ? 'h-2/5' : 'h-11'} md:h-1/3`}>
                     <button
                         type="button"
                         onClick={() => setTerminalOpen(o => !o)}

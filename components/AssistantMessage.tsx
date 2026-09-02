@@ -22,7 +22,9 @@ const AssistantMessage: React.FC<AssistantMessageProps> = ({ message, onRegenera
     const canPlayAudio = textContent && onPlayAudio;
 
     return (
-        <div className="p-4 rounded-2xl max-w-lg lg:max-w-2xl xl:max-w-4xl break-words bg-metal-700 rounded-bl-none">
+        /* Flat on the ground, no bubble: the single raised block in a thread is
+           yours. Two bubbles a value apart is the weak signal this replaced. */
+        <div className="w-full min-w-0 py-0.5 break-words text-metal-100">
           {message.thinking && (
             <details className="mb-3 rounded-lg hairline bg-surface">
               <summary className="cursor-pointer px-3 py-1.5 text-xs text-metal-300 select-none">

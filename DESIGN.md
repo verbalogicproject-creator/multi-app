@@ -465,5 +465,24 @@ node …/detect.mjs /tmp/ctl.tsx   # exit 2 — the detector is awake
 node …/detect.mjs components/    # exit 0 — and that zero is real
 ```
 
+**And it is looked at.** There *is* a browser on this device — Chromium 151 under
+`~/.cache/ms-playwright/chromium-1228/`, driven by any local `playwright-core`.
+The earlier claim that none existed was wrong: only `~/.cache/puppeteer` had been
+checked, and its directories are empty scaffolding. Screenshots are taken at
+390×844 (phone, `isMobile`, DPR 2) and 1440×900 (desktop) against a seeded
+`localStorage` — projects, files, personas, agents and a real conversation — so
+the states photographed are the states people meet, not empty ones.
+
+Four things were only findable that way, and none of them would have failed a
+typecheck, a build, or the detector:
+
+- The assistant turn was still a **bubble** (`bg-metal-700 rounded-2xl`). The
+  colour had been migrated and the shape had not, so "flat on the ground" was in
+  this document and not in the app.
+- `IdeView` opened on **an empty tree for a project that has files** —
+  `filesByProject` is filled lazily and nothing filled it for that route.
+- The desktop Memory trigger sat **on top of the send button**.
+- The phone editor spent **88px on two stacked header rows** before any code.
+
 A design decision that cannot be checked is a preference. The contrast table in
 §2 is the part of this document that is not negotiable.

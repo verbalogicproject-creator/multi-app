@@ -155,7 +155,11 @@ const ChatPanel: React.FC = () => {
                     <div ref={messagesEndRef} />
                 </div>
             </div>
-            <div className="shrink-0 p-3 md:p-4 bg-ground shadow-[inset_0_1px_0_rgb(255_255_255/0.06)]">
+            {/* md:pr-32 is not decoration: the Memory trigger is fixed to the
+                bottom-right corner on desktop and was landing on top of the send
+                button. A docked control has to be given its space, not float over
+                someone else's. On a phone the trigger is the tab bar, so no gutter. */}
+            <div className="shrink-0 p-3 md:p-4 md:pr-32 bg-ground shadow-[inset_0_1px_0_rgb(255_255_255/0.06)]">
                 {(mode === 'coding' || mode === 'chat') && (
                     <form onSubmit={handleSubmit} className="flex items-center gap-2">
                         <input
