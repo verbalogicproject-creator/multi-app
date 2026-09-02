@@ -11,7 +11,7 @@ interface UserMessageProps {
  */
 const UserMessage: React.FC<UserMessageProps> = ({ message }) => {
     return (
-        <div className="px-4 py-3 rounded-2xl rounded-br-sm max-w-full md:max-w-2xl break-words
+        <div className="px-4 py-3 rounded-2xl rounded-br-sm max-w-[85%] md:max-w-2xl break-words
                         bg-raised text-metal-100 shadow-[inset_0_0_0_1px_rgb(255_255_255/0.08)]">
           {message.parts.map((part, index) => (
             <div key={index}>

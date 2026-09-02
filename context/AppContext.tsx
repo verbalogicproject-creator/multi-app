@@ -195,6 +195,8 @@ interface AppContextType {
     selectedProjectIds: Set<string>;
     filesByProject: Map<string, ProjectFile[]>;
     activeProjectView: string | null;
+    /** Loads a project's files if they are not in the map yet. See its definition. */
+    ensureProjectFiles: (projectId: string) => Promise<void>;
     editingProject: Project | null;
     isProjectPanelCollapsed: boolean;
     analyzingProjects: Set<string>;
@@ -273,6 +275,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const [projects, setProjects] = useState<Project[]>([]);
     const [selectedProjectIds, setSelectedProjectIds] = useState<Set<string>>(new Set());
     const [filesByProject, setFilesByProject] = useState<Map<string, ProjectFile[]>>(new Map());
+    // Read by `ensureProjectFiles`, which must stay referentially stable (it is an
+    // effect dependency) while still seeing the current map.
+    const filesByProjectRef = useRef(filesByProject);
+    filesByProjectRef.current = filesByProject;
     const [activeProjectView, setActiveProjectView] = useState<string | null>(null);
     const [editingProject, setEditingProject] = useState<Project | null>(null);
     const [isProjectPanelCollapsed, setIsProjectPanelCollapsed] = useState(false);
@@ -424,6 +430,20 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             return newSet; 
         });
     };
+    /**
+     * `filesByProject` is filled lazily, and until this existed the *only* thing
+     * that filled it was expanding a project in the rail. Any surface that
+     * opened a project's files directly — the IDE — therefore showed an empty
+     * tree for a project that had files, which was invisible while the IDE was
+     * only ever reached by way of the rail and obvious the moment Code became a
+     * destination of its own.
+     */
+    const ensureProjectFiles = useCallback(async (projectId: string) => {
+        if (!projectId || filesByProjectRef.current.has(projectId)) return;
+        const files = await storageService.getFilesByProject(projectId);
+        setFilesByProject(prev => prev.has(projectId) ? prev : new Map(prev).set(projectId, files));
+    }, []);
+
     const handleViewProjectFiles = async (id: string) => {
         if (activeProjectView === id) {
             setActiveProjectView(null);
@@ -1086,6 +1106,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     const value = {
         projects, selectedProjectIds, filesByProject, activeProjectView, editingProject, isProjectPanelCollapsed, analyzingProjects,
+        ensureProjectFiles,
         activeTab, setActiveTab,
         handleCreateProject, handleDeleteProject, handleToggleProjectSelection, handleViewProjectFiles, handleAddFile, handleDeleteFile,
         aiCreateFile, aiUpdateFile, aiDeleteFile,

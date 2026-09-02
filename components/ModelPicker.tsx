@@ -25,7 +25,7 @@ const ModelPicker: React.FC<{ compact?: boolean }> = ({ compact }) => {
 
     return (
         <label className={`flex items-center gap-2 ${compact ? '' : 'justify-center'}`} title={title}>
-            <span className="text-xs text-metal-300 whitespace-nowrap">Model</span>
+            <span className="hidden md:inline text-xs text-metal-300 whitespace-nowrap">Model</span>
             <select
                 value={selectedModel}
                 onChange={e => setSelectedModel(e.target.value)}

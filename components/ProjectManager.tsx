@@ -84,7 +84,9 @@ const ProjectManager: React.FC = () => {
         >
             <div className={`flex items-center gap-2 px-4 py-2 safe-t md:pt-2
                              ${isProjectPanelCollapsed ? 'md:justify-center' : 'justify-between'}`}>
-                <h2 className={`font-display text-lg tracking-[-0.02em] text-metal-100 capitalize truncate
+                {/* The tab row below already names the surface, and so does the bottom
+                    bar. Three labels for one thing is a desktop luxury. */}
+                <h2 className={`hidden md:block font-display text-lg tracking-[-0.02em] text-metal-100 capitalize truncate
                                 ${isProjectPanelCollapsed ? 'md:hidden' : ''}`}>
                     {activeTab.replace('-', ' ')}
                 </h2>

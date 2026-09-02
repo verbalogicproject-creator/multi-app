@@ -26,20 +26,17 @@ const CodeEditor: React.FC<CodeEditorProps> = ({ file, onSave }) => {
     };
 
     return (
-        <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-ground">
-            {/* The desktop keeps the path in view here; on a phone the switcher
-                above already shows it, so this row is only the save state. */}
-            <div className="shrink-0 flex justify-between items-center gap-2 px-3 md:px-4
+        <div className="relative flex-1 flex flex-col min-w-0 min-h-0 bg-ground">
+            {/* Desktop keeps a persistent header. A phone does not: the switcher
+                above already carries the path, and a second 44px row of chrome
+                costs more than it returns on a 390px screen. */}
+            <div className="hidden md:flex shrink-0 justify-between items-center gap-2 px-4
                             bg-surface shadow-[inset_0_-1px_0_rgb(255_255_255/0.06)]">
-                <h3 className="meta text-xs truncate hidden md:flex items-center gap-2">
+                <h3 className="meta text-xs truncate flex items-center gap-2">
                     {/* Unsaved work is the one thing in this pane that needs you. */}
                     {!isSaved && <span aria-hidden className="w-1.5 h-1.5 rounded-full bg-accent shrink-0" />}
                     {file.path}
                 </h3>
-                <span className="md:hidden text-xs text-metal-300 flex items-center gap-2">
-                    {!isSaved && <span aria-hidden className="w-1.5 h-1.5 rounded-full bg-accent shrink-0" />}
-                    {isSaved ? 'Saved' : 'Unsaved changes'}
-                </span>
                 <button
                     onClick={handleSave}
                     disabled={isSaved}
@@ -60,6 +57,20 @@ const CodeEditor: React.FC<CodeEditorProps> = ({ file, onSave }) => {
                            resize-none focus:outline-none"
                 spellCheck="false"
             />
+            {/* Absolutely positioned so that appearing mid-keystroke cannot push the
+                text you are typing. Present only while there is something to save,
+                which is exactly what the accent is for. */}
+            {!isSaved && (
+                <button
+                    onClick={handleSave}
+                    className="tap md:hidden absolute bottom-3 right-3 flex items-center gap-2 px-4 rounded-full
+                               bg-metal-700 text-metal-100 shadow-[inset_0_1px_0_rgb(255_255_255/0.10)]
+                               transition-transform duration-200 ease-[--ease-fluid] active:scale-[0.98]"
+                >
+                    <span aria-hidden className="w-1.5 h-1.5 rounded-full bg-accent shrink-0" />
+                    Save
+                </button>
+            )}
         </div>
     );
 };
