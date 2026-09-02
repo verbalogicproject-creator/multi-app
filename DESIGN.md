@@ -257,6 +257,49 @@ When a real editor and file tree land, they land *inside `IdeView`*, once, and
 both layouts get them. That is why the phone did not get a code *sheet*: a sheet
 would have been a second home to delete later.
 
+**The editor is decided: CodeMirror 6, with type errors from `tsc`.** Both
+candidates were built and measured on this device.
+
+```
+CodeMirror 6   editor                    505 KB raw / 170 KB gzip   one file, no workers
+Monaco         editor only              ~4.4 MB    / ~1.17 MB       + editor.worker
+Monaco         + TypeScript service    ~11.3 MB    / ~2.6 MB        + a resident ts.worker
+```
+
+Monaco is genuinely better in one way: a real TypeScript language service. But
+that is also where its weight and nearly all of its memory cost sit — strip the
+worker and it is a nine-times heavier CodeMirror doing the same job. Its own FAQ
+answers mobile support with "No.", which for a phone-first app means any touch
+bug is permanently ours.
+
+**And the valuable half of a language service is the cheap half.** Type errors
+come from `npx tsc --noEmit` run server-side — about 15 KB of client code and one
+route — while the expensive half, completion, pays off only where a human
+hand-authors substantial TypeScript. Here the model writes the files and a person
+reviews them on a soft keyboard. Full LSP stays on the shelf until desktop
+hand-authoring proves real; the plan and the verified prototype are in
+`comprehensive-LSP-context-for-build-and-implementation.md`.
+
+The step with compounding value is the one most likely to be skipped: **feeding
+type errors back through `PROPOSAL_TABLE`** so the builder learns from its own.
+Generated code is the model's output and `tsc` is a deterministic judge — which
+is exactly the loop this repo already has.
+
+`typescript` is pinned to **`5.9.3` exactly**. Note that the caret range it
+replaced (`^5.4.5`) could *not* have drifted to TypeScript 7 — a caret is
+major-locked — so the drift warning in that document is overstated. The real
+reasons to pin are reproducibility and Track C: `typescript@latest` is now
+**7.0.2**, the native Go port, whose 2.5 MB package ships no `tsserver.js` where
+5.9.3 ships 23.6 MB, and `typescript-language-server` needs the JS one.
+
+### IdeView is one component, two layouts
+
+Because the desktop keeps its split, there is exactly one code surface in the
+app rendered two ways — a tab on the phone, the two-thirds column on desktop.
+When a real editor and file tree land, they land *inside `IdeView`*, once, and
+both layouts get them. That is why the phone did not get a code *sheet*: a sheet
+would have been a second home to delete later.
+
 **Which editor is not decided — and Monaco is NOT disqualified.** Its FAQ answers
 "Is the editor supported in mobile browsers or mobile web app frameworks?" with
 "No.", and that sentence was briefly treated here as a capability claim. It is a
