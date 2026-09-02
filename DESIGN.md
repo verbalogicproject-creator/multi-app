@@ -465,8 +465,10 @@ node …/detect.mjs /tmp/ctl.tsx   # exit 2 — the detector is awake
 node …/detect.mjs components/    # exit 0 — and that zero is real
 ```
 
-**And it is looked at.** There *is* a browser on this device — Chromium 151 under
-`~/.cache/ms-playwright/chromium-1228/`, driven by any local `playwright-core`.
+**And it is looked at.** There *is* a browser on this device — two, under
+`~/.cache/ms-playwright/`: `chromium-1228` is Chromium 149.0.7827.0 and
+`chromium-1234` is Chromium 151.0.7922.34. Use **1228**, the revision the local
+`playwright-core` 1.61.1 expects.
 The earlier claim that none existed was wrong: only `~/.cache/puppeteer` had been
 checked, and its directories are empty scaffolding. Screenshots are taken at
 390×844 (phone, `isMobile`, DPR 2) and 1440×900 (desktop) against a seeded
