@@ -1,5 +1,20 @@
 # Production Release Roadmap
 
+> **⚠ SUPERSEDED IN PART — 2026-09-02.** The single ordering is
+> `~/.claude/plans/CONSOLIDATED-PATH.md`. This audit is from **2026-08-23** and
+> several of its findings have since been fixed: the backend runs, model tools are
+> gated behind `resolvePendingTool(id, approved)`, chat history is keyed per agent,
+> seven release gates exist, and the runtime Pyodide CDN is gone.
+>
+> **Its "MVP Product Decision" section is void.** It defers the web-app builder,
+> the virtual terminal and Pyodide behind disabled flags; all three are now built,
+> migrated onto the design system, and wired into the memory loop.
+>
+> **What survives and still matters:** no authentication, `cors()` unrestricted,
+> and `app.listen(port)` binding every interface. Those are Stage 4 of the
+> consolidated path and they are the only items on it that get worse with time.
+> The Target Architecture and Reliability Rules sections also survive.
+
 ## Purpose and Status
 
 This roadmap turns the current AI Studio prototype into a stable, reliable, privately deployed MVP. It is based on the August 23, 2026 production audit. The application is salvageable, but it is not deployable today: the backend does not parse, several provider integrations are retired, privileged model tools execute automatically, chat state crosses agent boundaries, and no release gates exist.
