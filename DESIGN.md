@@ -225,40 +225,46 @@ would have been a second home to delete later.
 **support-policy** claim. Measured on this device against a real Monaco build
 (Pixel 7 emulation, touch, Chromium 149):
 
-| touch/mobile behaviour | result |
-|---|---|
-| renders, syntax highlighting | works |
-| tap to place cursor | works — accurate to the column |
-| typing after a touch focus | works |
-| **double-tap to select a word** | **works** |
-| shift+arrow selection, Ctrl+A | works |
-| Ctrl+Space autocomplete popup | works |
-| **drag a finger to select a range** | **fails — and there are 0 selection handles in the DOM** |
-| fling-scroll by touch | **inconclusive** — synthetic TouchEvents moved nothing, but that may be the test, not Monaco. Verify on hardware. |
+| touch/mobile behaviour | Monaco | CodeMirror 6 |
+|---|---|---|
+| renders, syntax highlighting | works | works |
+| tap to place cursor | works | works |
+| typing after a touch focus | works | works |
+| double-tap to select a word | works | works |
+| shift+arrow, Ctrl+A | works | works |
+| Ctrl+Space autocomplete | works | no popup (no type service) |
+| **drag a finger to select a range** | **not established — see below** | **not established** |
 
-Monaco never tags itself as touch/mobile (`saysMobile: false`); it runs its
-desktop path. So the real gap is one thing: **you cannot select an arbitrary
-range with a finger.** With a hardware-style keyboard — which is how this device
-is actually used — shift+arrow covers it.
+**The drag-select finding is withdrawn.** It was reported here as Monaco's one
+real gap. Then the identical probe was run against CodeMirror 6 — which handles
+touch selection well — and it failed in exactly the same way, including with real
+browser-level input through CDP `Input.dispatchTouchEvent` rather than synthetic
+`TouchEvent`s. When a test fails identically on the thing that works and the
+thing that supposedly does not, **the test is the finding.**
 
-Weight, measured from that same build, not recalled:
+The reason is that "drag = select" is not the mobile idiom anywhere. On a phone a
+finger drag *scrolls*; selection is long-press, then drag the handles the OS
+draws. Synthesising that reliably, in headless Chromium, against browser-drawn
+selection UI, is not something to trust. **This one is a human test on a real
+device, and it takes ten seconds.**
+
+Weight, measured from real builds on this device — the part that *is* settled:
 
 ```
-eager    index.js   3.94 MB raw / 1.01 MB gzip
-         index.css   162 KB     /   24 KB
-         codicon.ttf 141 KB     /   68 KB
-worker   editor      300 KB     /   92 KB
-worker   ts        6.91 MB      / 1.48 MB      (only with TS intellisense)
-------------------------------------------------------------------
-a JS/TS Monaco    ~11.3 MB raw  / ~2.6 MB gzip
-everything        14.16 MB raw  / 3.37 MB gzip
+CodeMirror 6   basicSetup + JS/TS + theme    505 KB raw /  170 KB gzip   one file
+Monaco         eager core + css + codicon   ~4.4 MB    / ~1.17 MB        + editor.worker
+Monaco         + ts.worker (type service)  ~11.3 MB    / ~2.6 MB
 ```
 
-Served from localhost, those bytes are close to free. The real costs are parse
-and compile on a mobile CPU, and the ts.worker's resident memory on a machine
-that also hosts local models. **CodeMirror 6 remains the alternative and remains
-unmeasured.** Decide on the two measurements, not on either the FAQ or the
-familiar name.
+Roughly **8× smaller raw, 7× smaller gzipped** for the comparable case, with no
+workers and no icon font. The difference Monaco buys for that is a real
+TypeScript language service — genuine type errors and type-aware completion.
+CodeMirror gives syntax, local-scope completion and search; type checking would
+mean adding `typescript` itself, which lands back in Monaco's range.
+
+Served from localhost these bytes are nearly free. The real costs are parse and
+compile on a mobile CPU, and the ts.worker's resident memory on a machine that
+also hosts local models.
 
 On a phone the three panes recompose rather than shrink:
 
