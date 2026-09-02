@@ -219,13 +219,46 @@ When a real editor and file tree land, they land *inside `IdeView`*, once, and
 both layouts get them. That is why the phone did not get a code *sheet*: a sheet
 would have been a second home to delete later.
 
-**Which editor is not decided, and Monaco is probably out.** Its own FAQ answers
-"Is the editor supported in mobile browsers or mobile web app frameworks?" with a
-flat **"No."** — not degraded, not best-effort. Since `IdeView` is one component
-and the phone is this app's base case, an editor that excludes the phone excludes
-the component. CodeMirror 6 is the mobile-capable candidate; **its real shipped
-size has not been measured yet and must be before anything is chosen.** Do not
-plan around Monaco on the strength of it being the familiar name.
+**Which editor is not decided — and Monaco is NOT disqualified.** Its FAQ answers
+"Is the editor supported in mobile browsers or mobile web app frameworks?" with
+"No.", and that sentence was briefly treated here as a capability claim. It is a
+**support-policy** claim. Measured on this device against a real Monaco build
+(Pixel 7 emulation, touch, Chromium 149):
+
+| touch/mobile behaviour | result |
+|---|---|
+| renders, syntax highlighting | works |
+| tap to place cursor | works — accurate to the column |
+| typing after a touch focus | works |
+| **double-tap to select a word** | **works** |
+| shift+arrow selection, Ctrl+A | works |
+| Ctrl+Space autocomplete popup | works |
+| **drag a finger to select a range** | **fails — and there are 0 selection handles in the DOM** |
+| fling-scroll by touch | **inconclusive** — synthetic TouchEvents moved nothing, but that may be the test, not Monaco. Verify on hardware. |
+
+Monaco never tags itself as touch/mobile (`saysMobile: false`); it runs its
+desktop path. So the real gap is one thing: **you cannot select an arbitrary
+range with a finger.** With a hardware-style keyboard — which is how this device
+is actually used — shift+arrow covers it.
+
+Weight, measured from that same build, not recalled:
+
+```
+eager    index.js   3.94 MB raw / 1.01 MB gzip
+         index.css   162 KB     /   24 KB
+         codicon.ttf 141 KB     /   68 KB
+worker   editor      300 KB     /   92 KB
+worker   ts        6.91 MB      / 1.48 MB      (only with TS intellisense)
+------------------------------------------------------------------
+a JS/TS Monaco    ~11.3 MB raw  / ~2.6 MB gzip
+everything        14.16 MB raw  / 3.37 MB gzip
+```
+
+Served from localhost, those bytes are close to free. The real costs are parse
+and compile on a mobile CPU, and the ts.worker's resident memory on a machine
+that also hosts local models. **CodeMirror 6 remains the alternative and remains
+unmeasured.** Decide on the two measurements, not on either the FAQ or the
+familiar name.
 
 On a phone the three panes recompose rather than shrink:
 
