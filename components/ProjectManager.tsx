@@ -64,7 +64,7 @@ const ProjectManager: React.FC = () => {
     const tabButtonClasses = (tabName: TabName, disabled = false) =>
         [
             'tap shrink-0 px-4 text-sm font-medium border-b-2',
-            'transition-colors duration-200 ease-[--ease-fluid]',
+            'transition-colors duration-200 ease-fluid',
             disabled
                 ? 'text-metal-500 border-transparent cursor-not-allowed opacity-60'
                 : activeTab === tabName
@@ -74,12 +74,12 @@ const ProjectManager: React.FC = () => {
 
     const iconButton =
         'tap flex items-center justify-center rounded-lg text-metal-300 ' +
-        'transition-colors duration-200 ease-[--ease-fluid] md:hover:text-metal-100 md:hover:bg-metal-700';
+        'transition-colors duration-200 ease-fluid md:hover:text-metal-100 md:hover:bg-metal-700';
 
     return (
         <aside
             className={`bg-surface shadow-[inset_-1px_0_0_rgb(255_255_255/0.06)] flex flex-col w-full min-w-0
-                        md:shrink-0 md:transition-[width] md:duration-300 md:ease-[--ease-fluid]
+                        md:shrink-0 md:transition-[width] md:duration-300 md:ease-fluid
                         ${isProjectPanelCollapsed ? 'md:w-16' : 'md:w-96'}`}
         >
             <div className={`flex items-center gap-2 px-4 py-2 safe-t md:pt-2
@@ -128,7 +128,7 @@ const ProjectManager: React.FC = () => {
                                     onClick={handleCreate}
                                     className="tap shrink-0 px-4 rounded-lg bg-metal-700 text-metal-100 text-sm font-medium
                                                shadow-[inset_0_1px_0_rgb(255_255_255/0.06)]
-                                               transition-[background-color,transform] duration-200 ease-[--ease-fluid]
+                                               transition-[background-color,transform] duration-200 ease-fluid
                                                md:hover:bg-[#33333a] active:scale-[0.98]"
                                 >
                                     Create
@@ -140,14 +140,14 @@ const ProjectManager: React.FC = () => {
                             )}
                             <ul className="space-y-3">
                                 {projects.map(p => (
-                                    <li key={p.id} className={`rounded-[--radius-card] bg-raised hairline ${activeAgentId ? 'opacity-50' : ''}`}>
+                                    <li key={p.id} className={`rounded-card bg-raised hairline ${activeAgentId ? 'opacity-50' : ''}`}>
                                         <div className="flex items-center justify-between gap-2 p-3">
                                             <label className="flex items-center gap-3 cursor-pointer min-w-0">
                                                 <input
                                                     type="checkbox"
                                                     checked={selectedProjectIds.has(p.id)}
                                                     onChange={() => handleToggleProjectSelection(p.id)}
-                                                    className="h-5 w-5 shrink-0 rounded bg-ground accent-[--color-accent]"
+                                                    className="h-5 w-5 shrink-0 rounded bg-ground accent-metal-300"
                                                     disabled={!!activeAgentId}
                                                 />
                                                 <span className="font-medium text-metal-100 truncate">{p.name}</span>
@@ -192,7 +192,7 @@ const ProjectManager: React.FC = () => {
                         <div className="text-center p-4">
                             <p className="font-display text-lg tracking-[-0.02em] text-metal-100">Web App Builder</p>
                             <p className="text-sm text-metal-300 mt-2">Create a new React webpage from an idea using the guided wizard.</p>
-                            <div className="mt-4 p-5 rounded-[--radius-card] bg-raised hairline">
+                            <div className="mt-4 p-5 rounded-card bg-raised hairline">
                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 mx-auto text-metal-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c.251.023.501.05.75.082a.75.75 0 01.75.75v5.714a2.25 2.25 0 00.659 1.591L14.25 14.5M9.75 3.104a2.25 2.25 0 00-1.632-2.062M14.25 14.5a2.25 2.25 0 01-1.632 2.062M14.25 14.5a2.25 2.25 0 001.632 2.062M14.25 14.5L19 19.25l-4.75-4.75M9.75 14.5L5 19.25l4.75-4.75" /></svg>
                                 <p className="text-xs text-metal-300 mt-3">Pick a tool to begin. It opens in the main panel.</p>
                             </div>

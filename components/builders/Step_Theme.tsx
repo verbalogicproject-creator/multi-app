@@ -28,8 +28,8 @@ const SwatchStrip: React.FC<{ colors: ThemeColors }> = ({ colors }) => (
  */
 const tile = (selected: boolean) =>
     [
-        'p-3 rounded-[--radius-card] text-left tap',
-        'transition-[background-color,box-shadow] duration-200 ease-[--ease-fluid]',
+        'p-3 rounded-card text-left tap',
+        'transition-[background-color,box-shadow] duration-200 ease-fluid',
         'active:scale-[0.98] disabled:opacity-40 disabled:active:scale-100',
         selected
             ? 'bg-raised shadow-[inset_0_0_0_1px_rgb(255_255_255/0.14)]'
@@ -128,7 +128,7 @@ const Step_Theme: React.FC = () => {
             </div>
 
             {/* Custom colours */}
-            <div className="mt-6 p-5 md:p-6 rounded-[--radius-card] bg-surface hairline">
+            <div className="mt-6 p-5 md:p-6 rounded-card bg-surface hairline">
                 <h3 className="text-xs font-medium uppercase tracking-[0.12em] text-metal-300">
                     Custom colours
                     {theme.palette === CUSTOM_PALETTE_NAME && (
@@ -190,7 +190,7 @@ const Step_Theme: React.FC = () => {
             </div>
 
             {/* AI art directions */}
-            <div className="mt-8 md:mt-10 p-5 md:p-6 rounded-[--radius-card] bg-surface hairline">
+            <div className="mt-8 md:mt-10 p-5 md:p-6 rounded-card bg-surface hairline">
                 <div className="flex flex-wrap items-center gap-4">
                     <div className="flex-1 min-w-[12rem]">
                         <h3 className="text-xs font-medium uppercase tracking-[0.12em] text-metal-300">AI art directions</h3>
@@ -199,7 +199,7 @@ const Step_Theme: React.FC = () => {
                     <button onClick={suggestArtDirections} disabled={isBusy}
                         className="tap px-5 rounded-lg bg-metal-700 text-metal-100 text-sm font-medium
                                    shadow-[inset_0_1px_0_rgb(255_255_255/0.06)]
-                                   transition-[background-color,transform] duration-200 ease-[--ease-fluid]
+                                   transition-[background-color,transform] duration-200 ease-fluid
                                    md:hover:bg-[#33333a] active:scale-[0.98]
                                    disabled:opacity-40 disabled:active:scale-100">
                         {isBusy && status.message.includes('art direction') ? 'Exploring…' : artDirections ? 'Suggest again' : 'Suggest 3 directions'}
@@ -213,7 +213,7 @@ const Step_Theme: React.FC = () => {
                             return (
                                 <div key={`${direction.name}-${index}`}
                                     className={[
-                                        'p-3 rounded-[--radius-card] flex flex-col',
+                                        'p-3 rounded-card flex flex-col',
                                         selected
                                             ? 'bg-raised shadow-[inset_0_0_0_1px_rgb(255_255_255/0.14)]'
                                             : 'bg-white/[0.04] shadow-[inset_0_0_0_1px_rgb(255_255_255/0.06)]',
@@ -229,7 +229,7 @@ const Step_Theme: React.FC = () => {
                                     <p className="text-[11px] text-metal-400 mt-2 font-mono">{findTypography(direction.typography).name}</p>
                                     <button onClick={() => applyDirection(direction, index)} disabled={isBusy}
                                         className="tap mt-3 w-full rounded-lg text-sm font-medium
-                                                   transition-[background-color,transform] duration-200 ease-[--ease-fluid]
+                                                   transition-[background-color,transform] duration-200 ease-fluid
                                                    active:scale-[0.98] disabled:opacity-40 disabled:active:scale-100
                                                    bg-metal-700 text-metal-100 shadow-[inset_0_1px_0_rgb(255_255_255/0.06)]
                                                    md:hover:bg-[#33333a]">
@@ -252,7 +252,7 @@ const Step_Theme: React.FC = () => {
                     disabled={isBusy}
                     className="tap w-full sm:w-auto px-10 rounded-xl bg-metal-700 text-metal-100 font-medium
                                shadow-[inset_0_1px_0_rgb(255_255_255/0.08)]
-                               transition-[background-color,transform] duration-200 ease-[--ease-fluid]
+                               transition-[background-color,transform] duration-200 ease-fluid
                                md:hover:bg-[#33333a] active:scale-[0.98]
                                disabled:opacity-40 disabled:active:scale-100"
                 >

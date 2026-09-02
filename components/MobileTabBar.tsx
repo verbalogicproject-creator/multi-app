@@ -79,7 +79,7 @@ const Tab: React.FC<{
         className={[
             'tap relative flex-1 flex flex-col items-center justify-center gap-1 pt-2 pb-1',
             'text-[11px] font-medium',
-            'transition-colors duration-200 ease-[--ease-fluid]',
+            'transition-colors duration-200 ease-fluid',
             disabled
                 ? 'text-metal-500 opacity-35'
                 : selected
@@ -90,7 +90,7 @@ const Tab: React.FC<{
         {/* Selection is a value change and a rule, never orange. */}
         <span
             aria-hidden
-            className={`absolute top-0 h-0.5 w-8 rounded-full transition-colors duration-200 ease-[--ease-fluid]
+            className={`absolute top-0 h-0.5 w-8 rounded-full transition-colors duration-200 ease-fluid
                         ${selected && !disabled ? 'bg-metal-300' : 'bg-transparent'}`}
         />
         <span className="relative">

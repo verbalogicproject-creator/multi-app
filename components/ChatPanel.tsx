@@ -110,8 +110,11 @@ const ChatPanel: React.FC = () => {
         <main className="flex-1 flex flex-col bg-ground min-w-0 h-full">
             {/* The controls stay put; only the transcript scrolls. On a phone a
                 header that scrolls away takes the model picker with it. */}
+            {/* No overflow-x here: setting one axis to `auto` makes the other
+                `auto` too, and it was cropping the mode pill's top edge. The
+                selector scrolls inside itself instead. */}
             <div className="shrink-0 flex items-center gap-2 px-4 py-2 safe-t md:pt-2
-                            shadow-[inset_0_-1px_0_rgb(255_255_255/0.06)] overflow-x-auto">
+                            shadow-[inset_0_-1px_0_rgb(255_255_255/0.06)]">
                 <div className="flex-1 min-w-0">
                     {!activeAgentId && <ModeSelector currentMode={mode} onModeChange={setMode} isAgentActive={!!activeAgentId} />}
                 </div>
@@ -135,7 +138,7 @@ const ChatPanel: React.FC = () => {
                     ))}
                     {isLoading && <LoadingIndicator text={statusText} />}
                     {mode === 'live' && (
-                        <div className="my-4 p-4 rounded-[--radius-card] bg-surface hairline text-sm text-metal-300">
+                        <div className="my-4 p-4 rounded-card bg-surface hairline text-sm text-metal-300">
                             {!isListening && !liveError && <p className="text-center">Tap “Start Listening” to begin a conversation.</p>}
                             {isListening && (
                                 <>
@@ -177,7 +180,7 @@ const ChatPanel: React.FC = () => {
                             aria-label="Send"
                             className="tap shrink-0 flex items-center justify-center rounded-xl
                                        bg-metal-700 text-metal-100 shadow-[inset_0_1px_0_rgb(255_255_255/0.08)]
-                                       transition-[background-color,transform] duration-200 ease-[--ease-fluid]
+                                       transition-[background-color,transform] duration-200 ease-fluid
                                        md:hover:bg-[#33333a] active:scale-[0.98]
                                        disabled:opacity-35 disabled:active:scale-100"
                         >

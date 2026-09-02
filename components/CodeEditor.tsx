@@ -42,7 +42,7 @@ const CodeEditor: React.FC<CodeEditorProps> = ({ file, onSave }) => {
                     disabled={isSaved}
                     className="tap shrink-0 px-4 rounded-lg text-sm font-medium
                                bg-metal-700 text-metal-100 shadow-[inset_0_1px_0_rgb(255_255_255/0.06)]
-                               transition-[background-color,transform] duration-200 ease-[--ease-fluid]
+                               transition-[background-color,transform] duration-200 ease-fluid
                                md:hover:bg-[#33333a] active:scale-[0.98]
                                disabled:opacity-35 disabled:active:scale-100 disabled:md:hover:bg-metal-700"
                 >
@@ -65,7 +65,7 @@ const CodeEditor: React.FC<CodeEditorProps> = ({ file, onSave }) => {
                     onClick={handleSave}
                     className="tap md:hidden absolute bottom-3 right-3 flex items-center gap-2 px-4 rounded-full
                                bg-metal-700 text-metal-100 shadow-[inset_0_1px_0_rgb(255_255_255/0.10)]
-                               transition-transform duration-200 ease-[--ease-fluid] active:scale-[0.98]"
+                               transition-transform duration-200 ease-fluid active:scale-[0.98]"
                 >
                     <span aria-hidden className="w-1.5 h-1.5 rounded-full bg-accent shrink-0" />
                     Save

@@ -22,7 +22,7 @@ const FileExplorer: React.FC<FileExplorerProps> = ({ files, activeFileId, onFile
 
     const iconButton =
         'tap flex items-center justify-center shrink-0 rounded-lg text-metal-300 ' +
-        'transition-colors duration-200 ease-[--ease-fluid] md:hover:text-metal-100 md:hover:bg-metal-700';
+        'transition-colors duration-200 ease-fluid md:hover:text-metal-100 md:hover:bg-metal-700';
 
     return (
         <div className="w-full flex flex-col min-h-0 bg-surface shadow-[inset_-1px_0_0_rgb(255_255_255/0.06)]">
@@ -52,7 +52,7 @@ const FileExplorer: React.FC<FileExplorerProps> = ({ files, activeFileId, onFile
                                 title={file.path}
                                 /* Selected is value, not hue. */
                                 className={`tap flex-1 min-w-0 text-left px-2 rounded-lg meta text-xs truncate
-                                            transition-colors duration-200 ease-[--ease-fluid]
+                                            transition-colors duration-200 ease-fluid
                                             ${selected
                                                 ? 'bg-raised text-metal-100 shadow-[inset_0_0_0_1px_rgb(255_255_255/0.10)]'
                                                 : 'md:hover:bg-white/[0.05]'}`}

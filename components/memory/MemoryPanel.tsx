@@ -57,7 +57,7 @@ const LessonCard: React.FC<{
     const reuse = byId(lesson.reuseEpisodeId);
 
     return (
-        <div className="rounded-[--radius-card] bg-raised p-4 shadow-[inset_0_0_0_1px_rgb(255_255_255/0.08)]">
+        <div className="rounded-card bg-raised p-4 shadow-[inset_0_0_0_1px_rgb(255_255_255/0.08)]">
             <p className="text-sm text-metal-100 leading-snug">{lesson.trigger}</p>
             <p className="mt-2 text-xs text-metal-300 leading-relaxed">{lesson.recommendation}</p>
 
@@ -77,13 +77,13 @@ const LessonCard: React.FC<{
                 onClick={() => setOpen(v => !v)}
                 aria-expanded={open}
                 className="tap mt-3 -ml-1 flex items-center gap-1.5 px-1 text-xs text-metal-300
-                           transition-colors duration-200 ease-[--ease-fluid] md:hover:text-metal-100"
+                           transition-colors duration-200 ease-fluid md:hover:text-metal-100"
             >
-                <span aria-hidden className={`transition-transform duration-200 ease-[--ease-fluid] ${open ? 'rotate-90' : ''}`}>▸</span>
+                <span aria-hidden className={`transition-transform duration-200 ease-fluid ${open ? 'rotate-90' : ''}`}>▸</span>
                 evidence
             </button>
 
-            <div className={`grid transition-[grid-template-rows,opacity] duration-240 ease-[--ease-fluid]
+            <div className={`grid transition-[grid-template-rows,opacity] duration-240 ease-fluid
                              ${open ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}>
                 <div className="overflow-hidden">
                     <dl className="pt-1 pb-1 space-y-1.5 text-[11px]">
@@ -132,7 +132,7 @@ const LessonCard: React.FC<{
                         title={!open ? 'Open the evidence first' : undefined}
                         className="tap ml-auto px-4 rounded-lg text-sm font-medium
                                    bg-metal-700 text-metal-100 shadow-[inset_0_1px_0_rgb(255_255_255/0.06)]
-                                   transition-[background-color,transform,opacity] duration-200 ease-[--ease-fluid]
+                                   transition-[background-color,transform,opacity] duration-200 ease-fluid
                                    md:hover:bg-[#33333a] active:scale-[0.98]
                                    disabled:opacity-35 disabled:active:scale-100 disabled:md:hover:bg-metal-700"
                     >
@@ -261,7 +261,7 @@ const MemoryPanel: React.FC<MemoryPanelProps> = ({ open: openProp, onOpenChange,
                 className="tap fixed bottom-4 right-4 z-40 hidden md:flex items-center gap-2 px-4 rounded-full
                            bg-metal-700 text-metal-100 text-sm font-medium
                            shadow-[inset_0_1px_0_rgb(255_255_255/0.08)]
-                           transition-[background-color,transform] duration-200 ease-[--ease-fluid]
+                           transition-[background-color,transform] duration-200 ease-fluid
                            md:hover:bg-[#33333a] active:scale-[0.98]"
                 style={{ marginBottom: 'env(safe-area-inset-bottom)' }}
             >
@@ -273,7 +273,7 @@ const MemoryPanel: React.FC<MemoryPanelProps> = ({ open: openProp, onOpenChange,
             <div
                 onClick={() => setOpen(false)}
                 aria-hidden
-                className={`fixed inset-0 z-40 bg-black/60 transition-opacity duration-320 ease-[--ease-fluid]
+                className={`fixed inset-0 z-40 bg-black/60 transition-opacity duration-320 ease-fluid
                             ${open ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
             />
 
@@ -285,7 +285,7 @@ const MemoryPanel: React.FC<MemoryPanelProps> = ({ open: openProp, onOpenChange,
                 aria-hidden={!open}
                 className={`fixed inset-y-0 right-0 z-50 w-full md:w-[26rem] flex flex-col
                             bg-surface shadow-[inset_1px_0_0_rgb(255_255_255/0.08)]
-                            transition-transform duration-320 ease-[--ease-fluid]
+                            transition-transform duration-320 ease-fluid
                             ${open ? 'translate-x-0' : 'translate-x-full pointer-events-none'}`}
             >
                 <header className="safe-t flex items-center gap-3 px-5 pb-3">
@@ -296,7 +296,7 @@ const MemoryPanel: React.FC<MemoryPanelProps> = ({ open: openProp, onOpenChange,
                         onClick={() => setOpen(false)}
                         aria-label="Close memory"
                         className="tap ml-auto -mr-2 text-metal-300 text-lg
-                                   transition-colors duration-200 ease-[--ease-fluid] md:hover:text-metal-100"
+                                   transition-colors duration-200 ease-fluid md:hover:text-metal-100"
                     >
                         <span aria-hidden>✕</span>
                     </button>
@@ -305,7 +305,7 @@ const MemoryPanel: React.FC<MemoryPanelProps> = ({ open: openProp, onOpenChange,
                 <div className="flex-1 overflow-y-auto px-5 pb-6 safe-b space-y-6">
                     {/* Degraded — say what broke, then immediately what it did not break. */}
                     {degraded && (
-                        <div className="rounded-[--radius-card] bg-raised p-4 shadow-[inset_0_0_0_1px_rgb(255_255_255/0.08)]">
+                        <div className="rounded-card bg-raised p-4 shadow-[inset_0_0_0_1px_rgb(255_255_255/0.08)]">
                             <p className="flex items-center gap-2 text-sm text-metal-100">
                                 <span aria-hidden className="w-1.5 h-1.5 rounded-full bg-accent shrink-0" />
                                 memory unavailable
@@ -393,7 +393,7 @@ const MemoryPanel: React.FC<MemoryPanelProps> = ({ open: openProp, onOpenChange,
                                     </p>
                                     <ul className="space-y-2">
                                         {proposed.map(lesson => (
-                                            <li key={lesson.id} className="rounded-[--radius-card] bg-white/[0.04] p-3 text-xs text-metal-300 leading-snug">
+                                            <li key={lesson.id} className="rounded-card bg-white/[0.04] p-3 text-xs text-metal-300 leading-snug">
                                                 {lesson.trigger}
                                             </li>
                                         ))}
@@ -410,7 +410,7 @@ const MemoryPanel: React.FC<MemoryPanelProps> = ({ open: openProp, onOpenChange,
                                             ['events', state.build.eventCount],
                                             ['evidence', state.build.evidenceCount],
                                         ].map(([label, n]) => (
-                                            <div key={label as string} className="rounded-[--radius-card] bg-white/[0.04] py-3">
+                                            <div key={label as string} className="rounded-card bg-white/[0.04] py-3">
                                                 <dd className="font-mono text-lg text-metal-100">{n as number}</dd>
                                                 <dt className="text-[11px] text-metal-400">{label as string}</dt>
                                             </div>
