@@ -9,6 +9,13 @@ Every code block in §4, §5 and §7 was built and run on this device before bei
 
 ---
 
+> **Ordering:** this document survives whole and is the implementation detail for
+> Stages 1–3 of `~/.claude/plans/CONSOLIDATED-PATH.md`. Its decision was adopted:
+> CodeMirror + `tsc`, LSP deferred. One correction — §7 trap 1 says `^5.4.5` will
+> drift to TypeScript 7. It cannot; a caret is major-locked. `typescript@latest`
+> *is* 7.0.2 with no `tsserver.js`, so the exact pin (now `5.9.3` in
+> `package.json`) is right, but the reason is reproducibility and Track C.
+
 ## 1. The decision
 
 **Build Track A and Track B. Treat Track C as optional and probably unnecessary.**
