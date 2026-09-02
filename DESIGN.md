@@ -22,6 +22,10 @@ used.
 | Panel is | **An inbox** — what needs you | A ledger; a ladder |
 | Approval | **Read the evidence, then approve** | One click; sign every time |
 | Quiet states | **Explain the ladder** | Facts only; fall back to the trail |
+| Phone nav | **Bottom tab bar** — Projects · Chat/Build · Code · Memory | Rail as an overlay sheet; a full screen stack |
+| Phone vs desktop | **Two designs** — desktop keeps its split, the phone gets its own | One layout that recomposes at every width |
+| Chat identity | **Shape** — one raised bubble for you, flat text for the assistant | Indigo vs teal; two greys; the accent for your turn |
+| Counterpoint | **Mono is the machine's voice** | The hairline as a grid; concentric radii alone |
 
 ### The glance test
 
@@ -151,7 +155,131 @@ highlight above, and it faces up.
 
 ---
 
-## 5. Motion
+## 5. The phone shell
+
+The phone and the desktop are **two designs**, not one design at two widths.
+That is a deliberate choice, taken after measuring what the "mobile-first" claim
+at the top of this document was actually worth:
+
+```
+19 breakpoints  Step_Theme        │  0 breakpoints  ProjectManager  (w-96, shrink-0)
+12              AiControls        │  0              ChatPanel
+ 7              ToolMessage       │  0              IdeView
+ 1              App.tsx           │  0              AgentManager · BuildShelf · FileExplorer
+```
+
+Three blocking consequences, all in the shell: a 384px rail on a 390px screen; a
+`w-2/3` code editor beside a `w-1/3` chat with no breakpoint at all; and a
+terminal pinned to `h-1/3` of a `h-full` inside an `h-dvh` — nested
+fixed-fraction scrolling, the exact pattern a phone cannot absorb.
+
+**Desktop is unchanged and stays unchanged.** Rail, then the main panel — which
+for an active agent is `IdeView` at two thirds beside its chat at one third —
+with the memory drawer over the top. Only its colours moved onto tokens.
+
+**The phone turns those three panels into destinations.**
+
+```
+┌──────────────────┐
+│  Projects        │   one surface at a time, full width
+├──────────────────┤
+│                  │
+│   content        │
+│                  │
+├──────────────────┤
+│  ▤    ◆   ⟨⟩   ●│   44px, safe-b, md:hidden
+│ Proj Chat Code Mem│
+└──────────────────┘
+```
+
+- **Projects** — the rail, full width. Its own Projects/Agents/AI Tools/AI
+  Settings tabs stay; the row scrolls horizontally rather than shrinking below
+  44px. Collapsing is gated at `md:` in CSS, not in state, so one source of
+  truth crosses the breakpoint.
+- **Chat / Build** — the label tracks what the main panel actually is rather
+  than asserting a fixed word.
+- **Code** — `IdeView`, and **disabled without an active agent**, because code
+  follows the agent. A disabled tab keeps the bar's arity stable instead of
+  making destinations appear and vanish under a thumb — the same idiom the rail
+  already uses for AI Tools while an agent is active.
+- **Memory** — a toggle, not a destination: the drawer is already a full sheet
+  on a phone. It carries the accent dot, so the glance test works from every
+  screen. The floating trigger becomes `md:` only; two ways in at the same
+  corner is one too many.
+
+**Surfaces are hidden, not unmounted.** `hidden` rather than a conditional
+render, so chat scroll position, an unsent message and terminal history all
+survive a trip to Code and back.
+
+### IdeView is one component, two layouts
+
+Because the desktop keeps its split, there is exactly one code surface in the
+app rendered two ways — a tab on the phone, the two-thirds column on desktop.
+When Monaco and a real file tree land, they land *inside `IdeView`*, once, and
+both layouts get them. That is why the phone did not get a code *sheet*: a sheet
+would have been a second home to delete later.
+
+On a phone the three panes recompose rather than shrink:
+
+| | Desktop | Phone |
+|---|---|---|
+| Tree | 256px column | sheet, summoned from the file name |
+| Editor | the remainder | everything left over |
+| Terminal | `h-1/3`, always | a disclosure, shut until asked for |
+
+A third of a 780px screen is not a terminal, it is a tax on the editor.
+
+---
+
+## 6. Identity without hue
+
+The accent rule gives colour exactly two jobs — attention and chrome. Anything
+that needs a *third* signal has to find it somewhere other than the palette,
+because a third job would quietly empty "any orange means something needs you"
+of its meaning by teaching the eye that colour here is sometimes just decoration.
+
+**Chat turns.** They used to be `bg-indigo-500` for you and `bg-teal-500` for
+the assistant. Now they are told apart by shape, which the markup already had
+and was not using:
+
+```
+    ◆  the assistant speaks flat on the ground,        ← glyph, left, no bubble
+       left-aligned, full width
+
+                       ╭────────────────────────╮
+                       │ and your turn is the   │      ← the one raised block
+                       │ one raised block       │
+                       ╰───────────────────────╯
+```
+
+Two silhouettes rather than two colours — which survives greyscale, daylight on
+a phone, and colour-blindness. None of those was true of indigo-versus-teal.
+
+**The counterpoint: mono is the machine's voice.** Geist Mono was loaded and
+barely used. It now has exactly one job, and nothing else has it:
+
+> File paths, model ids, build ids, token counts, timings, hex values — every
+> machine fact — is `.meta`: mono, `metal-300`, tight. Prose is never mono, and
+> a machine fact is never prose.
+
+Declared once as a utility so it cannot drift:
+
+```css
+@utility meta {
+  font-family: var(--font-mono);
+  letter-spacing: -0.01em;
+  color: var(--color-metal-300);
+}
+```
+
+Size stays with the caller; the *voice* is what is declared. This is the quieter
+signature the palette leaves room for: it gives the eye a second axis to sort by
+that is not colour, and it is true to what the product is — a builder, whose
+screens are full of machine facts.
+
+---
+
+## 7. Motion
 
 Every transition uses `cubic-bezier(0.32, 0.72, 0, 1)` — weighted, decelerating,
 never `ease-in-out`. Only `transform` and `opacity` animate; nothing that
@@ -171,7 +299,7 @@ does not exist on the device this app runs on.
 
 ---
 
-## 6. Typography
+## 8. Typography
 
 Three faces, self-hosted as woff2 in `public/fonts/`. **No CDN** — the device is
 often offline and a font that fails to load is a layout that fails to load.
@@ -208,7 +336,7 @@ rule off, so the rule still fires for the next font someone reaches for.
 
 ---
 
-## 7. The Memory panel
+## 9. The Memory panel
 
 A **right-hand drawer**, opened from a metallic button in the chrome bar that
 carries an orange dot when something needs you. On phone it is a full-screen
@@ -275,7 +403,7 @@ explain the system, and the moment you have time to read it:
 
 ---
 
-## 8. What this replaces
+## 10. What this replaces
 
 Measured before the work started:
 
@@ -288,11 +416,53 @@ Measured before the work started:
 The token layer above is what makes those unrepeatable: there is no `sky-600` to
 reach for.
 
-## 9. How this is checked
+**Progress, counted with the full alphabet.** The first sweep's verification
+grep listed eight hues and no property prefixes, and reported clean while
+`text-purple-400` and `accent-sky-500` were still on screen. Every count below
+is taken across all 22 Tailwind hue families and all 17 property prefixes,
+because *a check is only as good as its alphabet*.
+
+```
+after the chat sweep     26 files   336 usages
+after the shell pass     13 files   205 usages
+```
+
+Done: `App` · `MobileTabBar` · `ProjectManager` · `AgentManager` · `ChatPanel` ·
+`MessageItem` · `UserMessage` · `IdeView` · `FileExplorer` · `CodeEditor` ·
+`Terminal` · `LoadingIndicator` · `QuotaBadge` · `ModelPicker` · `MemoryPanel` ·
+`AiControls` · `AssistantMessage` · `ImageEditorPane` · `ModeSelector` ·
+`ToolMessage` · `Step_Theme`.
+
+Left, and all of it is the builder wizard plus four leaves: `Step_Plan` (37),
+`Step_Export` (36), `Step_Generate` (27), `BuildShelf` (24),
+`ProjectSettingsModal` (21), `VideoGeneratorPane` (18), `ImageUpload` (11),
+`Step_Idea` (8), `StepIndicator` (8), `LiveChatPane` (6), `CodeBlock` (6),
+`WebAppBuilder` (2), `DesignContractPreview` (1 — deliberate: that surface
+renders the *generated* app and must not inherit this palette).
+
+## 11. How this is checked
 
 ```sh
-npx impeccable detect components/ index.css   # deterministic, 61 rules
+npx impeccable detect components/ index.css App.tsx   # deterministic, 61 rules
 npm run typecheck && npm run build
+```
+
+Plus the hue sweep, which must use every hue family and every property prefix:
+
+```sh
+HUES='slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose'
+PREF='bg|text|border|ring|from|via|to|fill|stroke|shadow|outline|decoration|divide|accent|caret|placeholder'
+grep -rnoE "($PREF)-($HUES)-[0-9]{2,3}" components/ App.tsx
+```
+
+**And a silent check must be proved awake.** `impeccable detect` printing
+nothing is a claim, not a result, so it is run against a known-bad file from git
+in the same breath:
+
+```sh
+git show <pre-sweep>:components/ModeSelector.tsx > /tmp/ctl.tsx
+node …/detect.mjs /tmp/ctl.tsx   # exit 2 — the detector is awake
+node …/detect.mjs components/    # exit 0 — and that zero is real
 ```
 
 A design decision that cannot be checked is a preference. The contrast table in

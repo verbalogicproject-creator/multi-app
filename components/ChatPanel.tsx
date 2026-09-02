@@ -107,15 +107,18 @@ const ChatPanel: React.FC = () => {
         : "Ask me anything...";
 
     return (
-        <main className="flex-1 flex flex-col bg-gray-900 h-full">
-            <div className="flex-1 flex flex-col overflow-y-auto p-4">
-                <div className="flex items-center gap-3 mb-2">
-                    <div className="flex-1">
-                        {!activeAgentId && <ModeSelector currentMode={mode} onModeChange={setMode} isAgentActive={!!activeAgentId} />}
-                    </div>
-                    <QuotaBadge surface="chat" />
-                    <ModelPicker compact />
+        <main className="flex-1 flex flex-col bg-ground min-w-0 h-full">
+            {/* The controls stay put; only the transcript scrolls. On a phone a
+                header that scrolls away takes the model picker with it. */}
+            <div className="shrink-0 flex items-center gap-2 px-4 py-2 safe-t md:pt-2
+                            shadow-[inset_0_-1px_0_rgb(255_255_255/0.06)] overflow-x-auto">
+                <div className="flex-1 min-w-0">
+                    {!activeAgentId && <ModeSelector currentMode={mode} onModeChange={setMode} isAgentActive={!!activeAgentId} />}
                 </div>
+                <QuotaBadge surface="chat" />
+                <ModelPicker compact />
+            </div>
+            <div className="flex-1 flex flex-col overflow-y-auto px-4 py-3 md:px-5">
                 <div className="flex-1 space-y-4">
                     {messages.map(msg => (
                       <MessageItem 
@@ -132,26 +135,50 @@ const ChatPanel: React.FC = () => {
                     ))}
                     {isLoading && <LoadingIndicator text={statusText} />}
                     {mode === 'live' && (
-                        <div className="text-center my-4 text-gray-400 p-4 bg-gray-800/50 rounded-lg border border-gray-700">
-                            {!isListening && !liveError && <p className="italic">Click "Start Listening" to begin a conversation.</p>}
+                        <div className="my-4 p-4 rounded-[--radius-card] bg-surface hairline text-sm text-metal-300">
+                            {!isListening && !liveError && <p className="text-center">Tap “Start Listening” to begin a conversation.</p>}
                             {isListening && (
                                 <>
-                                    <p className="font-bold text-sky-400 mb-2">Live Transcription</p>
-                                    <p className="min-h-[1.5em]"><span className="font-semibold text-gray-300">You:</span> {liveTranscription.input}</p>
-                                    <p className="min-h-[1.5em]"><span className="font-semibold text-gray-300">Gemini:</span> {liveTranscription.output}</p>
+                                    <p className="text-xs font-medium uppercase tracking-[0.12em] text-metal-300 mb-2">Live transcription</p>
+                                    <p className="min-h-[1.5em] text-metal-100"><span className="meta text-xs">you</span> {liveTranscription.input}</p>
+                                    <p className="min-h-[1.5em] text-metal-100"><span className="meta text-xs">model</span> {liveTranscription.output}</p>
                                 </>
                             )}
-                            {liveError && <p className="text-red-400 mt-2 text-sm">{liveError}</p>}
+                            {liveError && (
+                                <p className="flex items-start gap-2 mt-2 text-metal-100">
+                                    <span aria-hidden className="w-1.5 h-1.5 mt-1.5 rounded-full bg-accent shrink-0" />
+                                    {liveError}
+                                </p>
+                            )}
                         </div>
                     )}
                     <div ref={messagesEndRef} />
                 </div>
             </div>
-            <div className="p-4 bg-gray-900 border-t border-gray-700">
+            <div className="shrink-0 p-3 md:p-4 bg-ground shadow-[inset_0_1px_0_rgb(255_255_255/0.06)]">
                 {(mode === 'coding' || mode === 'chat') && (
                     <form onSubmit={handleSubmit} className="flex items-center gap-2">
-                        <input type="text" value={codingPrompt} onChange={e => setCodingPrompt(e.target.value)} placeholder={textInputPlaceholder} className="w-full p-3 bg-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500" disabled={isLoading} />
-                        <button type="submit" disabled={isLoading || !codingPrompt.trim()} className="bg-sky-600 text-white p-3 rounded-lg hover:bg-sky-500 disabled:bg-gray-600 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></button>
+                        <input
+                            type="text"
+                            value={codingPrompt}
+                            onChange={e => setCodingPrompt(e.target.value)}
+                            placeholder={textInputPlaceholder}
+                            disabled={isLoading}
+                            className="tap flex-1 min-w-0 px-4 bg-raised rounded-xl text-metal-100
+                                       placeholder:text-metal-400 hairline focus:outline-none disabled:opacity-35"
+                        />
+                        <button
+                            type="submit"
+                            disabled={isLoading || !codingPrompt.trim()}
+                            aria-label="Send"
+                            className="tap shrink-0 flex items-center justify-center rounded-xl
+                                       bg-metal-700 text-metal-100 shadow-[inset_0_1px_0_rgb(255_255_255/0.08)]
+                                       transition-[background-color,transform] duration-200 ease-[--ease-fluid]
+                                       md:hover:bg-[#33333a] active:scale-[0.98]
+                                       disabled:opacity-35 disabled:active:scale-100"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+                        </button>
                     </form>
                 )}
                 {mode === 'image-edit' && (

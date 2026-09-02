@@ -26,17 +26,38 @@ const CodeEditor: React.FC<CodeEditorProps> = ({ file, onSave }) => {
     };
 
     return (
-        <div className="flex-1 flex flex-col bg-gray-800">
-            <div className="flex justify-between items-center p-2 bg-gray-900 border-b border-gray-700">
-                <h3 className="text-sm font-mono text-gray-400">{file.path} {!isSaved && '*'}</h3>
-                <button onClick={handleSave} disabled={isSaved} className="text-xs px-3 py-1 bg-sky-600 rounded hover:bg-sky-500 disabled:bg-gray-600 disabled:cursor-not-allowed">
+        <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-ground">
+            {/* The desktop keeps the path in view here; on a phone the switcher
+                above already shows it, so this row is only the save state. */}
+            <div className="shrink-0 flex justify-between items-center gap-2 px-3 md:px-4
+                            bg-surface shadow-[inset_0_-1px_0_rgb(255_255_255/0.06)]">
+                <h3 className="meta text-xs truncate hidden md:flex items-center gap-2">
+                    {/* Unsaved work is the one thing in this pane that needs you. */}
+                    {!isSaved && <span aria-hidden className="w-1.5 h-1.5 rounded-full bg-accent shrink-0" />}
+                    {file.path}
+                </h3>
+                <span className="md:hidden text-xs text-metal-300 flex items-center gap-2">
+                    {!isSaved && <span aria-hidden className="w-1.5 h-1.5 rounded-full bg-accent shrink-0" />}
+                    {isSaved ? 'Saved' : 'Unsaved changes'}
+                </span>
+                <button
+                    onClick={handleSave}
+                    disabled={isSaved}
+                    className="tap shrink-0 px-4 rounded-lg text-sm font-medium
+                               bg-metal-700 text-metal-100 shadow-[inset_0_1px_0_rgb(255_255_255/0.06)]
+                               transition-[background-color,transform] duration-200 ease-[--ease-fluid]
+                               md:hover:bg-[#33333a] active:scale-[0.98]
+                               disabled:opacity-35 disabled:active:scale-100 disabled:md:hover:bg-metal-700"
+                >
                     Save
                 </button>
             </div>
             <textarea
                 value={content}
                 onChange={handleChange}
-                className="flex-1 w-full h-full bg-[#1e1e1e] text-gray-200 font-mono p-4 text-sm resize-none focus:outline-none"
+                aria-label={`Contents of ${file.path}`}
+                className="flex-1 w-full min-h-0 bg-ground text-metal-200 font-mono p-4 text-sm
+                           resize-none focus:outline-none"
                 spellCheck="false"
             />
         </div>

@@ -179,11 +179,29 @@ const EmptyLadder: React.FC<{ episodes: number }> = ({ episodes }) => (
 
 /* ------------------------------------------------------------------- panel -- */
 
-const MemoryPanel: React.FC = () => {
+/**
+ * On a phone the drawer is driven by the tab bar, which also needs to know
+ * whether anything is waiting so it can show the dot. So the panel accepts an
+ * optional controlled `open` and reports `needsYou` upward — rather than the
+ * bar polling memory a second time for an answer this component already has.
+ * With no props it stays exactly as it was: its own state, its own trigger.
+ */
+interface MemoryPanelProps {
+    open?: boolean;
+    onOpenChange?: (open: boolean) => void;
+    onNeedsYouChange?: (needsYou: boolean) => void;
+}
+
+const MemoryPanel: React.FC<MemoryPanelProps> = ({ open: openProp, onOpenChange, onNeedsYouChange }) => {
     const { builderState } = useAppContext();
     const buildId = builderState.memory.buildId;
 
-    const [open, setOpen] = useState(false);
+    const [openState, setOpenState] = useState(false);
+    const open = openProp ?? openState;
+    const setOpen = useCallback((next: boolean) => {
+        setOpenState(next);
+        onOpenChange?.(next);
+    }, [onOpenChange]);
     const [state, setState] = useState<MemoryStateResponse | null>(null);
     const [approver, setApproverState] = useState(memoryService.getApprover);
     const [busyId, setBusyId] = useState<string | null>(null);
@@ -222,6 +240,8 @@ const MemoryPanel: React.FC = () => {
     // The glance test, computed once: is there anything on this screen that needs you?
     const needsYou = awaiting.length > 0 || degraded;
 
+    useEffect(() => { onNeedsYouChange?.(needsYou); }, [needsYou, onNeedsYouChange]);
+
     const approve = async (lesson: Lesson) => {
         setBusyId(lesson.id);
         setRefusals(r => ({ ...r, [lesson.id]: '' }));
@@ -233,11 +253,12 @@ const MemoryPanel: React.FC = () => {
 
     return (
         <>
-            {/* Trigger — bottom-right, where a thumb reaches. */}
+            {/* Trigger — desktop only. On a phone the tab bar is the way in, and two
+                ways in at the same corner is one too many. */}
             <button
                 onClick={() => setOpen(true)}
                 aria-label={needsYou ? 'Memory — something needs you' : 'Memory'}
-                className="tap fixed bottom-4 right-4 z-40 flex items-center gap-2 px-4 rounded-full
+                className="tap fixed bottom-4 right-4 z-40 hidden md:flex items-center gap-2 px-4 rounded-full
                            bg-metal-700 text-metal-100 text-sm font-medium
                            shadow-[inset_0_1px_0_rgb(255_255_255/0.08)]
                            transition-[background-color,transform] duration-200 ease-[--ease-fluid]
