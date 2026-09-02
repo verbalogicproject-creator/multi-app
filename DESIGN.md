@@ -528,11 +528,9 @@ Done: `App` · `MobileTabBar` · `ProjectManager` · `AgentManager` · `ChatPane
 `AiControls` · `AssistantMessage` · `ImageEditorPane` · `ModeSelector` ·
 `ToolMessage` · `Step_Theme`.
 
-Left, after the wizard landed — no coherent flow remains, only leaves:
-`ProjectSettingsModal` (21), `VideoGeneratorPane` (17), `ImageUpload` (11),
-`LiveChatPane` (6), `CodeBlock` (6), and `DesignContractPreview` (1 —
-deliberate: that surface renders the *generated* app and must not inherit this
-palette).
+**Nothing is left.** The only legacy hue in the tree is one class in
+`DesignContractPreview`, and it stays: that surface renders the *generated* app
+and must not inherit this palette.
 
 **Two of those carry a second obligation.** `ImageUpload` and
 `VideoGeneratorPane` load media, so under the preview-runtime decision in §5
