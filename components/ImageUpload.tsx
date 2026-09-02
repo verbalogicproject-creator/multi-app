@@ -50,27 +50,36 @@ const ImageUpload: React.FC<ImageUploadProps> = ({ onFileSelect, label, external
   }
 
   return (
+    /* The preview is always a data: or blob: URL — the server converts every
+       generated image and video before it reaches the browser, and uploads go
+       through FileReader. Nothing here is ever fetched cross-origin. */
     <div className="w-full max-w-xs relative">
-      <label className="block text-sm font-medium text-gray-400 mb-2">{label}</label>
-      <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-600 border-dashed rounded-md">
-        <div className="space-y-1 text-center">
+      <label htmlFor="file-upload" className="block text-xs font-medium uppercase tracking-[0.12em] text-metal-300 mb-2">{label}</label>
+      <div className="mt-1 flex justify-center px-6 py-5 rounded-card
+                      shadow-[inset_0_0_0_1px_rgb(255_255_255/0.08)]">
+        <div className="space-y-2 text-center">
           {preview ? (
-            <img src={preview} alt="Preview" className="mx-auto h-24 w-auto rounded" />
+            <img src={preview} alt="Selected image preview" className="mx-auto h-24 w-auto rounded-lg" />
           ) : (
-            <svg className="mx-auto h-12 w-12 text-gray-500" stroke="currentColor" fill="none" viewBox="0 0 48 48" aria-hidden="true">
-              <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            <svg className="mx-auto h-10 w-10 text-metal-400" stroke="currentColor" fill="none" viewBox="0 0 48 48" aria-hidden="true">
+              <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           )}
-          <div className="flex text-sm text-gray-500">
-            <label htmlFor="file-upload" className="relative cursor-pointer bg-gray-800 rounded-md font-medium text-indigo-400 hover:text-indigo-300 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-offset-gray-800 focus-within:ring-indigo-500 px-1">
-              <span>Upload a file</span>
+          <div className="flex items-center justify-center text-sm text-metal-300">
+            <label htmlFor="file-upload"
+              className="tap flex items-center justify-center relative cursor-pointer rounded-lg px-3 font-medium text-metal-100
+                         transition-colors duration-200 ease-fluid md:hover:bg-metal-700">
+              <span>Choose a file</span>
               <input ref={fileInputRef} id="file-upload" name="file-upload" type="file" className="sr-only" onChange={handleFileChange} accept="image/*" />
             </label>
-            <p className="pl-1">or drag and drop</p>
           </div>
-          <p className="text-xs text-gray-600">PNG, JPG, GIF up to 10MB</p>
+          <p className="meta text-[11px]">png · jpg · gif · up to 10 MB</p>
           {preview && (
-             <button onClick={handleRemove} className="mt-2 text-xs text-red-400 hover:text-red-300">Remove</button>
+             <button onClick={handleRemove}
+               className="tap px-3 rounded-lg text-xs text-metal-300
+                          transition-colors duration-200 ease-fluid md:hover:text-accent md:hover:bg-metal-700">
+               Remove
+             </button>
           )}
         </div>
       </div>

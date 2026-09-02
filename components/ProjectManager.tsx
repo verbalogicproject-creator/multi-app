@@ -142,7 +142,7 @@ const ProjectManager: React.FC = () => {
                                 {projects.map(p => (
                                     <li key={p.id} className={`rounded-card bg-raised hairline ${activeAgentId ? 'opacity-50' : ''}`}>
                                         <div className="flex items-center justify-between gap-2 p-3">
-                                            <label className="flex items-center gap-3 cursor-pointer min-w-0">
+                                            <label className="tap flex items-center gap-3 cursor-pointer min-w-0">
                                                 <input
                                                     type="checkbox"
                                                     checked={selectedProjectIds.has(p.id)}

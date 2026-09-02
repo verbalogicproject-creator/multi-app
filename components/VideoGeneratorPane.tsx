@@ -22,15 +22,20 @@ const shotTypes = ['none', 'Close-up', 'Wide Shot', 'Drone Shot', 'First-person 
 const cameraMovements = ['none', 'Static', 'Pan Left', 'Pan Right', 'Dolly Zoom', 'Tilt Up'];
 const styles = ['none', 'Cinematic', 'Documentary', 'Anime', 'Hyperrealistic', 'Vintage Film'];
 
+const labelClass = "block text-xs text-metal-300 mb-1";
+const selectClass = "tap w-full bg-raised rounded-lg px-2 text-xs text-metal-100 hairline focus:outline-none disabled:opacity-40";
+
 const VideoDirectorControls: React.FC<{ controls: DirectorControls; setControls: (controls: DirectorControls) => void; disabled: boolean; }> = ({ controls, setControls, disabled }) => {
     const handleChange = (field: keyof DirectorControls, value: string) => setControls({ ...controls, [field]: value });
     return (
-        <details className="w-full md:w-auto text-sm bg-gray-900/50 rounded-lg">
-            <summary className="cursor-pointer font-semibold p-2 text-gray-300 hover:text-white">Director Mode (Optional)</summary>
-            <div className="p-3 border-t border-gray-700 flex flex-col md:flex-row gap-4">
-                <div><label htmlFor="shotType" className="block text-xs text-gray-400 mb-1">Shot Type</label><select id="shotType" value={controls.shotType} onChange={e => handleChange('shotType', e.target.value)} className="bg-gray-700 rounded p-1 text-xs" disabled={disabled}>{shotTypes.map(st => <option key={st} value={st}>{st}</option>)}</select></div>
-                <div><label htmlFor="cameraMovement" className="block text-xs text-gray-400 mb-1">Camera Movement</label><select id="cameraMovement" value={controls.cameraMovement} onChange={e => handleChange('cameraMovement', e.target.value)} className="bg-gray-700 rounded p-1 text-xs" disabled={disabled}>{cameraMovements.map(cm => <option key={cm} value={cm}>{cm}</option>)}</select></div>
-                <div><label htmlFor="style" className="block text-xs text-gray-400 mb-1">Artistic Style</label><select id="style" value={controls.style} onChange={e => handleChange('style', e.target.value)} className="bg-gray-700 rounded p-1 text-xs" disabled={disabled}>{styles.map(s => <option key={s} value={s}>{s}</option>)}</select></div>
+        <details className="w-full md:w-auto text-sm bg-surface rounded-card hairline">
+            <summary className="tap flex items-center cursor-pointer px-3 text-metal-300 md:hover:text-metal-100">
+                Director mode <span className="ml-1 text-metal-400">(optional)</span>
+            </summary>
+            <div className="p-3 shadow-[inset_0_1px_0_rgb(255_255_255/0.06)] flex flex-col md:flex-row gap-4">
+                <div><label htmlFor="shotType" className={labelClass}>Shot type</label><select id="shotType" value={controls.shotType} onChange={e => handleChange('shotType', e.target.value)} className={selectClass} disabled={disabled}>{shotTypes.map(st => <option key={st} value={st}>{st}</option>)}</select></div>
+                <div><label htmlFor="cameraMovement" className={labelClass}>Camera movement</label><select id="cameraMovement" value={controls.cameraMovement} onChange={e => handleChange('cameraMovement', e.target.value)} className={selectClass} disabled={disabled}>{cameraMovements.map(cm => <option key={cm} value={cm}>{cm}</option>)}</select></div>
+                <div><label htmlFor="style" className={labelClass}>Artistic style</label><select id="style" value={controls.style} onChange={e => handleChange('style', e.target.value)} className={selectClass} disabled={disabled}>{styles.map(s => <option key={s} value={s}>{s}</option>)}</select></div>
             </div>
         </details>
     );
@@ -41,17 +46,24 @@ const VideoGeneratorPane: React.FC<VideoGeneratorPaneProps> = (props) => {
   return (
     <form onSubmit={onSubmit} className="flex flex-col items-center gap-4">
         <div className="w-full flex items-center justify-center gap-4 text-sm flex-wrap">
-            <label htmlFor="duration" className="text-gray-400">Duration: {duration}s</label>
-            <input type="range" id="duration" min="1" max="15" value={duration} onChange={e => setDuration(Number(e.target.value))} className="w-48 accent-metal-300" disabled={isLoading} />
-            <label htmlFor="aspectRatio" className="text-gray-400">Aspect Ratio:</label>
-            <select id="aspectRatio" value={aspectRatio} onChange={e => setAspectRatio(e.target.value)} className="bg-gray-700 rounded p-1" disabled={isLoading}>{aspectRatios.map(ar => <option key={ar} value={ar}>{ar}</option>)}</select>
+            <label htmlFor="duration" className="text-metal-300">Duration <span className="meta">{duration}s</span></label>
+            <input type="range" id="duration" min="1" max="15" value={duration} onChange={e => setDuration(Number(e.target.value))} className="w-40 md:w-48 h-11 accent-metal-300" disabled={isLoading} />
+            <label htmlFor="aspectRatio" className="text-metal-300">Aspect ratio</label>
+            <select id="aspectRatio" value={aspectRatio} onChange={e => setAspectRatio(e.target.value)} className="tap bg-raised rounded-lg px-2 text-metal-100 hairline focus:outline-none disabled:opacity-40" disabled={isLoading}>{aspectRatios.map(ar => <option key={ar} value={ar}>{ar}</option>)}</select>
         </div>
         <div className="w-full flex justify-center"><VideoDirectorControls controls={directorControls} setControls={setDirectorControls} disabled={isLoading} /></div>
          <div className="w-full flex flex-col md:flex-row items-center gap-4">
             <div className="w-full md:w-auto"><ImageUpload onFileSelect={onFileSelect} label="Optional starting image"/></div>
             <div className="flex-1 w-full flex items-center gap-2">
-                <input type="text" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Describe the video scene..." className="w-full p-3 bg-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500" disabled={isLoading} />
-                <button type="submit" disabled={isLoading || !prompt.trim()} className="bg-sky-600 text-white p-3 rounded-lg hover:bg-sky-500 disabled:bg-gray-600 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></button>
+                <input type="text" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Describe the video scene…" aria-label="Video prompt"
+                    className="tap w-full min-w-0 px-4 bg-raised rounded-xl text-metal-100 placeholder:text-metal-400 hairline focus:outline-none disabled:opacity-40" disabled={isLoading} />
+                <button type="submit" disabled={isLoading || !prompt.trim()} aria-label="Generate video"
+                    className="tap shrink-0 flex items-center justify-center rounded-xl bg-metal-700 text-metal-100
+                               shadow-[inset_0_1px_0_rgb(255_255_255/0.08)]
+                               transition-[background-color,transform] duration-200 ease-fluid
+                               md:hover:bg-[#33333a] active:scale-[0.98] disabled:opacity-35 disabled:active:scale-100">
+                    <svg xmlns="http://www.w3.org/2000/svg" aria-hidden className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+                </button>
             </div>
         </div>
     </form>

@@ -251,6 +251,28 @@ const AUDIT = () => {
         }
     }
 
+    // --- origins: nothing may be fetched cross-origin -------------------------
+    //
+    // Not a style rule. The preview-runtime decision (DESIGN.md §5) keeps the
+    // door open to WebContainer, which needs cross-origin isolation, which
+    // needs `COEP: require-corp` — under which the document REFUSES any
+    // cross-origin subresource that has not opted in, silently.
+    //
+    // The app already satisfies this and nobody had written it down: the server
+    // converts Veo downloads and generated images to `data:` URLs before they
+    // reach the browser, uploads go through FileReader, and the fonts are
+    // self-hosted. That invariant is easy to break with one convenient CDN URL,
+    // so it is checked rather than remembered.
+    const ORIGIN_OK = /^(data:|blob:|about:|$)/;
+    for (const el of document.querySelectorAll('img[src], video[src], source[src], iframe[src], audio[src], link[rel="stylesheet"], script[src]')) {
+        const raw = el.getAttribute('src') || el.getAttribute('href') || '';
+        if (ORIGIN_OK.test(raw)) continue;
+        let url;
+        try { url = new URL(raw, location.href); } catch { continue; }
+        if (url.origin === location.origin) continue;
+        findings.overflow.push(`cross-origin resource: <${el.tagName.toLowerCase()}> ${url.origin}${url.pathname} — breaks under COEP`);
+    }
+
     // --- overflow: the page itself must never scroll sideways ----------------
     const de = document.documentElement;
     if (de.scrollWidth > de.clientWidth + 1) {

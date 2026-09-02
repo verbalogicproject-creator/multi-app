@@ -86,7 +86,7 @@ const Terminal: React.FC<TerminalProps> = ({ projectId }) => {
                     onChange={e => setInput(e.target.value)}
                     onKeyDown={handleKeyDown}
                     aria-label="Terminal input"
-                    className="flex-1 min-w-0 bg-transparent text-metal-100 focus:outline-none"
+                    className="tap flex-1 min-w-0 bg-transparent text-metal-100 focus:outline-none"
                     autoComplete="off"
                 />
             </div>
