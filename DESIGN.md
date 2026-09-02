@@ -136,16 +136,16 @@ else is a flat plane.
 
 ```html
 <!-- shell -->
-<div class="rounded-[--radius-shell] bg-white/[0.03] ring-1 ring-white/[0.06] p-1.5">
+<div class="rounded-shell bg-white/[0.03] ring-1 ring-white/[0.06] p-1.5">
   <!-- core: concentric, its own ground, one inset highlight -->
-  <div class="rounded-[--radius-core] bg-surface
+  <div class="rounded-core bg-surface
               shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
 ```
 
 **Everything else** — file rows, message bubbles, terminal lines, shelf entries:
 
 ```html
-<div class="rounded-[--radius-card] bg-white/[0.04]">
+<div class="rounded-card bg-white/[0.04]">
 ```
 
 Separation is by **value**, not by outline. The only border in the system is a
@@ -284,6 +284,15 @@ screens are full of machine facts.
 Every transition uses `cubic-bezier(0.32, 0.72, 0, 1)` — weighted, decelerating,
 never `ease-in-out`. Only `transform` and `opacity` animate; nothing that
 triggers layout.
+
+**Write `ease-fluid` and `rounded-card`, never `ease-[--ease-fluid]` or
+`rounded-[--radius-card]`.** Tailwind compiles the bracket form to
+`transition-timing-function: --ease-fluid`, a bare custom property where a value
+belongs — invalid CSS, silently dropped by every engine. For a year of commits
+that meant the motion curve and every corner radius in this document existed only
+in the document. `@theme`'s `--ease-*` and `--radius-*` namespaces already
+generate the real utilities; use them. `npm run check:css` now fails the build on
+any dropped declaration.
 
 ```
 press       active:scale-[0.98]            120ms
@@ -445,6 +454,7 @@ renders the *generated* app and must not inherit this palette).
 ```sh
 npx impeccable detect components/ index.css App.tsx   # deterministic, 61 rules
 npm run typecheck && npm run build
+npm run check:css        # dropped declarations in the BUILT css — see below
 ```
 
 Plus the hue sweep, which must use every hue family and every property prefix:

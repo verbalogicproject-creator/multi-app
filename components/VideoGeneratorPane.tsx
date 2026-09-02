@@ -42,7 +42,7 @@ const VideoGeneratorPane: React.FC<VideoGeneratorPaneProps> = (props) => {
     <form onSubmit={onSubmit} className="flex flex-col items-center gap-4">
         <div className="w-full flex items-center justify-center gap-4 text-sm flex-wrap">
             <label htmlFor="duration" className="text-gray-400">Duration: {duration}s</label>
-            <input type="range" id="duration" min="1" max="15" value={duration} onChange={e => setDuration(Number(e.target.value))} className="w-48 accent-sky-500" disabled={isLoading} />
+            <input type="range" id="duration" min="1" max="15" value={duration} onChange={e => setDuration(Number(e.target.value))} className="w-48 accent-metal-300" disabled={isLoading} />
             <label htmlFor="aspectRatio" className="text-gray-400">Aspect Ratio:</label>
             <select id="aspectRatio" value={aspectRatio} onChange={e => setAspectRatio(e.target.value)} className="bg-gray-700 rounded p-1" disabled={isLoading}>{aspectRatios.map(ar => <option key={ar} value={ar}>{ar}</option>)}</select>
         </div>

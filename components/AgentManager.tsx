@@ -8,7 +8,7 @@ const field =
 
 const button =
     'tap px-4 rounded-lg text-sm font-medium ' +
-    'transition-[background-color,transform] duration-200 ease-[--ease-fluid] ' +
+    'transition-[background-color,transform] duration-200 ease-fluid ' +
     'active:scale-[0.98] disabled:opacity-35 disabled:active:scale-100';
 
 const solid = `${button} bg-metal-700 text-metal-100 shadow-[inset_0_1px_0_rgb(255_255_255/0.06)] md:hover:bg-[#33333a]`;
@@ -36,7 +36,7 @@ const AgentForm: React.FC<{
     // accent is for, and the only thing on this screen wearing it.
     if (projects.length === 0 || personas.length === 0) {
         return (
-            <div className="p-4 rounded-[--radius-card] bg-raised hairline text-sm">
+            <div className="p-4 rounded-card bg-raised hairline text-sm">
                 <p className="flex items-center gap-2 font-medium text-metal-100 mb-2">
                     <span aria-hidden className="w-1.5 h-1.5 rounded-full bg-accent shrink-0" />
                     Prerequisites missing
@@ -50,7 +50,7 @@ const AgentForm: React.FC<{
     }
 
     return (
-        <form onSubmit={handleSubmit} className="p-4 rounded-[--radius-card] bg-raised hairline space-y-4">
+        <form onSubmit={handleSubmit} className="p-4 rounded-card bg-raised hairline space-y-4">
             <h3 className="font-display text-base tracking-[-0.02em] text-metal-100">
                 {isEditing ? `Edit agent: ${agent.name}` : 'Create new agent'}
             </h3>
@@ -106,7 +106,7 @@ const AgentManager: React.FC = () => {
 
     const iconButton =
         'tap flex items-center justify-center rounded-lg text-metal-300 ' +
-        'transition-colors duration-200 ease-[--ease-fluid] md:hover:text-metal-100 md:hover:bg-metal-700';
+        'transition-colors duration-200 ease-fluid md:hover:text-metal-100 md:hover:bg-metal-700';
 
     return (
         <div className="space-y-4">
@@ -129,8 +129,8 @@ const AgentManager: React.FC = () => {
                                 onClick={() => handleSelectAgent(isSelected ? null : agent.id)}
                                 onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSelectAgent(isSelected ? null : agent.id); } }}
                                 /* Selected is a state you caused: it rises and brightens. No orange. */
-                                className={`p-3 rounded-[--radius-card] cursor-pointer
-                                            transition-[background-color,box-shadow] duration-200 ease-[--ease-fluid]
+                                className={`p-3 rounded-card cursor-pointer
+                                            transition-[background-color,box-shadow] duration-200 ease-fluid
                                             ${isSelected
                                                 ? 'bg-raised shadow-[inset_0_0_0_1px_rgb(255_255_255/0.14)]'
                                                 : 'bg-white/[0.04] shadow-[inset_0_0_0_1px_rgb(255_255_255/0.06)] md:hover:bg-white/[0.07]'}`}

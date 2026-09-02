@@ -1,5 +1,16 @@
 @import "tailwindcss";
 
+/* Prose is not source. Tailwind v4 auto-scans the project, so DESIGN.md quoting
+   a broken class name in order to forbid it made Tailwind emit that broken class
+   — the documentation compiled itself into the bundle and kept the very
+   declaration it was warning about alive in `check:css`. Same for the checker's
+   own explanatory comment. */
+@source not "./DESIGN.md";
+@source not "./README.md";
+@source not "./AGENTS.md";
+@source not "./production-release-roadmap.md";
+@source not "./scripts";
+
 /* ==========================================================================
    Tokens — see DESIGN.md. This is the only place a colour is decided.
    ========================================================================== */

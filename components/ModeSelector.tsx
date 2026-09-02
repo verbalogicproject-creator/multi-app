@@ -19,7 +19,10 @@ const modes = allModes.filter(m => m.enabled);
 
 const ModeSelector: React.FC<ModeSelectorProps> = ({ currentMode, onModeChange }) => {
   return (
-    <div className="flex justify-center items-center p-2 rounded-lg bg-black/20 mb-4 flex-wrap">
+    /* Scrolls inside itself. It used to carry `mb-4` and wrap, which was right
+       when it sat above the transcript and wrong once it moved into a header
+       row — the margin pushed it past the row's box and the row clipped it. */
+    <div className="flex items-center gap-1 p-1 rounded-lg bg-black/20 overflow-x-auto max-w-full">
       {modes.map(mode => {
         return (
           <button
@@ -27,7 +30,7 @@ const ModeSelector: React.FC<ModeSelectorProps> = ({ currentMode, onModeChange }
             onClick={() => onModeChange(mode.id)}
             aria-pressed={currentMode === mode.id}
             className={`tap px-4 rounded-md text-sm font-medium
-              transition-[background-color,color,transform] duration-200 ease-[--ease-fluid] active:scale-[0.98]
+              transition-[background-color,color,transform] duration-200 ease-fluid active:scale-[0.98]
               ${currentMode === mode.id
                 ? 'bg-raised text-metal-100 shadow-[inset_0_0_0_1px_rgb(255_255_255/0.14)]'
                 : 'text-metal-300 md:hover:bg-metal-700 md:hover:text-metal-100'}

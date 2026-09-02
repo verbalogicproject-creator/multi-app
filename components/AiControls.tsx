@@ -147,7 +147,7 @@ const AiControls: React.FC = () => {
               {activePersona.composedStyles.map((style, index) => (<div key={index} className="flex items-center gap-2 bg-metal-700 p-2 rounded">
                   <div className="flex flex-col"><button onClick={() => handleMoveStyle(index, 'up')} disabled={index === 0} className="disabled:opacity-20 hover:text-metal-200">&#9650;</button><button onClick={() => handleMoveStyle(index, 'down')} disabled={index === activePersona.composedStyles.length - 1} className="disabled:opacity-20 hover:text-metal-200">&#9660;</button></div>
                   <span className="font-semibold text-sm flex-1 truncate" title={style.name}>{style.name}</span>
-                  <input type="range" min="0" max="1" step="0.05" value={style.weight} onChange={e => handleUpdateComposedStyle(index, { weight: Number(e.target.value) })} className="w-20 accent-[--color-accent]" />
+                  <input type="range" min="0" max="1" step="0.05" value={style.weight} onChange={e => handleUpdateComposedStyle(index, { weight: Number(e.target.value) })} className="w-20 accent-metal-300" />
                   <span className="text-xs w-8 text-center">{Math.round(style.weight * 100)}%</span>
                   <button onClick={() => handleRemoveComposedStyle(index)} className="text-metal-400 hover:text-accent-soft font-bold p-1 text-lg">&times;</button>
               </div>))}

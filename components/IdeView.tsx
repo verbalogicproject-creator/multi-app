@@ -121,7 +121,7 @@ const IdeView: React.FC<IdeViewProps> = ({ projectId }) => {
                         className="tap md:hidden shrink-0 flex items-center gap-2 px-4 text-left
                                    text-xs font-medium uppercase tracking-[0.12em] text-metal-300"
                     >
-                        <span aria-hidden className={`transition-transform duration-200 ease-[--ease-fluid] ${terminalOpen ? 'rotate-90' : ''}`}>▸</span>
+                        <span aria-hidden className={`transition-transform duration-200 ease-fluid ${terminalOpen ? 'rotate-90' : ''}`}>▸</span>
                         Terminal
                     </button>
                     <div className={`flex-1 min-h-0 ${terminalOpen ? 'flex' : 'hidden'} md:flex`}>

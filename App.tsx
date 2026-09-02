@@ -105,7 +105,7 @@ const AppContent: React.FC = () => {
             )}
 
             {globalError && (
-                <div className="fixed right-4 z-50 max-w-sm p-4 rounded-[--radius-card] bg-raised shadow-[inset_0_0_0_1px_rgb(255_255_255/0.10)]
+                <div className="fixed right-4 z-50 max-w-sm p-4 rounded-card bg-raised shadow-[inset_0_0_0_1px_rgb(255_255_255/0.10)]
                                 bottom-[calc(4.25rem+max(1rem,env(safe-area-inset-bottom)))] md:bottom-20">
                     <div className="flex justify-between items-center">
                         <p className="flex items-center gap-2 text-sm font-medium text-metal-100">
