@@ -163,7 +163,7 @@ const ProjectManager: React.FC = () => {
                                         {p.dependencySummary && (
                                             <div className="px-3 pb-3 pt-2 shadow-[inset_0_1px_0_rgb(255_255_255/0.06)]">
                                               <details>
-                                                <summary className="cursor-pointer text-xs font-medium text-metal-300 md:hover:text-metal-100 flex items-center gap-2">
+                                                <summary className="tap cursor-pointer text-xs font-medium text-metal-300 md:hover:text-metal-100 flex items-center gap-2">
                                                     Detected dependencies
                                                     {analyzingProjects.has(p.id) && <div className="scale-50"><LoadingIndicator /></div>}
                                                 </summary>
