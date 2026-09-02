@@ -215,9 +215,17 @@ survive a trip to Code and back.
 
 Because the desktop keeps its split, there is exactly one code surface in the
 app rendered two ways — a tab on the phone, the two-thirds column on desktop.
-When Monaco and a real file tree land, they land *inside `IdeView`*, once, and
+When a real editor and file tree land, they land *inside `IdeView`*, once, and
 both layouts get them. That is why the phone did not get a code *sheet*: a sheet
 would have been a second home to delete later.
+
+**Which editor is not decided, and Monaco is probably out.** Its own FAQ answers
+"Is the editor supported in mobile browsers or mobile web app frameworks?" with a
+flat **"No."** — not degraded, not best-effort. Since `IdeView` is one component
+and the phone is this app's base case, an editor that excludes the phone excludes
+the component. CodeMirror 6 is the mobile-capable candidate; **its real shipped
+size has not been measured yet and must be before anything is chosen.** Do not
+plan around Monaco on the strength of it being the familiar name.
 
 On a phone the three panes recompose rather than shrink:
 
