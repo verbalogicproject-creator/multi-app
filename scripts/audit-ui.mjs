@@ -24,7 +24,7 @@
  */
 import { mkdirSync } from 'node:fs';
 import { spawn } from 'node:child_process';
-import { launch, openPage, SURFACES, PHONE, DESKTOP } from './ui-harness.mjs';
+import { launch, openPage, assertBackend, SURFACES, PHONE, DESKTOP } from './ui-harness.mjs';
 
 const arg = (flag, fallback) => {
     const i = process.argv.indexOf(flag);
@@ -87,6 +87,21 @@ const startPreview = async () => {
     proc.stdout.on('data', d => { log += d; });
     proc.stderr.on('data', d => { log += d; });
     for (let i = 0; i < 60; i++) {
+        // Our own child, before anything else. `--strictPort` makes vite exit
+        // when the port is taken, and a leftover preview server from an earlier
+        // run answers 200 on the very next poll — so a probe that only asks
+        // "is something listening?" happily audits a stale build served by a
+        // process this run did not start and cannot configure. That is how a
+        // correct API_TARGET still produced a hung audit: the answering server
+        // was the previous one, still pointed at the wrong backend.
+        if (proc.exitCode !== null) {
+            console.error(`preview server exited (code ${proc.exitCode}) instead of serving ${PORT}:`);
+            console.error(log.trim() || '(no output)');
+            if (/already in use/i.test(log)) {
+                console.error(`\nSomething else holds ${PORT}. Free it:  pkill -f "vite preview --port ${PORT}"`);
+            }
+            process.exit(1);
+        }
         try {
             const r = await fetch(`http://127.0.0.1:${PORT}/`);
             if (r.ok) return proc;
@@ -285,7 +300,7 @@ const AUDIT = () => {
 };
 
 const run = async () => {
-    if (!arg('--url', null)) await assertFreshBuild();
+    if (!arg('--url', null)) { await assertFreshBuild(); await assertBackend(); }
     const preview = arg('--url', null) ? null : await startPreview();
     const browser = await launch();
     const report = [];

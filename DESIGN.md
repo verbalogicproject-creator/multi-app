@@ -285,25 +285,70 @@ type errors back through `PROPOSAL_TABLE`** so the builder learns from its own.
 Generated code is the model's output and `tsc` is a deterministic judge — which
 is exactly the loop this repo already has.
 
-`typescript` is pinned to **`5.9.3` exactly**. Note that the caret range it
-replaced (`^5.4.5`) could *not* have drifted to TypeScript 7 — a caret is
-major-locked — so the drift warning in that document is overstated. The real
-reasons to pin are reproducibility and Track C: `typescript@latest` is now
-**7.0.2**, the native Go port, whose 2.5 MB package ships no `tsserver.js` where
-5.9.3 ships 23.6 MB, and `typescript-language-server` needs the JS one.
+`typescript` is pinned to **`5.9.3` exactly** — that is what this app compiles
+with, and it is what Stage 2's `tsc --noEmit` will run. Note that the caret range
+it replaced (`^5.4.5`) could *not* have drifted to TypeScript 7: a caret is
+major-locked, so the drift warning in that document is overstated. The reasons to
+pin are reproducibility and Track C.
 
-### IdeView is one component, two layouts
+**The two pins are not the same pin.** Track C — the deferred LSP — needs a
+TypeScript that still ships `lib/tsserver.js`, and `typescript@latest` is now
+**7.0.2**, the native Go port, whose 2.5 MB package ships none. Verified on this
+device: **6.0.3 is the newest release that still ships it** (24.3 MB, same
+`tsserver.js` shim + `_tsserver.js` pair as 5.9.3), and `typescript-language-server`
+6.0.0 initialises against it. So the LSP document's pin is `6.0.3`; the app's stays
+`5.9.3` until there is a reason to move a compiler major, which is its own change
+with its own risk.
 
-Because the desktop keeps its split, there is exactly one code surface in the
-app rendered two ways — a tab on the phone, the two-thirds column on desktop.
-When a real editor and file tree land, they land *inside `IdeView`*, once, and
-both layouts get them. That is why the phone did not get a code *sheet*: a sheet
-would have been a second home to delete later.
+#### What landed, and what it cost
 
-**Which editor is not decided — and Monaco is NOT disqualified.** Its FAQ answers
-"Is the editor supported in mobile browsers or mobile web app frameworks?" with
-"No.", and that sentence was briefly treated here as a capability claim. It is a
-**support-policy** claim. Measured on this device against a real Monaco build
+CodeMirror 6 replaced the `<textarea>` on 2026-09-03. Measured on this device,
+not estimated:
+
+```
+before            858 KB raw / 208 KB gzip   one chunk
+after (naive)   1,379 KB raw / 390 KB gzip   one chunk  — +182 KB on first paint
+after (split)     858 KB raw / 209 KB gzip   app
+                + 522 KB raw / 181 KB gzip   CodeEditor, loaded on demand
+```
+
+The editor is a `lazy()` chunk. It is larger than the entire rest of the app, and
+most sessions open the chat before they open a file, so it streams in behind a
+usable screen instead of standing in front of one. First paint pays **0.75 KB**
+for the split; opening a file pays the 181 KB once. The grammars for HTML, CSS and
+JSON are why this is 181 KB rather than the 170 KB measured for JS/TS alone.
+
+**Syntax has no hue, and that is the system working rather than a compromise.**
+§6 says a signal needing a third job beyond attention and chrome must find it
+outside the palette. Syntax is exactly such a signal. So `components/editor/theme.ts`
+spends none: keywords are `metal-100` at 600, types and functions `metal-100`,
+strings and numbers `metal-200`, punctuation `metal-300`, comments `metal-300`
+italic. Three values and two weights carry more structure than they sound like,
+and the accent stays unspent — which is what leaves it free to mean *this line has
+a type error* in Stage 2. The one exception is an unclosed bracket, which is
+already the accent's job: something needs you.
+
+Two things the token layer had to be told about. `EditorView.lineWrapping` is on,
+because a long line that scrolls sideways on a 390px viewport is a line nobody
+reads. And `indentWithTab` is deliberately **absent**: it traps keyboard focus in
+the editor with no way out, and CodeMirror ships no escape hatch for it.
+
+**The failure mode this component has is invisible**, which is why it has its own
+gate. Rebuild the `EditorView` when the `file` prop changes identity — which it
+does on every save — and the pane looks perfect, keeps your text, and passes every
+visual check, while silently discarding undo history each time you press Save. The
+effect is therefore keyed on `file.id`, and `npm run check:editor` proves both
+halves through the keyboard: history and cursor survive a save, and history resets
+across files. Reverting the key to `[file]` makes three of its assertions fail with
+the right diagnosis — that negative control was run, not assumed.
+
+#### What the touch probe did and did not establish
+
+This section carried a second, older copy of itself that still said the
+editor was undecided. The decision above supersedes it; the evidence below is
+the part that survives, because it is measurement rather than framing.
+
+Measured on this device against a real Monaco build
 (Pixel 7 emulation, touch, Chromium 149):
 
 | touch/mobile behaviour | Monaco | CodeMirror 6 |
@@ -328,24 +373,6 @@ finger drag *scrolls*; selection is long-press, then drag the handles the OS
 draws. Synthesising that reliably, in headless Chromium, against browser-drawn
 selection UI, is not something to trust. **This one is a human test on a real
 device, and it takes ten seconds.**
-
-Weight, measured from real builds on this device — the part that *is* settled:
-
-```
-CodeMirror 6   basicSetup + JS/TS + theme    505 KB raw /  170 KB gzip   one file
-Monaco         eager core + css + codicon   ~4.4 MB    / ~1.17 MB        + editor.worker
-Monaco         + ts.worker (type service)  ~11.3 MB    / ~2.6 MB
-```
-
-Roughly **8× smaller raw, 7× smaller gzipped** for the comparable case, with no
-workers and no icon font. The difference Monaco buys for that is a real
-TypeScript language service — genuine type errors and type-aware completion.
-CodeMirror gives syntax, local-scope completion and search; type checking would
-mean adding `typescript` itself, which lands back in Monaco's range.
-
-Served from localhost these bytes are nearly free. The real costs are parse and
-compile on a mobile CPU, and the ts.worker's resident memory on a machine that
-also hosts local models.
 
 On a phone the three panes recompose rather than shrink:
 
@@ -627,6 +654,41 @@ typecheck, a build, or the detector:
   `filesByProject` is filled lazily and nothing filled it for that route.
 - The desktop Memory trigger sat **on top of the send button**.
 - The phone editor spent **88px on two stacked header rows** before any code.
+
+**And behaviour is checked separately from appearance**, because the editor's
+worst failure has no appearance:
+
+```sh
+npm run check:editor   # 17 assertions, keyboard only, on the built output
+```
+
+It asserts CodeMirror mounted, the grammar produced styled spans, typing reaches
+the document, `Mod-s` saves, and then the two that define the stage: within a
+file the cursor and undo history survive a save; across files undo cannot walk
+back into the previous file's edits. Every assertion also checks that its subject
+*moved* — a test in which "nothing changed" can pass is a test that passes when
+the editor is dead. Proved awake by keying the effect on `[file]` instead of
+`[file.id]`: three assertions fail, naming the rebuild.
+
+**Both browser gates need multi-app's own backend**, and that is now checked
+rather than assumed. `vite preview` proxies `/api`, so an upstream that accepts
+the connection and never answers leaves every request pending, `networkidle`
+never fires, and the run dies on a `page.goto` timeout that reads exactly like
+broken UI. That happened: port 8080 was held by an unrelated project's server,
+which answers `/healthz` with `{status:'ok'}` — healthy, wrong app. A liveness
+probe any server can pass is not a probe, so `assertBackend` asserts the response
+shape only this app returns, and `API_TARGET` moves the target when 8080 is taken:
+
+```sh
+PORT=8090 node server.js
+API_TARGET=http://localhost:8090 npm run audit:ui
+```
+
+The same class of bug bit the preview server itself: `--strictPort` makes Vite
+exit when the port is held, and a leftover preview from an earlier run answers
+200 on the very next poll — so the audit ran against a stale build served by a
+process it did not start. `startPreview` now watches its own child's exit code
+first.
 
 A design decision that cannot be checked is a preference. The contrast table in
 §2 is the part of this document that is not negotiable.

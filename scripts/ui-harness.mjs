@@ -195,3 +195,41 @@ export const launch = () => chromium.launch({
     executablePath: findChrome(),
     args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
 });
+
+/**
+ * Prove the backend is *this app's* backend, not merely that something answers.
+ *
+ * Every surface is seeded from localStorage, so the audit does not need the API
+ * for its assertions — but `vite preview` proxies `/api` regardless, and a proxy
+ * whose upstream accepts the connection and never replies leaves the request
+ * hanging, so `waitUntil: 'networkidle'` never fires and the run dies on a
+ * `page.goto` timeout that reads exactly like broken UI.
+ *
+ * That is not hypothetical. Port 8080 was taken by an unrelated project's BFF,
+ * which answers `/healthz` with `{status:'ok'}` — healthy, wrong app, and the
+ * audit hung for thirty seconds and blamed the page. A liveness check that any
+ * server can pass is not a check; this one asserts the response shape only
+ * multi-app returns.
+ */
+export const assertBackend = async () => {
+    const target = process.env.API_TARGET || 'http://localhost:8080';
+    let body;
+    try {
+        const r = await fetch(`${target}/healthz`, { signal: AbortSignal.timeout(4000) });
+        body = await r.json();
+    } catch (e) {
+        console.error(`No backend on ${target} — ${e.message}`);
+        console.error('The preview proxy would hang on every /api call and the audit would');
+        console.error('time out looking like a UI failure. Start it:  node server.js');
+        console.error('(Or point elsewhere: API_TARGET=http://localhost:8090 <this command>)');
+        process.exit(1);
+    }
+    if (!body || body.ok !== true || !body.models) {
+        console.error(`Something is listening on ${target}, but it is not multi-app.`);
+        console.error(`  /healthz returned: ${JSON.stringify(body)}`);
+        console.error('  expected the shape: { ok: true, models: {...} }');
+        console.error('Free the port, or run multi-app elsewhere and point at it:');
+        console.error('  PORT=8090 node server.js  &&  API_TARGET=http://localhost:8090 <this command>');
+        process.exit(1);
+    }
+};
