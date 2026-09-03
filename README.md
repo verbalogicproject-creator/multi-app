@@ -12,13 +12,18 @@ Originally exported from Google AI Studio; restored and extended to run standalo
 ```sh
 npm install
 cp .env.example .env        # then set GEMINI_API_KEY
-npm run dev:server          # Express backend on :8080
-npm run dev                 # Vite frontend on :5173 (proxies /api to :8080)
+npm run dev:server          # Express backend on :8050
+npm run dev                 # Vite frontend on :5173 (proxies /api to :8050)
 ```
 
-Production: `npm run build` then `npm start` (serves the built client from `dist/` on :8080).
+Production: `npm run build` then `npm start` (serves the built client from `dist/` on :8050).
 
-Health check: `curl localhost:8080/healthz` (also reports the active model registry).
+Health check: `curl localhost:8050/healthz` (also reports the active model registry).
+
+The backend is on **8050, not 8080** — 8080 is the port every other tool reaches
+for first, and one of them took it here mid-session, which hangs the dev proxy
+rather than failing it. `PORT` still overrides; if you move it, move
+`API_TARGET` with it.
 
 ## The builder
 
@@ -81,7 +86,8 @@ a cost estimate first.
 |---------|---------|---------|
 | `GEMINI_API_KEY` | Google key (required; `API_KEY` accepted as legacy fallback) | — |
 | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `NVIDIA_API_KEY` | Optional; each unlocks that provider's models | — |
-| `PORT` | Backend port | `8080` |
+| `PORT` | Backend port | `8050` |
+| `API_TARGET` | Where `vite dev`/`preview` proxy `/api` | `http://localhost:8050` |
 | `MODEL_CHAT` / `MODEL_CODING` | Chat + coding defaults | `gemini-3.5-flash` |
 | `MODEL_BUILDER` | Builder codegen default | `gemini-3.7-flash` |
 | `MODEL_IMAGE` / `MODEL_VIDEO` | Media models (features flagged off) | `gemini-3.1-flash-image` / `veo-3.1-generate-preview` |

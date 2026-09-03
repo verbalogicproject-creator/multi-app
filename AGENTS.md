@@ -30,8 +30,11 @@ Invariants to preserve:
 ## Build, Test, and Development Commands
 
 - `npm install` installs the locked dependencies from `package-lock.json`.
-- `npm run dev` starts the Vite frontend; `/api` requests proxy to port 8080.
-- `npm start` starts the Express backend on `PORT` or port 8080.
+- `npm run dev` starts the Vite frontend; `/api` requests proxy to port 8050
+  (`API_TARGET` overrides).
+- `npm start` starts the Express backend on `PORT` or port 8050. **Not 8080** —
+  that port is crowded on this device and a stranger holding it hangs the proxy
+  instead of failing it.
 - `npm run build` creates the production frontend bundle in `dist/`.
 - `npx tsc --noEmit` runs the strict TypeScript check without writing files.
 

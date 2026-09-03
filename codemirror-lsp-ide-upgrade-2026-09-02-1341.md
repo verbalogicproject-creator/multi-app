@@ -43,7 +43,7 @@ Hover types, go-to-definition, rename-symbol, find-references, inlay hints, diag
 Three facts about your codebase decide the architecture:
 
 1. **`components/CodeEditor.tsx` is a raw 77-line `<textarea>`.** No editor library, no highlighting. This is greenfield — you are not migrating off anything, so there is no swap cost.
-2. **You have a Node backend.** `server.js` runs Express on `:8080`, and `vite.config.ts` already proxies `/api` to it. Fractal (the SAG example) is browser-only and would have to fight `tsserver` into a web worker. **You don't.** You can run a real language server as a child process, server-side, which is the well-trodden path.
+2. **You have a Node backend.** `server.js` runs Express on `:8050` (moved off 8080 on 2026-09-03 — that port is crowded on this device), and `vite.config.ts` already proxies `/api` to it. Fractal (the SAG example) is browser-only and would have to fight `tsserver` into a web worker. **You don't.** You can run a real language server as a child process, server-side, which is the well-trodden path.
 3. **Your files are virtual.** `types/project.ts:8` — `ProjectFile { path, content, projectId }`, generated in memory by `/api/builder/generate`. There is no directory on disk for a language server to read. **This is the one genuinely hard part of the integration**, and §5 is about it.
 
 ---
@@ -53,7 +53,7 @@ Three facts about your codebase decide the architecture:
 ### Option A — Server-side language server over WebSocket ✅ **Recommended**
 
 ```
-Browser                          Express (:8080)                  child process
+Browser                          Express (:8050)                  child process
 ┌────────────────────┐           ┌──────────────────┐            ┌─────────────┐
 │ CodeMirror         │           │ WS endpoint      │            │ typescript- │
 │ @codemirror/       │◄─ ws ────►│ /api/lsp         │◄─ stdio ──►│ language-   │
@@ -171,8 +171,8 @@ Vite must proxy the WebSocket in dev — note `ws: true`:
 // vite.config.ts
 server: {
   proxy: {
-    '/api/lsp': { target: 'ws://localhost:8080', ws: true },   // must precede '/api'
-    '/api':     { target: 'http://localhost:8080', changeOrigin: true },
+    '/api/lsp': { target: 'ws://localhost:8050', ws: true },   // must precede '/api'
+    '/api':     { target: 'http://localhost:8050', changeOrigin: true },
   }
 }
 ```

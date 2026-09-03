@@ -207,12 +207,13 @@ export const launch = () => chromium.launch({
  *
  * That is not hypothetical. Port 8080 was taken by an unrelated project's BFF,
  * which answers `/healthz` with `{status:'ok'}` — healthy, wrong app, and the
- * audit hung for thirty seconds and blamed the page. A liveness check that any
- * server can pass is not a check; this one asserts the response shape only
- * multi-app returns.
+ * audit hung for thirty seconds and blamed the page. The default moved to 8050
+ * because of it, which makes a collision unlikely rather than impossible: a
+ * liveness check that any server can pass is still not a check, so this one
+ * asserts the response shape only multi-app returns.
  */
 export const assertBackend = async () => {
-    const target = process.env.API_TARGET || 'http://localhost:8080';
+    const target = process.env.API_TARGET || 'http://localhost:8050';
     let body;
     try {
         const r = await fetch(`${target}/healthz`, { signal: AbortSignal.timeout(4000) });
