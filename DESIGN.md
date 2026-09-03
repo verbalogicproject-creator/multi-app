@@ -328,10 +328,20 @@ and the accent stays unspent — which is what leaves it free to mean *this line
 a type error* in Stage 2. The one exception is an unclosed bracket, which is
 already the accent's job: something needs you.
 
-Two things the token layer had to be told about. `EditorView.lineWrapping` is on,
+Three things the token layer had to be told about. `EditorView.lineWrapping` is on,
 because a long line that scrolls sideways on a 390px viewport is a line nobody
-reads. And `indentWithTab` is deliberately **absent**: it traps keyboard focus in
-the editor with no way out, and CodeMirror ships no escape hatch for it.
+reads. `indentWithTab` is deliberately **absent**: it traps keyboard focus in the
+editor with no way out, and CodeMirror ships no escape hatch for it. And
+`.cm-content` carries `min-height: 100%`, because `.cm-gutters` is `height: 100%`
+of a flex line sized by the content — without it the gutter's hairline stops where
+the document does and hangs in mid-air below it.
+
+**That last one was found by looking at the screenshot, and nothing else would have
+found it.** The same pass removed a `padding-bottom: 35vh` on `.cm-scroller` that
+was there to clear a soft keyboard: it is a guess about a platform this project has
+never exercised (see the open risk on Android Chrome), and it bought a permanent
+phantom scrollbar in exchange. An unmeasured convenience is not worth a visible
+defect.
 
 **The failure mode this component has is invisible**, which is why it has its own
 gate. Rebuild the `EditorView` when the `file` prop changes identity — which it

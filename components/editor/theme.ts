@@ -22,14 +22,12 @@ export const editorTheme = EditorView.theme(
             fontSize: '13px',
         },
         '&.cm-focused': { outline: 'none' },
-        '.cm-scroller': {
-            fontFamily: 'inherit',
-            lineHeight: '1.55',
-            overflow: 'auto',
-            /* Room to scroll the last line clear of a soft keyboard. */
-            paddingBottom: '35vh',
-        },
-        '.cm-content': { padding: '0.75rem 0' },
+        '.cm-scroller': { fontFamily: 'inherit', lineHeight: '1.55', overflow: 'auto' },
+        /* `.cm-gutters` is height:100% of the flex line, which is sized by
+           `.cm-content` — so without this the gutter's hairline stops where the
+           document does and hangs in mid-air below it. Found by looking at it;
+           nothing else would have. */
+        '.cm-content': { padding: '0.75rem 0', minHeight: '100%' },
         '.cm-line': { padding: '0 1rem 0 0.5rem' },
 
         /* Cursor and selection are state you caused, so they are value, never
