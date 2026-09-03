@@ -23,7 +23,15 @@ export type BuildIssueCode =
     | 'unresolved-import'
     | 'unresolved-html-ref'
     | 'plan-page-missing'
-    | 'plan-component-missing';
+    | 'plan-component-missing'
+    /**
+     * A strict TypeScript check failed.
+     *
+     * Produced server-side, never here: `tsc` is a subprocess and this module stays
+     * pure. It is one code for every TS error number on purpose — `memory/proposals.js`
+     * keys on the code, and a row per TS number would be a table nobody maintains.
+     */
+    | 'type-error';
 
 export interface BuildIssue {
     severity: 'error' | 'warning';

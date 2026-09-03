@@ -69,6 +69,13 @@ export const PROPOSAL_TABLE = {
         recommendation:
             'Always emit index.html, with a root element and a module script pointing at src/main.tsx. Without it nothing can start, however complete the rest is.',
     },
+    'type-error': {
+        trigger: 'Generated code failed a strict TypeScript check',
+        recommendation:
+            'Write code that type-checks under strict mode. Annotate props and state, ' +
+            'do not assign across incompatible types, and do not reference identifiers ' +
+            'that were never declared or imported.',
+    },
     'unresolved-html-ref': {
         trigger: 'index.html references a file that was never generated',
         recommendation:
