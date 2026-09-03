@@ -617,10 +617,10 @@ ${Array.isArray(plan?.acceptanceCriteria) && plan.acceptanceCriteria.length > 0
 - No external images. Where an image would go, use a styled div with a gradient or an inline SVG.
 
 **Stack rules:**
-1. Vite + React 18 + TypeScript, standard layout: index.html, src/main.tsx, src/App.tsx, src/index.css, src/pages/*, src/components/*.
+1. Vite + React 19 + TypeScript, standard layout: index.html, src/main.tsx, src/App.tsx, src/index.css, src/pages/*, src/components/*.
 2. Routing with react-router-dom v6 (Routes in src/App.tsx, shared layout with nav + footer).
 3. Styling with Tailwind CSS v4: src/index.css starts with '@import "tailwindcss";' and vite.config.ts uses the @tailwindcss/vite plugin. Do NOT emit tailwind.config.js or postcss.config.js.
-4. package.json with correct dependencies and pinned major versions (react ^18, react-router-dom ^6, tailwindcss ^4, @tailwindcss/vite ^4, vite ^5, @vitejs/plugin-react ^4, typescript ^5) and scripts: "dev": "vite", "build": "vite build", "typecheck": "tsc --noEmit", "preview": "vite preview".
+4. package.json with correct dependencies and pinned major versions (react ^19, react-dom ^19, react-router-dom ^6, tailwindcss ^4, @tailwindcss/vite ^4, vite ^5, @vitejs/plugin-react ^4, typescript ^5) and scripts: "dev": "vite", "build": "vite build", "typecheck": "tsc --noEmit", "preview": "vite preview".
 5. tsconfig.json compilerOptions must be exactly: { "target": "ES2020", "lib": ["ES2020", "DOM", "DOM.Iterable"], "module": "ESNext", "moduleResolution": "bundler", "jsx": "react-jsx", "strict": true, "esModuleInterop": true, "skipLibCheck": true, "noEmit": true } with "include": ["src"].
 6. Code must compile under strict TypeScript: every function parameter, callback parameter and prop is explicitly typed — no implicit any. With jsx react-jsx, do not import React just for JSX; import only the hooks you use.
 7. Every file must be complete and syntactically valid. State lives in React hooks; interactive features (forms, filters, toggles) must actually work with local state.

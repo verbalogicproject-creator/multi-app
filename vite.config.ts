@@ -20,10 +20,22 @@ const proxy = {
   '/api': { target: API_TARGET, changeOrigin: true },
 }
 
+/**
+ * The typecheck/preview scratch tree, which the server writes into on every run.
+ *
+ * It lives inside the repo deliberately — TypeScript resolves `react` by walking
+ * *up* looking for `node_modules`, so a project materialised here sees the real
+ * `@types/react`, and one in `/tmp` sees nothing at all. The cost is that vite's
+ * watcher would otherwise notice every write: its defaults only ignore
+ * `node_modules` and `.git`, so a dot-directory is watched like any other, and a
+ * typecheck during `npm run dev` would reload the page it was checking.
+ */
+const watch = { ignored: ['**/.preview-work/**'] }
+
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
-  server: { proxy },
+  server: { proxy, watch },
   // `vite preview` needs the same proxy: the UI audit runs against the built
   // output rather than the dev server, because transpiling on demand for a
   // couple of dozen fresh browser contexts kills the dev server on this device.
