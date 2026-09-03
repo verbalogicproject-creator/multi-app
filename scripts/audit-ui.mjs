@@ -67,7 +67,16 @@ const assertFreshBuild = async () => {
     let built;
     try { built = newest('dist/assets'); }
     catch { console.error('No dist/. Run `npm run build` (or use `npm run audit:ui`).'); process.exit(1); }
-    const source = Math.max(newest('components'), statSync('App.tsx').mtimeMs, statSync('index.css').mtimeMs);
+    /* Every source root the client bundle is built from. `components/` alone was
+       enough while the UI lived entirely there; diagnostics put real behaviour in
+       `hooks/` and `services/`, and a root that is not listed here is a change this
+       check will cheerfully certify as already built. */
+    const roots = ['components', 'hooks', 'services', 'context', 'utils', 'types'];
+    const source = Math.max(
+        ...roots.map(r => { try { return newest(r); } catch { return 0; } }),
+        statSync('App.tsx').mtimeMs,
+        statSync('index.css').mtimeMs,
+    );
     if (source > built) {
         const age = Math.round((source - built) / 1000);
         console.error(`dist/ is ${age}s older than the source it is built from.`);
@@ -76,12 +85,22 @@ const assertFreshBuild = async () => {
     }
 };
 
+const stopPreview = (proc) => {
+    if (!proc) return;
+    try { process.kill(-proc.pid, 'SIGTERM'); }
+    catch { proc.kill('SIGTERM'); }
+};
+
 const startPreview = async () => {
     // --host 127.0.0.1 is not optional: `vite preview` binds "localhost", which
     // resolves to ::1 here, and the readiness probe on 127.0.0.1 then fails
     // against a server that is perfectly alive.
     const proc = spawn('npx', ['vite', 'preview', '--port', String(PORT), '--strictPort', '--host', '127.0.0.1'], {
-        stdio: ['ignore', 'pipe', 'pipe'], detached: false,
+        // `detached` so the whole group can be signalled at once: `npx` is not the
+        // server, it is the server's parent, and killing it alone leaves vite holding
+        // the port for the next run to trip over -- and its pipes open, which keeps
+        // this script alive long after it has printed its verdict.
+        stdio: ['ignore', 'pipe', 'pipe'], detached: true,
     });
     let log = '';
     proc.stdout.on('data', d => { log += d; });
@@ -110,7 +129,7 @@ const startPreview = async () => {
     }
     console.error(`preview server never came up on ${PORT}:\n${log}`);
     console.error('Did you run `npm run build` first?');
-    proc.kill();
+    stopPreview(proc);
     process.exit(1);
 };
 const URL = arg('--url', `http://127.0.0.1:${PORT}/`);
@@ -350,12 +369,13 @@ const run = async () => {
     const visited = report.length - unreachable.length;
     console.log(`${visited} surface(s) audited, ${total} finding(s).`);
     await browser.close();
-    preview?.kill();
+    stopPreview(preview);
 
     // A surface we could not reach is a coverage hole, and a coverage hole is
     // indistinguishable from a pass. Fail on it.
     if (total > 0 || unreachable.length > 0) process.exit(2);
     console.log('ui ok');
+    process.exit(0);
 };
 
 run().catch(e => { console.error('AUDIT FAILED TO RUN:', e.message); process.exit(1); });
