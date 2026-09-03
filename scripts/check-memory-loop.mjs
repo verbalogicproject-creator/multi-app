@@ -120,6 +120,42 @@ check('the trial carries the note about what just broke', scoped.includes('Emit 
 check('and not the unrelated one from an older failure', !scoped.includes('re-read every relative import'),
     'a note that stopped being relevant stops being injected');
 
+// ---- the seam: a type error is a lesson like any other ------------------------
+// Stage 3's whole claim is that `tsc` is just another judge feeding the same
+// ladder. This proves it with the code the compiler actually produces, rather
+// than assuming the machinery generalises.
+const tsBuild = 'build-typeerror';
+const tsEpi1 = await bridge.openEpisodeSafe({ buildId: tsBuild, objective: 'generate Kanban — first attempt' });
+const tsEv1 = await bridge.recordEvidenceSafe({ buildId: tsBuild, kind: 'validation', ref: `build://${tsBuild}/e1/v`, summary: 'TS2322 in src/App.tsx' });
+const tsVerdict = { ok: false, checked: 6, errors: 1, warnings: 0, codes: { 'type-error': 1 } };
+const tsProposals = proposals.proposalsFor(tsVerdict);
+const tsProposed = await bridge.proposeLessonsSafe({
+    buildId: tsBuild, episodeId: tsEpi1, evidenceIds: [tsEv1.id], proposals: tsProposals,
+});
+check('a type error proposes a lesson', tsProposed?.length === 1, JSON.stringify(tsProposed?.map(p => p.code)));
+// The proposal, not the stored record: what a model is told is the recommendation
+// text, and it has to say something actionable rather than name the failure again.
+check('and it is guidance a model can act on', tsProposals[0]?.recommendation?.includes('type-check'),
+    tsProposals[0]?.recommendation?.slice(0, 60));
+
+await bridge.appendEventSafe({ buildId: tsBuild, episodeId: tsEpi1, kind: 'verification.completed', domain: 'build', payload: tsVerdict, evidenceIds: [tsEv1.id] });
+await bridge.closeEpisodeSafe({ buildId: tsBuild, episodeId: tsEpi1, outcome: 'failed' });
+
+// The next attempt is told about it, in the block reserved for the unproven.
+const tsEpi2 = await bridge.openEpisodeSafe({ buildId: tsBuild, objective: 'generate Kanban — second attempt' });
+const tsTrial = await bridge.trialBlock({ buildId: tsBuild, episodeId: tsEpi2 });
+check('the next attempt trials it', tsTrial.includes('type-check'), tsTrial.slice(0, 80));
+
+// And a passing attempt promotes it — the ratchet is on the close, not the verdict.
+const tsEv2 = await bridge.recordEvidenceSafe({ buildId: tsBuild, kind: 'validation', ref: `build://${tsBuild}/e2/v`, summary: 'types clean over 6 files' });
+await bridge.appendEventSafe({ buildId: tsBuild, episodeId: tsEpi2, kind: 'verification.completed', domain: 'build', payload: { ok: true, checked: 6, errors: 0, warnings: 0, codes: {} }, evidenceIds: [tsEv2.id] });
+await bridge.closeEpisodeSafe({ buildId: tsBuild, episodeId: tsEpi2, outcome: 'verified' });
+await bridge.recordReuseSafe({ buildId: tsBuild, episodeId: tsEpi2 });
+
+const tsState = await bridge.listBuildState(tsBuild);
+const tsLesson = tsState.lessons.find(l => l.id === tsProposed[0].lessonId);
+check('a passing attempt qualifies it', tsLesson?.status === 'qualified', tsLesson?.status);
+
 bridge.closeAll();
 rmSync(scratch, { recursive: true, force: true });
 console.log(failures === 0 ? '\nTHE LOOP CLOSES' : `\n${failures} CHECK(S) FAILED`);

@@ -6,6 +6,7 @@ import type { CatalogModel } from '../services/apiService';
 import * as buildStorage from '../services/buildStorage';
 import type { SavedBuild } from '../services/buildStorage';
 import * as memoryService from '../services/memoryService';
+import { runTypecheck } from '../services/typecheckService';
 import type { EpisodeOutcome, MemoryEvent, MemoryEvidence } from '../services/memoryService';
 import { DEFAULT_PALETTE, sanitizeColors, type ArtDirection, type ThemeColors } from '../utils/palettes';
 import { validateBuild, type BuildValidation } from '../utils/validateBuild';
@@ -954,7 +955,32 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             }, { buildId, episodeId });
             bumpQuotaTick();
             // The model's word is not evidence: check the files before adopting them.
-            const validation = validateBuild(files, builderState.plan);
+            const lexical = validateBuild(files, builderState.plan);
+
+            /*
+             * And then a compiler, which is the judge the lexical pass cannot be.
+             * `validateBuild` counts braces and resolves imports by regex; `tsc`
+             * knows whether the code means anything. Both verdicts go into one
+             * `BuildValidation`, so promotion, the evidence line and the single
+             * `verification.completed` event below all see the same thing.
+             *
+             * Never allowed to block the transition. The checker is bounded server
+             * side, and anything short of a completed answer — unreachable, timed
+             * out, cancelled — leaves the lexical verdict standing alone. An
+             * unfinished compile reports zero diagnostics, which is why `completed`
+             * is read rather than the count: a checker that did not run must not be
+             * able to certify a build.
+             */
+            setBuilderState(prev => ({ ...prev, status: { ...prev.status, message: 'Checking types…' } }));
+            const typecheck = await runTypecheck(buildId ?? 'build', files, 0);
+            const validation: BuildValidation = typecheck?.completed
+                ? {
+                    ok: lexical.ok && typecheck.ok,
+                    issues: [...lexical.issues, ...typecheck.issues],
+                    checked: lexical.checked,
+                }
+                : lexical;
+
             const fileCount = Object.keys(files).length;
             const errors = validation.issues.filter(i => i.severity === 'error').length;
 
