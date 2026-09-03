@@ -15,6 +15,8 @@ import { PLAN_SCHEMA, DIRECTIONS_SCHEMA, GENERATE_SCHEMA, filesArrayToRecord } f
 import { buildSystemPrompt, builderPreamble } from './providers/prompts.js';
 import { memoryRouter } from './memory/routes.js';
 import * as memory from './memory/bridge.js';
+import typecheckRouter from './typecheck/routes.js';
+import { clean as cleanTypecheckScratch, killAll as killTypecheckRuns } from './typecheck/runner.js';
 
 const app = express();
 const port = process.env.PORT || 8050;
@@ -32,6 +34,10 @@ const upload = multer({ storage: multer.memoryStorage() });
 // Memory is mounted before the model routes so its availability is a fact the
 // UI can read, never something a builder request has to discover by failing.
 app.use('/api/memory', memoryRouter);
+
+// The typechecker, mounted for the same reason and with the same shape. Both must
+// sit ahead of the `app.get('*')` SPA fallback at the bottom of this file.
+app.use('/api/typecheck', typecheckRouter);
 
 // Initialize Google GenAI
 const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
@@ -752,9 +758,16 @@ app.get('*', (req, res) => {
 for (const signal of ['SIGINT', 'SIGTERM']) {
     process.on(signal, () => {
         try { memory.closeAll(); } catch { /* shutting down anyway */ }
+        // A tsc child outlives its parent unless told otherwise, and it holds real
+        // memory on a phone.
+        try { killTypecheckRuns(); } catch { /* shutting down anyway */ }
         process.exit(0);
     });
 }
+
+// Anything left in the scratch tree is from a run that did not get to clean up
+// after itself. Start from empty rather than inheriting it.
+await cleanTypecheckScratch();
 
 app.listen(port, () => {
     console.log(`Server listening at http://localhost:${port}`);
