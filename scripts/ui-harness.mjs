@@ -44,6 +44,14 @@ const SEED = {
         { id: 'f1', projectId: PROJECT_ID, path: 'src/App.tsx', type: 'text/plain', createdAt: 1,
           content: "import React from 'react';\n\nexport default function App() {\n  return <main>harbour</main>;\n}\n" },
         { id: 'f2', projectId: PROJECT_ID, path: 'src/components/Header.tsx', type: 'text/plain', createdAt: 2, content: 'export const Header = () => null;\n' },
+        // A deliberate type error, and deliberately a *cross-file* one: the
+        // interface it violates lives in another file, so a checker that only ever
+        // saw one file at a time would call this project clean. Kept last so
+        // `files[0]` is still src/App.tsx and the editor still opens on it.
+        { id: 'f3', projectId: PROJECT_ID, path: 'src/types.ts', type: 'text/plain', createdAt: 3,
+          content: 'export interface User { id: number; name: string; }\n' },
+        { id: 'f4', projectId: PROJECT_ID, path: 'src/Broken.tsx', type: 'text/plain', createdAt: 4,
+          content: "import type { User } from './types';\n\nexport const Broken = () => {\n  const user: User = { id: 'not-a-number', name: 'crate' };\n  return <span>{user.name}</span>;\n};\n" },
     ],
     gemini_personas: [
         { id: 'p1', name: 'React Specialist', baseInstructions: 'You write React.',
@@ -155,11 +163,24 @@ export const SURFACES = [
         await bottomTab(p, 'Code');
         await p.getByRole('button', { name: /^Choose file/ }).click(); await p.waitForTimeout(400);
     } },
+    // The bottom block is a tab strip now, so these are tabs, not buttons. The
+    // audit caught the change by failing to reach the surface at all, which is
+    // the point of treating an unreachable surface as a failure.
     { name: 'code-terminal',   phone: true,  desktop: false, reach: async p => {
         await bottomTab(p, 'Projects'); await railTab(p, 'Agents');
         await p.getByText('Harbour Builder').click(); await p.waitForTimeout(500);
         await bottomTab(p, 'Code');
-        await p.getByRole('button', { name: 'Terminal' }).first().click(); await p.waitForTimeout(400);
+        await p.getByRole('tab', { name: /Terminal/ }).first().click(); await p.waitForTimeout(400);
+    } },
+    // The seeded project carries a deliberate type error, so this surface is the
+    // populated panel rather than its empty state. Given the checker is a
+    // subprocess, it needs longer than the other surfaces to have anything to show.
+    { name: 'code-problems',   phone: true,  desktop: true,  reach: async p => {
+        await bottomTab(p, 'Projects'); await railTab(p, 'Agents');
+        await p.getByText('Harbour Builder').click(); await p.waitForTimeout(500);
+        await bottomTab(p, 'Code');
+        await p.getByRole('tab', { name: /Problems/ }).first().click();
+        await p.waitForTimeout(6000);
     } },
     { name: 'memory',          phone: true,  desktop: true,  reach: async p => {
         // Phone: the bottom bar. Desktop: the floating trigger, whose accessible

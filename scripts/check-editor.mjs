@@ -32,9 +32,28 @@ const ok = (name, cond, detail = '') => {
     return false;
 };
 
+/**
+ * Stop the preview, and mean it.
+ *
+ * `spawn` gets us `npx`, which is not the server — `npx` starts vite as a *child*,
+ * and killing the parent leaves that child holding the port. The next run then meets
+ * `--strictPort`, exits, and the readiness poll is answered by the leftover from last
+ * time: the exact trap the guard in `startPreview` was written for. `detached` puts
+ * the pair in their own process group so one signal reaches both.
+ *
+ * It also has to happen, or the script never exits. A surviving grandchild keeps its
+ * pipes open, and open pipes keep node's event loop alive long after the last
+ * assertion has been printed.
+ */
+const stopPreview = (proc) => {
+    if (!proc) return;
+    try { process.kill(-proc.pid, 'SIGTERM'); }
+    catch { proc.kill('SIGTERM'); }
+};
+
 const startPreview = async () => {
     const proc = spawn('npx', ['vite', 'preview', '--port', String(PORT), '--strictPort', '--host', '127.0.0.1'], {
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: ['ignore', 'pipe', 'pipe'], detached: true,
     });
     let log = '';
     proc.stdout.on('data', d => { log += d; });
@@ -50,7 +69,7 @@ const startPreview = async () => {
         await new Promise(r => setTimeout(r, 500));
     }
     console.error(`preview never came up on ${PORT}:\n${log}`);
-    proc.kill();
+    stopPreview(proc);
     process.exit(1);
 };
 
@@ -86,9 +105,63 @@ const run = async () => {
         const spans = await page.locator('.cm-line span').count();
         ok('the grammar produced styled spans', spans > 0, `${spans} spans in the document`);
 
+        // ── 1. Type diagnostics ─────────────────────────────────────────────
+        // `src/Broken.tsx` violates an interface declared in `src/types.ts`, so
+        // nothing here can pass unless the checker saw both files at once.
+        await page.getByRole('button', { name: 'src/Broken.tsx', exact: true }).click();
+        await page.waitForTimeout(700);
+
+        // tsc is a subprocess behind a 500ms debounce; it is seconds, not frames.
+        let squiggle = page.locator('.cm-lintRange-error').first();
+        try { await squiggle.waitFor({ timeout: 30000 }); } catch { /* asserted below */ }
+
+        const marked = (await squiggle.count()) ? (await squiggle.innerText()) : '';
+        ok('a type error is underlined', marked.length > 0,
+           'no .cm-lintRange-error appeared — the checker never answered, or the dispatch never landed');
+        // The whole point of the offset conversion. tsc counts lines and columns
+        // from 1; CodeMirror wants absolute offsets, and getting that wrong
+        // underlines real text with total confidence.
+        ok('the underline is on the offending token', marked === 'id',
+           `underlined ${JSON.stringify(marked)}, expected "id" — the line/col to offset conversion is off`);
+
+        ok('the gutter marks the line', await page.locator('.cm-lint-marker-error').count() > 0);
+
+        // The panel lists it, and says where.
+        await page.getByRole('tab', { name: /Problems/ }).click();
+        await page.waitForTimeout(400);
+        const entry = page.getByRole('button', { name: /src\/Broken\.tsx:4:24/ }).first();
+        ok('the problems panel names the place', await entry.count() > 0,
+           'no entry matching src/Broken.tsx:4:24');
+
+        // ── 2. The staleness guard, and proof it is awake ───────────────────
+        // Editing the marked line must *retract* the squiggle, not leave it to
+        // slide onto whatever text now sits at those coordinates. Delete the
+        // clear-on-change dispatch in useDiagnostics and this is the assertion
+        // that fails, by name.
+        const brokenLine = page.locator('.cm-line').nth(3);
+        await brokenLine.click();
+        await page.keyboard.press('End');
+        // Count first. "It is gone now" is not a result unless it was there before —
+        // otherwise this assertion passes loudest when diagnostics are broken
+        // entirely, which is the one time it must not.
+        const before = await page.locator('.cm-lintRange-error').count();
+        await page.keyboard.type(' ');
+        await page.waitForTimeout(250);
+        const after = await page.locator('.cm-lintRange-error').count();
+        ok('editing the line retracts the stale squiggle', before > 0 && after === 0,
+           before === 0
+               ? 'there was no underline to retract — this assertion proved nothing'
+               : `${after} underline(s) survived the edit — they now describe text that has moved`);
+
+
+        // Back to a pristine App.tsx for the editing assertions below, which need
+        // the caret in a file they are about to deliberately mangle.
+        await page.getByRole('button', { name: 'src/App.tsx', exact: true }).click();
+        await page.waitForTimeout(600);
+
         const save = page.getByRole('button', { name: 'Save', exact: true });
 
-        // ── 1. History and cursor survive a save ────────────────────────────
+        // ── 3. History and cursor survive a save ────────────────────────────
         const firstLine = page.locator('.cm-line').first();
         await firstLine.click();
         await page.keyboard.press('End');
@@ -126,7 +199,7 @@ const run = async () => {
         ok('undo history survives a save', !afterUndo.includes('/*MARK*/'),
            `still ${JSON.stringify(afterUndo.slice(0, 80))} — history was reset by the save`);
 
-        // ── 2. History resets across files ──────────────────────────────────
+        // ── 4. History resets across files ──────────────────────────────────
         await page.keyboard.press('Control+Shift+z');   // redo, back to /*MARK*/
         await page.waitForTimeout(300);
         await page.keyboard.press('Control+s');
@@ -160,12 +233,16 @@ const run = async () => {
     } finally {
         await context.close();
         await browser.close();
-        preview.kill();
+        stopPreview(preview);
     }
 
     console.log('');
     if (failures) { console.error(`editor: ${failures} failure(s)`); process.exit(1); }
     console.log('editor ok');
+    /* Explicit, because a verdict has been printed and there is nothing left to
+       decide. Draining the loop instead means any stray handle turns a pass into a
+       hang, which reads as a broken gate rather than a green one. */
+    process.exit(0);
 };
 
 run().catch(e => { console.error('CHECK FAILED TO RUN:', e.message); process.exit(1); });

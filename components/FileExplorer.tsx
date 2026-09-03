@@ -9,9 +9,11 @@ interface FileExplorerProps {
     onDeleteFile: (path: string) => void;
     /** Present when the explorer is a phone sheet rather than a desktop column. */
     onClose?: () => void;
+    /** Type errors per path, if the project has been checked. */
+    errorCounts?: Map<string, number>;
 }
 
-const FileExplorer: React.FC<FileExplorerProps> = ({ files, activeFileId, onFileSelect, onCreateFile, onDeleteFile, onClose }) => {
+const FileExplorer: React.FC<FileExplorerProps> = ({ files, activeFileId, onFileSelect, onCreateFile, onDeleteFile, onClose, errorCounts }) => {
 
     const handleCreate = () => {
         const path = prompt("Enter the new file path (e.g., src/components/New.tsx):");
@@ -44,6 +46,7 @@ const FileExplorer: React.FC<FileExplorerProps> = ({ files, activeFileId, onFile
                 {files.length === 0 && <p className="text-xs text-metal-300 p-2">No files in project.</p>}
                 {files.map(file => {
                     const selected = activeFileId === file.id;
+                    const errors = errorCounts?.get(file.path) ?? 0;
                     return (
                         <li key={file.id} className="flex items-center gap-1">
                             <button
@@ -59,6 +62,20 @@ const FileExplorer: React.FC<FileExplorerProps> = ({ files, activeFileId, onFile
                             >
                                 {file.path}
                             </button>
+                            {/* A sibling, deliberately. The count must not touch the
+                                button's accessible name: `check-editor.mjs` selects
+                                files by exact name, and both a badge *inside* the
+                                button and an `aria-label` *on* it would rename it and
+                                silently break every file-switching assertion. */}
+                            {errors > 0 && (
+                                <span
+                                    role="status"
+                                    aria-label={`${file.path} has ${errors} type ${errors === 1 ? 'error' : 'errors'}`}
+                                    className="meta text-[0.6875rem] shrink-0 px-1.5 rounded-full bg-accent-strong text-white"
+                                >
+                                    {errors}
+                                </span>
+                            )}
                             {/* Always reachable: an opacity-0 control that appears on hover is
                                 a control a touch screen cannot find. */}
                             <button

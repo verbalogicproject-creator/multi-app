@@ -84,9 +84,25 @@ const FALLBACK_OPTIONS = {
  * sidesteps the question rather than answering it: there is no input that produces
  * a `..`, and the same project always lands in the same place.
  */
-const dirFor = (projectId) => path.join(WORK_DIR, createHash('sha1').update(String(projectId)).digest('hex').slice(0, 16));
+const keyFor = (projectId) => createHash('sha1').update(String(projectId)).digest('hex').slice(0, 16);
 
-/** In-flight runs, one per project. A newer revision supersedes an older answer. */
+/**
+ * Every run gets its *own* directory, not one per project.
+ *
+ * Sharing a directory per project looks natural and is a race. Saves in quick
+ * succession cancel each other, so two runs for the same project overlap by design:
+ * the newer one wipes and rewrites the tree, and then the older one's cleanup —
+ * which is still pending, because it was only just killed — deletes the files the
+ * newer one is about to compile. tsc then finds nothing, exits 0, and reports a
+ * clean project. Measured exactly that: four files sent, an obvious type error in
+ * one of them, `completed: true`, zero diagnostics.
+ *
+ * A per-run suffix means a run can only ever delete its own work.
+ */
+let runSeq = 0;
+const dirForRun = (projectId) => path.join(WORK_DIR, `${keyFor(projectId)}-${++runSeq}`);
+
+/** In-flight runs, keyed by project. A newer revision supersedes an older answer. */
 const running = new Map();
 
 /**
@@ -143,10 +159,11 @@ const writeConfig = async (dir, files, checkable) => {
 
 /** Kill whatever is running for this project; its answer is stale by definition. */
 export const cancel = (projectId) => {
-    const child = running.get(dirFor(projectId));
+    const key = keyFor(projectId);
+    const child = running.get(key);
     if (child) {
         child.kill('SIGTERM');
-        running.delete(dirFor(projectId));
+        running.delete(key);
     }
 };
 
@@ -162,12 +179,21 @@ export const clean = () => fs.rm(WORK_DIR, { recursive: true, force: true }).cat
 /**
  * Typecheck a virtual project.
  *
+ * One behaviour of tsc worth knowing before reading a result: **a single file that
+ * fails to parse suppresses semantic diagnostics for the entire program.** Leave a
+ * stray `!` in one file and every type error in every other file disappears, replaced
+ * by one syntax error. So "one diagnostic, and it is a TS1xxx" does not mean the rest
+ * of the project is clean — it means the rest of the project was never checked.
+ * Observed here, not read: it is what an editing test kept hitting, because a file
+ * mid-edit is routinely unparseable.
+ *
  * @param {{projectId: string, files: Record<string,string>}} input
  * @returns {Promise<{ok: boolean, issues: object[], diagnostics: object[], truncated: boolean, checked: number, durationMs: number}>}
  */
 export const typecheck = async ({ projectId, files }) => {
-    const dir = dirFor(projectId);
     cancel(projectId);
+    const key = keyFor(projectId);
+    const dir = dirForRun(projectId);
 
     const started = Date.now();
     let checkable;
@@ -183,29 +209,58 @@ export const typecheck = async ({ projectId, files }) => {
        the lexical validator's verdict to give, not ours. */
     if (checkable.length <= 1) {
         await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
-        return { ok: true, issues: [], diagnostics: [], truncated: false, checked: 0, durationMs: Date.now() - started };
+        return { completed: true, ok: true, issues: [], diagnostics: [], truncated: false, checked: 0, durationMs: Date.now() - started };
     }
 
+    let child;
     const raw = await new Promise((resolve) => {
-        const child = execFile(
+        child = execFile(
             TSC,
             ['-p', 'tsconfig.check.json', '--noEmit', '--pretty', 'false'],
             { cwd: dir, timeout: TIMEOUT_MS, maxBuffer: MAX_OUTPUT, killSignal: 'SIGTERM' },
-            /* A non-zero exit is the normal path: tsc exits 2 when it finds errors.
-               Only stdout matters, and it is present either way. */
+            /* A non-zero exit is the normal path: tsc exits 2 when it finds errors, and
+               stdout is where the errors are either way. `killed` is the different
+               case — a run cut short by the timeout or by a newer revision. */
             (err, stdout) => resolve({ stdout: stdout ?? '', killed: Boolean(err && (err.killed || err.code === 'ABORT_ERR')) }),
         );
-        running.set(dir, child);
+        running.set(key, child);
     });
-    running.delete(dir);
+    /* Vacate the slot only if it is still ours. A newer run may already have claimed
+       it, and clearing that one would leave its compiler with nothing able to cancel
+       or kill it. */
+    if (running.get(key) === child) running.delete(key);
+    /* This run's own directory, and only ever this run's — see `dirForRun`. */
     await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+
+    /**
+     * A compile that was cut short knows nothing, and must not be allowed to say so
+     * quietly. Killing tsc leaves stdout empty, an empty stdout parses to zero
+     * diagnostics, and zero diagnostics is indistinguishable from a clean project —
+     * so the honest "I did not finish" arrives dressed as "your code is fine".
+     *
+     * That is not a cosmetic difference. Saves in quick succession cancel each other
+     * by design, so this is the *common* path, not a rare one; and once type errors
+     * feed the lesson ladder, a cancelled run would close a build as verified.
+     */
+    if (raw.killed) {
+        return {
+            completed: false,
+            ok: false,
+            issues: [],
+            diagnostics: [],
+            truncated: true,
+            checked: 0,
+            durationMs: Date.now() - started,
+        };
+    }
 
     const declared = declaredPackages(files['package.json']);
     const parsed = dropDeclaredMissingModules(parseTsc(raw.stdout), declared);
-    const truncated = parsed.length > MAX_DIAGNOSTICS || raw.killed;
+    const truncated = parsed.length > MAX_DIAGNOSTICS;
     const diagnostics = parsed.slice(0, MAX_DIAGNOSTICS);
 
     return {
+        completed: true,
         ok: diagnostics.length === 0,
         issues: toBuildIssues(diagnostics),
         diagnostics,
