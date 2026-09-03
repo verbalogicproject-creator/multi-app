@@ -28,17 +28,20 @@
     "@codemirror/lang-html": "^6.4.12",
     "@codemirror/lang-javascript": "^6.2.5",
     "@codemirror/lang-json": "^6.0.2",
+    "@codemirror/lint": "^6.9.7",
     "@google/genai": "^2.20.0",
     "@lezer/highlight": "^1.2.3",
     "codemirror": "^6.0.2",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
+    "esbuild": "^0.21.5",
     "express": "^4.19.2",
     "multer": "1.4.5-lts.1",
     "multi-graph-memory": "file:../multi-graph-memory",
     "openai": "^7.8.0",
     "react": "^19.1.1",
-    "react-dom": "^19.1.1"
+    "react-dom": "^19.1.1",
+    "react-router-dom": "^6.30.6"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",

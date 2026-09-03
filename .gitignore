@@ -13,3 +13,7 @@ logs/
 
 # Design review scratch — served by vite, never shipped
 public/memory-preview.html
+
+# Typecheck/preview scratch. Inside the repo on purpose: tsc's upward node_modules
+# walk finds the real @types from here, which /tmp cannot reach.
+.preview-work/
