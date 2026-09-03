@@ -685,13 +685,15 @@ rather than assumed. `vite preview` proxies `/api`, so an upstream that accepts
 the connection and never answers leaves every request pending, `networkidle`
 never fires, and the run dies on a `page.goto` timeout that reads exactly like
 broken UI. That happened: port 8080 was held by an unrelated project's server,
-which answers `/healthz` with `{status:'ok'}` — healthy, wrong app. A liveness
-probe any server can pass is not a probe, so `assertBackend` asserts the response
-shape only this app returns, and `API_TARGET` moves the target when 8080 is taken:
+which answers `/healthz` with `{status:'ok'}` — healthy, wrong app. **The default
+backend port moved to 8050 because of it**, which makes the collision unlikely
+rather than impossible — so `assertBackend` still asserts the response shape only
+this app returns, because a liveness probe any server can pass is not a probe.
+`API_TARGET` moves the target if 8050 is ever taken too:
 
 ```sh
-PORT=8090 node server.js
-API_TARGET=http://localhost:8090 npm run audit:ui
+PORT=9000 node server.js
+API_TARGET=http://localhost:9000 npm run audit:ui
 ```
 
 The same class of bug bit the preview server itself: `--strictPort` makes Vite

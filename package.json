@@ -13,7 +13,7 @@
     "dev:server": "node --watch server.js",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
-    "smoke": "curl -sf http://localhost:8080/healthz",
+    "smoke": "curl -sf http://localhost:8050/healthz",
     "smoke:providers": "node scripts/smoke-providers.mjs",
     "check:memory-loop": "node scripts/check-memory-loop.mjs",
     "smoke:memory": "node scripts/smoke-memory.mjs",
