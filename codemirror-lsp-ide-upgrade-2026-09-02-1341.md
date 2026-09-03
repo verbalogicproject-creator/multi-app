@@ -93,7 +93,7 @@ npm i codemirror @codemirror/lang-javascript @codemirror/lsp-client
 
 # server
 npm i ws typescript-language-server
-npm i -E typescript@5.9.3        # see §7.1 — do NOT let this float to 7.x
+npm i -E typescript@6.0.3        # see §7.1 — do NOT let this float to 7.x
 ```
 
 | Package | Verified version |
@@ -102,7 +102,7 @@ npm i -E typescript@5.9.3        # see §7.1 — do NOT let this float to 7.x
 | `@codemirror/lsp-client` | 6.2.5 |
 | `@codemirror/lang-javascript` | 6.2.5 |
 | `typescript-language-server` | 6.0.0 |
-| `typescript` | **5.9.3 (pinned)** |
+| `typescript` | **6.0.3 (pinned)** |
 | `ws` | 8.21.3 |
 
 ### 4.2 Server — the WebSocket ↔ stdio bridge
@@ -299,7 +299,7 @@ Your app is mobile-conscious — `MobileTabBar.tsx`, `md:hidden` chrome, comment
 
 The TS 7 package ships only a `tsc` binary (compiler-only; no `--lsp` flag) plus a native platform package (`@typescript/typescript-linux-arm64` here).
 
-**Fix:** pin TypeScript 5.x — `npm i -E typescript@5.9.3`. This matches what multi-app already declares (`^5.4.5`), but `^` will drift you into 7 on a fresh install. **Pin it exactly.**
+**Fix:** pin TypeScript 6.x — `npm i -E typescript@6.0.3`. Verified on this device: `typescript-language-server` 6.0.0 initializes cleanly against TypeScript 6.0.3, which still ships `lib/tsserver.js`. 6.0.3 is the newest version that works; 7.x does not. This matches what multi-app already declares (`^5.4.5`), but `^` will drift you into 7 on a fresh install. **Pin it exactly.**
 
 Revisit when TS 7's own LSP server ships as a usable standalone; at that point this bridge gets simpler, not harder.
 
@@ -364,7 +364,7 @@ The working prototype:
 mkdir cmtest && cd cmtest && npm init -y
 npm i codemirror @codemirror/lang-javascript @codemirror/lsp-client vite
 npm i ws typescript-language-server
-npm i -E typescript@5.9.3            # NOT 7.x — see §7.1
+npm i -E typescript@6.0.3            # NOT 7.x — see §7.1
 
 mkdir workspace
 echo 'const answer = 42;' > workspace/main.ts

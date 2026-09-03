@@ -19,11 +19,18 @@
     "smoke:memory": "node scripts/smoke-memory.mjs",
     "check:css": "node scripts/check-css.mjs",
     "audit:ui": "npm run build && node scripts/audit-ui.mjs",
-    "shoot:ui": "npm run build && node scripts/audit-ui.mjs --shots /tmp/ui-shots"
+    "shoot:ui": "npm run build && node scripts/audit-ui.mjs --shots /tmp/ui-shots",
+    "check:editor": "npm run build && node scripts/check-editor.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.122.0",
+    "@codemirror/lang-css": "^6.3.1",
+    "@codemirror/lang-html": "^6.4.12",
+    "@codemirror/lang-javascript": "^6.2.5",
+    "@codemirror/lang-json": "^6.0.2",
     "@google/genai": "^2.20.0",
+    "@lezer/highlight": "^1.2.3",
+    "codemirror": "^6.0.2",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",

@@ -140,7 +140,7 @@ Two landing points. They share a parser and are independently useful.
 
 ### 5.1 The exact tsc contract
 
-Verified on this device with TypeScript 5.9.3:
+Verified on this device with TypeScript 5.9.3 (format is unchanged in 6.x):
 
 ```
 broken.ts(1,7): error TS2322: Type 'string' is not assignable to type 'number'.
@@ -309,7 +309,7 @@ The prototype in `codemirror-lsp-ide-upgrade-2026-09-02-1341.md` §4 is verified
 
 Three traps carry over, and each costs a day if hit cold:
 
-1. 🔴 **TypeScript 7 breaks `typescript-language-server`.** `npm i typescript` resolves to 7.0.2 — the native Go port, which ships **no `tsserver.js`**. Handshake dies with `-32603 ... no valid TypeScript installation was found`. **Pin `typescript@5.9.3` exactly.** Your `^5.4.5` will drift into 7 on a fresh install. *This also affects Track B* if you ever depend on `tsserver` rather than `tsc` — Track B uses `tsc` only, which TS 7 still ships, so Track B is safe either way.
+1. 🔴 **TypeScript 7 breaks `typescript-language-server`.** `npm i typescript` resolves to 7.0.2 — the native Go port, which ships **no `tsserver.js`**. Handshake dies with `-32603 ... no valid TypeScript installation was found`. **Pin `typescript@6.0.3` exactly** — verified working; it is the newest release that still ships `tsserver.js`. Your `^5.4.5` will drift into 7 on a fresh install. *This also affects Track B* if you ever depend on `tsserver` rather than `tsc` — Track B uses `tsc` only, which TS 7 still ships, so Track B is safe either way.
 2. **The `initialize` race.** `LSPClient.connect()` sends its first message synchronously, before the socket opens. Without an outbound queue it is dropped and `client.initializing` never resolves — no error, no server log.
 3. **Vite proxy ordering.** `/api/lsp` must be declared *before* `/api` and set `ws: true`, or the upgrade is proxied as plain HTTP.
 

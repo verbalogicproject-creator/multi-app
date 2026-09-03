@@ -1,7 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import FileExplorer from './FileExplorer';
-import CodeEditor from './CodeEditor';
 import Terminal from './Terminal';
+
+/* CodeMirror is 182 KB gzip — more than the rest of the app put together. Held
+   in its own chunk so it streams in behind a usable screen instead of standing
+   in front of one; nothing else on first paint needs it. */
+const CodeEditor = lazy(() => import('./CodeEditor'));
 import { useAppContext } from '../context/AppContext';
 
 interface IdeViewProps {
@@ -19,8 +23,8 @@ interface IdeViewProps {
  * and the terminal becomes a disclosure that is shut until you ask for it. The
  * editor gets everything that is left, because editing is why you opened this.
  *
- * When Monaco replaces the textarea it lands inside here, once, and both
- * layouts get it.
+ * The editor is CodeMirror 6 and it lands inside here, once, so both layouts
+ * get it together. Type diagnostics arrive the same way.
  */
 const IdeView: React.FC<IdeViewProps> = ({ projectId }) => {
     const { filesByProject, aiDeleteFile, handleSaveFileContent, aiCreateFile, ensureProjectFiles } = useAppContext();
@@ -100,7 +104,13 @@ const IdeView: React.FC<IdeViewProps> = ({ projectId }) => {
 
                 <div className="flex-1 min-h-0 flex">
                     {activeFile ? (
-                        <CodeEditor file={activeFile} onSave={handleSave} />
+                        <Suspense fallback={
+                            <div className="flex-1 flex items-center justify-center bg-ground">
+                                <span className="meta text-xs">Loading editor…</span>
+                            </div>
+                        }>
+                            <CodeEditor file={activeFile} onSave={handleSave} />
+                        </Suspense>
                     ) : (
                         <div className="flex-1 flex items-center justify-center p-6 text-sm text-metal-300 text-center">
                             <p>Select a file to view, or create one.</p>
