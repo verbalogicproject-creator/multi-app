@@ -399,6 +399,39 @@ const run = async () => {
         ok('and the seeded project is running inside it', ideText?.includes('harbour') === true,
             ideText === null ? 'nothing rendered in #root' : `#root reads "${ideText}"`);
 
+        /* -- and it follows the code --
+           The IDE's whole claim over the wizard's is that the preview tracks what you
+           are editing. Nothing above proves that: a host that builds once and never
+           again passes every assertion so far. So change the rendered text, save, and
+           look for the new text inside the frame.
+
+           The caret is placed by arrow keys from a known line ending, which is only
+           safe because the fixture is ours — so the document is asserted *before* the
+           frame is. If the caret lands somewhere unexpected the edit assertion fails
+           by name, instead of the frame assertion failing for a reason that has
+           nothing to do with the preview. */
+        if (ideBuilt) {
+            const harbourLine = ide.page.locator('.cm-line').filter({ hasText: 'harbour' }).first();
+            await harbourLine.click();
+            await ide.page.keyboard.press('End');
+            /* Back over `;` `>` `n` `i` `a` `m` `/` `<` to sit just after the word. */
+            for (let i = 0; i < 8; i++) await ide.page.keyboard.press('ArrowLeft');
+            await ide.page.keyboard.type('-tideworks');
+
+            const edited = await ide.page.locator('.cm-content').innerText();
+            ok('the edit landed where it was aimed', edited.includes('<main>harbour-tideworks</main>'),
+                'the caret was not where this assertion assumed; the frame check below would have been meaningless');
+
+            await ide.page.keyboard.press('Control+s');
+            const updated = await ide.page.frameLocator('iframe[title="Preview of the open project"]')
+                .locator('#root')
+                .filter({ hasText: 'harbour-tideworks' })
+                .waitFor({ timeout: 30_000 })
+                .then(() => true).catch(() => false);
+            ok('and the preview follows the code on save', updated,
+                'the frame still shows the old text — the host built once and stopped');
+        }
+
         // -- mount two: the wizard's export step --
         /* Seeded from the audit's own fixture, so the two gates cannot disagree
            about what a finished build looks like. */
