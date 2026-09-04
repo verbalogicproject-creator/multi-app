@@ -83,6 +83,30 @@ export const PROPOSAL_TABLE = {
             'tag, terminate every string, and escape quotes inside JSX text — ' +
             'setQuote("I can\'t do this"), never setQuote(\'I can\'t do this\').',
     },
+    'runtime-error': {
+        trigger: 'The generated app threw once it was running',
+        recommendation:
+            'Guard every value that can be absent before you use it. Give useState a ' +
+            'sensible initial value rather than null or undefined, check an array exists ' +
+            'before mapping it, and do not read a property off something a fetch or a ' +
+            'lookup might not have returned. Code that type-checks can still throw on ' +
+            'the first render.',
+    },
+    'renders-nothing': {
+        trigger: 'The app built and ran without error, but mounted nothing',
+        recommendation:
+            'Make sure the entry actually mounts: createRoot on the element index.html ' +
+            'declares, rendering the app inside it. Then make sure the first route ' +
+            'renders something — a router whose paths never match the initial location ' +
+            'produces a page that is blank and not broken.',
+    },
+    'bundle-error': {
+        trigger: 'The project would not bundle',
+        recommendation:
+            'Import only from files you emitted and packages you listed in package.json, ' +
+            'and keep every module a valid ES module. A project that type-checks can ' +
+            'still fail to build.',
+    },
     'unresolved-html-ref': {
         trigger: 'index.html references a file that was never generated',
         recommendation:

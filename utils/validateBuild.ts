@@ -25,6 +25,23 @@ export type BuildIssueCode =
      * almost always a truncated file or a mis-escaped quote, not a typing mistake.
      */
     | 'syntax-error'
+    /**
+     * The project would not bundle for a reason that is not a missing import.
+     * Produced by esbuild, which is a different judge from `tsc`: code can type-check
+     * and still fail to resolve or transform.
+     */
+    | 'bundle-error'
+    /**
+     * The app ran and threw. The first verdict in this list that comes from
+     * *behaviour* rather than from reading the text — impossible to observe before
+     * the preview could actually execute a build.
+     */
+    | 'runtime-error'
+    /**
+     * It built, it ran, it threw nothing, and it mounted nothing. The failure a
+     * reader sees as a blank white pane and every text-reading check calls a pass.
+     */
+    | 'renders-nothing'
     | 'unresolved-import'
     | 'unresolved-html-ref'
     | 'plan-page-missing'
