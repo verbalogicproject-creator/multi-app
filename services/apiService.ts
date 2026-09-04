@@ -167,9 +167,11 @@ export const generateWebAppPlan = async (idea: string, model?: string, refine?: 
 export interface BuilderProgressEvent {
     progress?: number;   // total characters generated so far
     file?: string;       // a file path Gemini just started writing
-    phase?: 'thinking' | 'writing' | 'planning';
+    phase?: 'thinking' | 'writing' | 'planning' | 'repairing';
     model?: string;      // which model is serving this attempt (fallback-aware)
     manifest?: string[]; // the file list, declared before any file is written
+    files?: string[];    // on a 'repairing' phase, which files a compiler rejected
+    repaired?: string;   // one file, corrected
 }
 
 export const generateWebAppCode = async (plan: any, theme: any, model?: string, onProgress?: (event: BuilderProgressEvent) => void, memory?: MemoryRef): Promise<GenerateResult> => {
@@ -190,6 +192,8 @@ export const generateWebAppCode = async (plan: any, theme: any, model?: string, 
     let finishReason: string | null = null;
     let manifest: string[] = [];
     let missing: string[] = [];
+    let repaired: string[] = [];
+    let repairRounds = 0;
 
     const handleLine = (line: string) => {
         if (!line.trim()) return;
@@ -204,6 +208,8 @@ export const generateWebAppCode = async (plan: any, theme: any, model?: string, 
             finishReason = event.finishReason ?? null;
             manifest = Array.isArray(event.manifest) ? event.manifest : manifest;
             missing = Array.isArray(event.missing) ? event.missing : [];
+            repaired = Array.isArray(event.repaired) ? event.repaired : [];
+            repairRounds = event.repairRounds ?? 0;
         } else {
             /* The manifest arrives on its own, before any file, so the UI can show
                the whole list up front instead of a log that grows from nothing. */
@@ -223,5 +229,5 @@ export const generateWebAppCode = async (plan: any, theme: any, model?: string, 
     if (tail.trim()) handleLine(tail);
 
     if (!files) throw new Error('Generation stream ended without a result. Please try again.');
-    return { files, truncated, salvagedCount, finishReason, manifest, missing };
+    return { files, truncated, salvagedCount, finishReason, manifest, missing, repaired, repairRounds };
 };

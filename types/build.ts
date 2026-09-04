@@ -25,6 +25,13 @@ export interface GenerateResult {
      * makes a stopped build resumable rather than lost.
      */
     missing: string[];
+    /**
+     * Files a compiler rejected and the builder then re-requested with the errors
+     * attached. Present so a build that needed rescuing does not read as one that
+     * never did.
+     */
+    repaired: string[];
+    repairRounds: number;
     /** The provider's own word for why it stopped — `MAX_TOKENS`, `length`, … */
     finishReason: string | null;
 }

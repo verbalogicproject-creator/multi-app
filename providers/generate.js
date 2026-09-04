@@ -233,3 +233,160 @@ const isTruncationReason = (reason) => {
     }
     return truncationCheck(reason);
 };
+
+/**
+ * Which files a compiler blamed, and for what.
+ *
+ * Grouping by file is what makes repair bounded: only the files named cost a
+ * request, and a project with two bad files does not pay for sixteen.
+ */
+export const filesNeedingRepair = (diagnostics, { max = 10 } = {}) => {
+    const byFile = new Map();
+    for (const d of Array.isArray(diagnostics) ? diagnostics : []) {
+        if (typeof d?.path !== 'string') continue;
+        if (!byFile.has(d.path)) byFile.set(d.path, []);
+        byFile.get(d.path).push(d);
+    }
+    /* Most-broken first: a file with fourteen errors is more likely to be the cause
+       than the file with one that merely consumes it. */
+    return [...byFile.entries()]
+        .sort((a, b) => b[1].length - a[1].length)
+        .slice(0, max)
+        .map(([path, diags]) => ({ path, diagnostics: diags }));
+};
+
+/** The project files this one imports, resolved against what actually exists. */
+export const importedPaths = (content, fromPath, record) => {
+    const base = fromPath.includes('/') ? fromPath.slice(0, fromPath.lastIndexOf('/')) : '';
+    const out = new Set();
+    for (const spec of String(content ?? '').matchAll(/from\s+['"](\.[^'"]+)['"]/g)) {
+        const stack = [];
+        for (const part of `${base}/${spec[1]}`.split('/')) {
+            if (part === '..') stack.pop();
+            else if (part !== '.' && part !== '') stack.push(part);
+        }
+        const target = stack.join('/');
+        const hit = Object.keys(record).find(f =>
+            f === target || f.startsWith(`${target}.`) || f.startsWith(`${target}/index.`));
+        if (hit) out.add(hit);
+    }
+    return [...out];
+};
+
+/**
+ * Ask for one file again, with the compiler's own complaint attached.
+ *
+ * The sources of what it imports go in verbatim, and that is the point rather than
+ * generosity. The errors that survive the export contract are *shape* disagreements —
+ * `TideCard.tsx` expecting `TideEntry.height` from a `types.ts` that never declared
+ * it — and no amount of describing a file fixes that. Only reading it does.
+ *
+ * Bounded by construction: only files a compiler named are repaired, only the files
+ * they import are included, and the whole thing runs a fixed number of rounds.
+ */
+export const repairInstruction = ({ manifest, path, purpose, content, diagnostics, sources }) => {
+    const complaints = diagnostics
+        .map(d => `- line ${d.line}, column ${d.col}: ${d.code} ${d.message.split('\n')[0]}`)
+        .join('\n');
+    const context = sources.length > 0
+        ? `\n\nThe files it imports, exactly as they are — match them, do not assume:\n\n${
+            sources.map(s => `--- ${s.path} ---\n${s.content}`).join('\n\n')}`
+        : '';
+    const entry = manifest.find(f => f.path === path);
+    const contract = entry?.exports?.length
+        ? `\n\nIt must still export exactly: ${entry.exports.join(', ')}.`
+        : '';
+
+    return `
+
+**Fix one file: \`${path}\`.**
+
+Its purpose: ${purpose}
+
+TypeScript rejected it:
+${complaints}
+
+Here is the file as written:
+
+${content}${context}${contract}
+
+Return the corrected file in full. Change only what the errors require — do not
+rewrite working code, do not rename exports other files depend on, and do not add
+dependencies. If an error means a type is missing a property, the fix belongs in
+whichever of these files is wrong, and you are being asked for this one.`;
+};
+
+/**
+ * One repair round: re-request every file a compiler blamed, and only those.
+ *
+ * `record` is updated in place with whatever comes back — a file that fails to
+ * regenerate keeps the version it had, because a broken file is still better than a
+ * missing one and the caller's next typecheck will say so either way.
+ *
+ * Deliberately not a loop. A model that cannot fix a file will not fix it on the
+ * fourth attempt either, and an unbounded repair burns quota to arrive at the same
+ * answer more slowly. The caller decides how many rounds; the honest number is small.
+ */
+export const repairRound = async ({
+    models, run, getProvider, systemFor, basePrompt, manifest, record, diagnostics,
+    emit, schemas, concurrency = 3, onServed, maxFiles = 10,
+}) => {
+    const targets = filesNeedingRepair(diagnostics, { max: maxFiles });
+    if (targets.length === 0) return { repaired: [], attempted: [] };
+
+    emit({ phase: 'repairing', files: targets.map(t => t.path) });
+
+    const repaired = [];
+    const queue = [...targets];
+    const fixOne = async (target) => {
+        const entry = manifest.find(f => f.path === target.path);
+        const sources = importedPaths(record[target.path], target.path, record)
+            .map(path => ({ path, content: record[path] }));
+
+        const result = await run(models, async (model) => {
+            const provider = getProvider(model);
+            let acc = '';
+            let usage = null;
+            for await (const event of provider.streamJson({
+                model,
+                system: systemFor(model),
+                prompt: basePrompt + repairInstruction({
+                    manifest,
+                    path: target.path,
+                    purpose: entry?.purpose ?? '',
+                    content: record[target.path],
+                    diagnostics: target.diagnostics,
+                    sources,
+                }),
+                schema: schemas.file,
+                effort: 'medium',
+                maxOutputTokens: 16384,
+            })) {
+                if (event.usage) usage = event.usage;
+                if (event.text) acc += event.text;
+            }
+            let content = null;
+            try {
+                const parsed = JSON.parse(acc);
+                if (typeof parsed?.content === 'string') content = parsed.content;
+            } catch { /* a repair that will not parse is simply not a repair */ }
+            return { content, usage };
+        }, onServed);
+
+        if (typeof result.content === 'string' && result.content.trim() !== '') {
+            record[target.path] = result.content;
+            repaired.push(target.path);
+            emit({ repaired: target.path });
+        }
+    };
+
+    await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, async () => {
+        while (queue.length > 0) {
+            const target = queue.shift();
+            try { await fixOne(target); }
+            catch (error) { emit({ failed: target.path, reason: String(error?.message ?? error).slice(0, 120) }); }
+        }
+    }));
+
+    return { repaired, attempted: targets.map(t => t.path) };
+};

@@ -25,7 +25,7 @@
 import { salvageFiles, isTruncation } from '../providers/salvage.js';
 import { toBuildIssues } from '../typecheck/parse.js';
 import { proposalsFor, unmappedCodes, PROPOSAL_TABLE, NOT_A_LESSON } from '../memory/proposals.js';
-import { normaliseManifest, manifestGaps, missingFrom, manifestInstruction, fileInstruction, generateFromManifest } from '../providers/generate.js';
+import { normaliseManifest, manifestGaps, missingFrom, manifestInstruction, fileInstruction, generateFromManifest, filesNeedingRepair, importedPaths, repairInstruction, repairRound } from '../providers/generate.js';
 
 let failures = 0;
 const ok = (label, cond, detail = '') => {
@@ -271,6 +271,74 @@ const doomed = await drive({ manifest: [{ path: 'src/App.tsx', purpose: 'routes'
 ok('a manifest with no entry point is refused', Boolean(doomed.result.unusable), JSON.stringify(doomed.result).slice(0, 90));
 ok('and not one file request is spent on it', doomed.calls.files.length === 0,
     `${doomed.calls.files.length} request(s) were made against a manifest that cannot run`);
+
+// ── 8. The repair pass ───────────────────────────────────────────────────────
+// The export contract killed the import-name failures and revealed the next layer:
+// files agreeing on names and disagreeing on shapes. No manifest fixes that without
+// carrying the code, so the compiler's own diagnostics drive a correction instead.
+console.log('\n8. a compiler names the broken files, and only those are re-requested');
+
+const DIAGS = [
+    { path: 'src/TideCard.tsx', line: 22, col: 9, code: 'TS2339', message: "Property 'height' does not exist on type 'TideEntry'." },
+    { path: 'src/TideCard.tsx', line: 30, col: 4, code: 'TS2339', message: "Property 'height' does not exist on type 'TideEntry'." },
+    { path: 'src/App.tsx', line: 20, col: 6, code: 'TS2322', message: "Type '{ x: string; }' is not assignable." },
+];
+const grouped = filesNeedingRepair(DIAGS);
+ok('diagnostics group by file', grouped.length === 2, grouped.map(g => g.path).join(', '));
+ok('and the most-broken file comes first', grouped[0].path === 'src/TideCard.tsx',
+    'a file with two errors is likelier the cause than the one with one that consumes it');
+ok('repair is capped', filesNeedingRepair(
+    Array.from({ length: 40 }, (_, i) => ({ path: `f${i}.ts`, line: 1, col: 1, code: 'TS1', message: 'x' })),
+).length === 10, 'an unbounded repair burns quota to reach the same answer slowly');
+
+const REC = {
+    'src/types.ts': 'export interface TideEntry { time: string; }',
+    'src/TideCard.tsx': "import { TideEntry } from './types';\nexport const C = (e: TideEntry) => e.height;",
+};
+ok('a file\'s imports are resolved against what exists',
+    importedPaths(REC['src/TideCard.tsx'], 'src/TideCard.tsx', REC).includes('src/types.ts'));
+
+const fix = repairInstruction({
+    manifest: [{ path: 'src/TideCard.tsx', purpose: 'one tide', exports: ['C'] }],
+    path: 'src/TideCard.tsx', purpose: 'one tide',
+    content: REC['src/TideCard.tsx'], diagnostics: grouped[0].diagnostics,
+    sources: [{ path: 'src/types.ts', content: REC['src/types.ts'] }],
+});
+ok('the repair carries the compiler\'s own words', fix.includes("Property 'height' does not exist"));
+/* The whole reason repair beats re-prompting: a shape mismatch is unfixable from a
+   description, and readable from the source. */
+ok('and the real source of what it imports', fix.includes('export interface TideEntry { time: string; }'),
+    'a shape disagreement cannot be fixed from a description of the file');
+ok('and holds it to its export contract', fix.includes('export exactly: C'));
+
+/* Only the named files cost a request. */
+const repairCalls = [];
+const repairProvider = {
+    async *streamJson({ prompt }) {
+        const path = /Fix one file: `([^`]+)`/.exec(prompt)?.[1];
+        repairCalls.push(path);
+        yield { text: JSON.stringify({ path, content: 'export const C = () => null;' }) };
+    },
+};
+const record = { ...REC, 'src/Untouched.tsx': 'export const U = 1;' };
+const round = await repairRound({
+    models: ['stub'],
+    run: async (m, attempt, onServed) => { const r = await attempt(m[0]); onServed?.(m[0]); return r; },
+    getProvider: () => repairProvider,
+    systemFor: () => 'sys',
+    basePrompt: 'PLAN',
+    manifest: [{ path: 'src/TideCard.tsx', purpose: 'card', exports: ['C'] }],
+    record,
+    diagnostics: DIAGS.filter(d => d.path === 'src/TideCard.tsx'),
+    emit: () => {},
+    schemas: { file: {} },
+});
+ok('only the blamed file is re-requested', repairCalls.length === 1 && repairCalls[0] === 'src/TideCard.tsx',
+    repairCalls.join(', '));
+ok('the fix replaces it in the record', record['src/TideCard.tsx'].includes('=> null'));
+ok('and a file nobody blamed is untouched', record['src/Untouched.tsx'] === 'export const U = 1;',
+    'repair must not rewrite working code');
+ok('the repaired file is reported', round.repaired.includes('src/TideCard.tsx'), JSON.stringify(round.repaired));
 
 console.log(failures === 0 ? '\ngenerate ok' : `\n${failures} CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

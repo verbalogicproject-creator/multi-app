@@ -963,6 +963,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                     /* The manifest names every file before any of them is written, so
                        the count is known rather than watched. */
                     if (event.manifest) message = `Writing ${event.manifest.length} files…`;
+                    /* A repair is worth naming rather than hiding behind "writing":
+                       the build is being corrected, and saying so is the difference
+                       between a slow success and an unexplained pause. */
+                    if (event.phase === 'repairing') {
+                        message = `Fixing ${event.files?.length ?? 0} file${event.files?.length === 1 ? '' : 's'} the compiler rejected…`;
+                    }
                     if (event.progress) message = `Writing code… ${(event.progress / 1024).toFixed(1)} KB`;
                     if (event.file && !log.includes(event.file)) log = [...log, event.file];
                     return { ...prev, status: { ...prev.status, message, log } };
