@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useAppContext } from '../../context/AppContext';
+import PreviewHost from '../PreviewHost';
 
 const button =
     "tap px-6 md:px-8 rounded-xl font-medium " +
@@ -101,26 +102,21 @@ const Step_Export: React.FC = () => {
                 </div>
             )}
 
-            {generatedFiles['preview.html'] && (
-                <div className="mt-8 text-left">
-                    <p className="text-xs font-medium uppercase tracking-[0.12em] text-metal-300 mb-3">
-                        Visual preview <span className="normal-case tracking-normal text-metal-400">— static snapshot of the home page</span>
-                    </p>
-                    {/* The preview seam. `sandbox=""` grants nothing: no scripts, no
-                        same-origin, no forms. When the preview becomes a real React
-                        runtime it replaces the srcDoc here and nowhere else. */}
-                    <div className="bezel-shell">
-                        <div className="bezel-core overflow-hidden">
-                            <iframe
-                                sandbox=""
-                                srcDoc={generatedFiles['preview.html']}
-                                title={`${plan.projectName} preview`}
-                                className="w-full h-[22rem] md:h-[28rem] bg-white block rounded-core"
-                            />
-                        </div>
-                    </div>
-                </div>
-            )}
+            <div className="mt-8 text-left">
+                <p className="text-xs font-medium uppercase tracking-[0.12em] text-metal-300 mb-3">
+                    Live preview <span className="normal-case tracking-normal text-metal-400">— the app, bundled and running</span>
+                </p>
+                {/* The preview seam, and it is now one component rather than a
+                    `srcDoc` written here. What it replaced was a static snapshot the
+                    model hand-wrote: a picture of a home page, no JavaScript, nothing
+                    you could click. `PreviewHost` owns the sandbox and the three ways
+                    a preview fails; this file owns where it sits on the page. */}
+                <PreviewHost
+                    projectId={savedBuildId ?? 'build-preview'}
+                    files={generatedFiles}
+                    title={`${plan.projectName} preview`}
+                />
+            </div>
 
             <div className="mt-8 flex flex-col md:flex-row justify-center gap-3 md:gap-4">
                 <button onClick={exportGeneratedProject} className={solid}>Download project (.zip)</button>

@@ -214,8 +214,10 @@ survive a trip to Code and back.
 
 ### The preview runs in an iframe, and that is a decision about headers
 
-Generated React will render in an **iframe fed a self-contained document** that
-the server bundles with esbuild — not in a WebContainer.
+Generated React renders in an **iframe fed a self-contained document** that the
+server bundles with esbuild — not in a WebContainer. Shipped as described: the
+seam below is `components/PreviewHost.tsx` and `services/buildPreview.ts`, and
+the bundler is `preview/` behind `POST /api/preview/build`.
 
 WebContainer is the better product: a real Node runtime in the tab, real
 `npm install`, real Vite, real HMR. It needs `SharedArrayBuffer`, which since
@@ -243,6 +245,31 @@ cheap to take later:
   expensive part of COEP compliance, it is good practice regardless, and doing it
   during the wizard migration means the headers become a config line if
   WebContainer is ever wanted.
+
+#### What the sandbox costs, measured
+
+`sandbox="allow-scripts"` **without** `allow-same-origin` — the two together are
+not a sandbox — gives the document an **opaque origin**, and a surprising amount
+of ordinary React throws there. Measured in a real sandboxed frame, not read:
+
+| API | At an opaque origin |
+|---|---|
+| `history.pushState` / `replaceState` | `SecurityError` |
+| `localStorage` / `sessionStorage` | `SecurityError` on *property access* |
+| `document.cookie` (read and write) | `SecurityError` |
+| `location.hash = '#/x'` | works |
+| `indexedDB`, `matchMedia`, `fetch` | present |
+
+The first two rows are what generated apps do: the generate prompt **mandates**
+`react-router-dom` v6, and persisting to `localStorage` is routine. Unshimmed,
+the first click on a nav link throws and the pane goes white — and it reads as
+the model's bug rather than ours. So the bundler substitutes `MemoryRouter` for
+`BrowserRouter` (`HashRouter` is no escape; v6's hash history is also built on
+`pushState`) and the document shims the storage APIs before the app runs.
+
+`postMessage` works, which is what carries runtime errors back out — but
+`event.origin` is the string `"null"` and identifies nothing, so the parent
+verifies the frame's own `contentWindow` instead.
 
 The rule that follows, and it binds the migration: **when a component that loads
 media is migrated, its media is proxied at the same time.** Doing the colours now

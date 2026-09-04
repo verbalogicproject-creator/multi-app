@@ -633,8 +633,6 @@ ${Array.isArray(plan?.acceptanceCriteria) && plan.acceptanceCriteria.length > 0
 6. Code must compile under strict TypeScript: every function parameter, callback parameter and prop is explicitly typed — no implicit any. With jsx react-jsx, do not import React just for JSX; import only the hooks you use.
 7. Every file must be complete and syntactically valid. State lives in React hooks; interactive features (forms, filters, toggles) must actually work with local state.
 
-**Additionally generate "preview.html"**: a single fully self-contained static HTML snapshot of the app's home page for an instant visual preview. Inline ALL of its CSS in a <style> tag (hand-written CSS reproducing the theme — do not reference Tailwind or any external resource, no JavaScript). It must faithfully show the real layout, colors, typography and content.
-
 **Before you finish**, verify every relative import you wrote resolves to a file you also emitted, and that every package you imported appears in package.json. Escape quotes inside JSX text (setQuote("I can't do this"), never setQuote('I can't do this')) — unescaped quotes are a build failure.
 
 **Response format:** a single JSON object of the form {"files":[{"path":"...","content":"..."}, ...]} listing every file. No markdown, no commentary.`;

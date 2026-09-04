@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback, Suspense, lazy } from
 import FileExplorer from './FileExplorer';
 import Terminal from './Terminal';
 import ProblemsPanel from './ProblemsPanel';
+import PreviewHost from './PreviewHost';
 import { useDiagnostics, useErrorCounts } from '../hooks/useDiagnostics';
 import type { TscDiagnostic } from '../types/diagnostics';
 
@@ -14,6 +15,11 @@ import { useAppContext } from '../context/AppContext';
 interface IdeViewProps {
     projectId: string;
 }
+
+/** Three panels, one row of chrome. Order is left-to-right in the strip. */
+const DRAWER_TABS = ['terminal', 'problems', 'preview'] as const;
+type DrawerTab = (typeof DRAWER_TABS)[number];
+const TAB_LABEL: Record<DrawerTab, string> = { terminal: 'Terminal', problems: 'Problems', preview: 'Preview' };
 
 /**
  * One component, two layouts.
@@ -36,7 +42,7 @@ const IdeView: React.FC<IdeViewProps> = ({ projectId }) => {
     const [activeFileId, setActiveFileId] = useState<string | null>(null);
     const [treeOpen, setTreeOpen] = useState(false);
     const [drawerOpen, setDrawerOpen] = useState(false);
-    const [drawerTab, setDrawerTab] = useState<'terminal' | 'problems'>('terminal');
+    const [drawerTab, setDrawerTab] = useState<DrawerTab>('terminal');
     const [revealAt, setRevealAt] = useState<{ line: number; col: number; nonce: number } | undefined>();
 
     // Without this the IDE opens on an empty tree for a project that has files:
@@ -86,13 +92,21 @@ const IdeView: React.FC<IdeViewProps> = ({ projectId }) => {
         setRevealAt({ line: d.line, col: d.col, nonce: Date.now() });
     }, [files]);
 
-    const openDrawerTab = (tab: 'terminal' | 'problems') => {
+    const openDrawerTab = (tab: DrawerTab) => {
         if (drawerOpen && drawerTab === tab) { setDrawerOpen(false); return; }
         setDrawerTab(tab);
         setDrawerOpen(true);
     };
 
     const problemCount = diagnostics.all.length;
+
+    /* The bundler takes the project as the model wrote it, not as the tree holds it.
+       Memoised on the files array so switching tabs does not rebuild. */
+    const fileRecord = useMemo(() => {
+        const record: Record<string, string> = {};
+        for (const file of files) record[file.path] = file.content ?? '';
+        return record;
+    }, [files]);
 
     return (
         <div className="flex-1 flex bg-ground min-w-0 h-full overflow-hidden">
@@ -163,7 +177,7 @@ const IdeView: React.FC<IdeViewProps> = ({ projectId }) => {
                                  shadow-[inset_0_1px_0_rgb(255_255_255/0.06)]
                                  ${drawerOpen ? 'h-2/5' : 'h-11'} md:h-1/3`}>
                     <div role="tablist" aria-label="Output" className="shrink-0 flex items-stretch">
-                        {(['terminal', 'problems'] as const).map(tab => {
+                        {DRAWER_TABS.map(tab => {
                             const selected = drawerTab === tab;
                             return (
                                 <button
@@ -185,7 +199,7 @@ const IdeView: React.FC<IdeViewProps> = ({ projectId }) => {
                                         className={`md:hidden transition-transform duration-200 ease-fluid
                                                     ${selected && drawerOpen ? 'rotate-90' : ''}`}
                                     >▸</span>
-                                    {tab === 'terminal' ? 'Terminal' : 'Problems'}
+                                    {TAB_LABEL[tab]}
                                     {tab === 'problems' && problemCount > 0 && (
                                         <span className="meta text-[0.6875rem] px-1.5 rounded-full bg-accent-strong text-white">
                                             {problemCount}
@@ -196,9 +210,29 @@ const IdeView: React.FC<IdeViewProps> = ({ projectId }) => {
                         })}
                     </div>
                     <div className={`flex-1 min-h-0 ${drawerOpen ? 'flex' : 'hidden'} md:flex`}>
-                        {drawerTab === 'terminal'
-                            ? <Terminal projectId={projectId} />
-                            : <ProblemsPanel state={diagnostics} onSelect={handleProblemSelect} />}
+                        {drawerTab === 'terminal' && <Terminal projectId={projectId} />}
+                        {drawerTab === 'problems' && <ProblemsPanel state={diagnostics} onSelect={handleProblemSelect} />}
+                        {/* Kept mounted while another tab is showing, so its built
+                            document survives a trip to the Terminal, but told it is
+                            inactive so a save does not bundle a project nobody is
+                            looking at.
+
+                            `active` deliberately tracks the selected tab and not
+                            visibility. Whether the drawer is open is a CSS fact at the
+                            `md:` breakpoint, and this app has no JavaScript media query
+                            anywhere — adding one here would put the breakpoint in a
+                            second place that can drift from the first. The cost is a
+                            phone that rebuilds while Preview is selected but collapsed;
+                            the cost of the alternative is a breakpoint that lies. */}
+                        <div className={`flex-1 min-h-0 overflow-y-auto p-3 ${drawerTab === 'preview' ? '' : 'hidden'}`}>
+                            <PreviewHost
+                                projectId={projectId}
+                                files={fileRecord}
+                                title="Preview of the open project"
+                                active={drawerTab === 'preview'}
+                                className="h-64 md:h-full md:min-h-[12rem]"
+                            />
+                        </div>
                     </div>
                 </div>
             </div>
