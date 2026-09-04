@@ -113,16 +113,22 @@ const ChatPanel: React.FC = () => {
             {/* No overflow-x here: setting one axis to `auto` makes the other
                 `auto` too, and it was cropping the mode pill's top edge. The
                 selector scrolls inside itself instead. */}
-            <div className="shrink-0 flex items-center gap-2 px-4 py-2 safe-t md:pt-2
+            {/* The bands run edge to edge so their rules do; the content inside each is
+                capped to a readable measure and centred. Chat is a full-screen
+                destination at every width now, and a 1440px line of prose is not a
+                feature of the extra room, it is what the extra room does if you let it. */}
+            <div className="shrink-0 flex justify-center px-4 py-2 safe-t md:pt-2
                             shadow-[inset_0_-1px_0_rgb(255_255_255/0.06)]">
+              <div className="w-full max-w-3xl flex items-center gap-2">
                 <div className="flex-1 min-w-0">
                     {!activeAgentId && <ModeSelector currentMode={mode} onModeChange={setMode} isAgentActive={!!activeAgentId} />}
                 </div>
                 <QuotaBadge surface="chat" />
                 <ModelPicker compact />
+              </div>
             </div>
             <div className="flex-1 flex flex-col overflow-y-auto px-4 py-3 md:px-5">
-                <div className="flex-1 space-y-4">
+                <div className="flex-1 w-full max-w-3xl mx-auto space-y-4">
                     {messages.map(msg => (
                       <MessageItem 
                           key={msg.id} 
@@ -158,11 +164,12 @@ const ChatPanel: React.FC = () => {
                     <div ref={messagesEndRef} />
                 </div>
             </div>
-            {/* md:pr-32 is not decoration: the Memory trigger is fixed to the
-                bottom-right corner on desktop and was landing on top of the send
-                button. A docked control has to be given its space, not float over
-                someone else's. On a phone the trigger is the tab bar, so no gutter. */}
-            <div className="shrink-0 p-3 md:p-4 md:pr-32 bg-ground shadow-[inset_0_1px_0_rgb(255_255_255/0.06)]">
+            {/* This carried `md:pr-32` — a 128px gutter reserving the bottom-right
+                corner for the Memory panel's own floating trigger, which used to land on
+                top of the send button. That trigger is gone; Memory is a dock item. A
+                gutter held open for a control that no longer exists is just a hole. */}
+            <div className="shrink-0 flex justify-center p-3 md:p-4 bg-ground shadow-[inset_0_1px_0_rgb(255_255_255/0.06)]">
+              <div className="w-full max-w-3xl">
                 {(mode === 'coding' || mode === 'chat') && (
                     <form onSubmit={handleSubmit} className="flex items-center gap-2">
                         <input
@@ -195,6 +202,7 @@ const ChatPanel: React.FC = () => {
                     <VideoGeneratorPane prompt={videoPrompt} setPrompt={setVideoPrompt} isLoading={isLoading} uploadedFile={uploadedFile} onFileSelect={setUploadedFile} duration={duration} setDuration={setDuration} aspectRatio={aspectRatio} setAspectRatio={setAspectRatio} directorControls={directorControls} setDirectorControls={setDirectorControls} onSubmit={handleSubmit} />
                 )}
                  {mode === 'live' && <LiveChatPane isListening={isListening} startListening={startListening} stopListening={stopListening} />}
+              </div>
             </div>
         </main>
     );

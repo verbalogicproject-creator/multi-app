@@ -3,7 +3,7 @@ import { Project, ProjectFile, CustomAiStyle, Persona, Agent, AiResponseStyle } 
 import * as storageService from '../services/geminiService';
 import * as apiService from '../services/apiService';
 import type { CatalogModel } from '../services/apiService';
-import type { MobileSurface } from '../types/ui';
+import type { Surface } from '../types/ui';
 import * as buildStorage from '../services/buildStorage';
 import type { SavedBuild } from '../services/buildStorage';
 import * as memoryService from '../services/memoryService';
@@ -191,7 +191,6 @@ const defaultCustomStyles: CustomAiStyle[] = [
     }
 ];
 
-type AppTab = 'projects' | 'agents' | 'ai-settings' | 'tools';
 
 interface AppContextType {
     projects: Project[];
@@ -201,17 +200,18 @@ interface AppContextType {
     /** Loads a project's files if they are not in the map yet. See its definition. */
     ensureProjectFiles: (projectId: string) => Promise<void>;
     editingProject: Project | null;
-    isProjectPanelCollapsed: boolean;
     analyzingProjects: Set<string>;
-    activeTab: AppTab;
-    setActiveTab: React.Dispatch<React.SetStateAction<AppTab>>;
     /**
-     * Which destination the phone is showing. It lives here, not in `App`, because
-     * things that are not the tab bar need to move you — the builder's hand-off has
-     * to be able to land you in the IDE it just filled.
+     * Which destination is on screen. It lives here, not in `App`, because things that
+     * are not the dock need to move you — the builder's hand-off has to be able to land
+     * you in the IDE it just filled, and choosing an expert has to land you in the
+     * conversation it changed.
+     *
+     * It was `MobileSurface` when the phone had destinations and the desktop had a
+     * layout. There is one layout now, so it is just `Surface`.
      */
-    surface: MobileSurface;
-    setSurface: React.Dispatch<React.SetStateAction<MobileSurface>>;
+    surface: Surface;
+    setSurface: React.Dispatch<React.SetStateAction<Surface>>;
     handleCreateProject: (name: string) => Promise<Project>;
     handleDeleteProject: (id: string) => Promise<void>;
     handleToggleProjectSelection: (id: string) => void;
@@ -225,7 +225,6 @@ interface AppContextType {
     handleOpenProjectSettings: (project: Project) => Promise<void>;
     handleCloseProjectSettings: () => void;
     handleRenameProject: (projectId: string, newName: string) => Promise<void>;
-    handleToggleProjectPanel: () => void;
     setSelectedProjectIds: React.Dispatch<React.SetStateAction<Set<string>>>;
     useWebSearch: boolean;
     setUseWebSearch: React.Dispatch<React.SetStateAction<boolean>>;
@@ -291,11 +290,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     filesByProjectRef.current = filesByProject;
     const [activeProjectView, setActiveProjectView] = useState<string | null>(null);
     const [editingProject, setEditingProject] = useState<Project | null>(null);
-    const [isProjectPanelCollapsed, setIsProjectPanelCollapsed] = useState(false);
     const [analyzingProjects, setAnalyzingProjects] = useState<Set<string>>(new Set());
-    // Land on the builder when a build was in progress, so a reload never looks like data loss.
-    const [activeTab, setActiveTab] = useState<AppTab>(() => getRestoredBuilderState().isActive ? 'tools' : 'projects');
-    
+
     const [useWebSearch, setUseWebSearch] = useState(false);
     const [lowLatencyMode, setLowLatencyMode] = useState(false);
     const [selectedModel, setSelectedModelState] = useState<string>(() => {
@@ -328,7 +324,20 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const [activePersona, setActivePersona] = useState<Persona>(defaultPersona);
     const [agents, setAgents] = useState<Agent[]>([]);
     const [activeAgentId, setActiveAgentId] = useState<string | null>(null);
-    const [surface, setSurface] = useState<MobileSurface>('main');
+    /**
+     * Where you are. One value, because the dock is the only navigation.
+     *
+     * It used to be two: this, plus an `activeTab` naming a tab inside a rail that no
+     * longer exists. Two values for one question is how the old shell came to disagree
+     * with itself — the tab said `AI Tools` while the surface rendered something else.
+     *
+     * Landing on the builder when a build was interrupted is the one piece of that
+     * state worth keeping, so it moves here: a reload never looks like data loss, and
+     * `Projects` is home otherwise.
+     */
+    const [surface, setSurface] = useState<Surface>(
+        () => getRestoredBuilderState().isActive ? 'build' : 'projects',
+    );
 
     const [globalError, setGlobalError] = useState<string | null>(null);
     // Bumped after every served model request so quota badges refetch.
@@ -442,12 +451,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         });
     };
     /**
-     * `filesByProject` is filled lazily, and until this existed the *only* thing
-     * that filled it was expanding a project in the rail. Any surface that
-     * opened a project's files directly — the IDE — therefore showed an empty
-     * tree for a project that had files, which was invisible while the IDE was
-     * only ever reached by way of the rail and obvious the moment Code became a
-     * destination of its own.
+     * `filesByProject` is filled lazily, and until this existed the *only* thing that
+     * filled it was expanding a project in the old rail. Any surface that opened a
+     * project's files directly — the IDE — therefore showed an empty tree for a project
+     * that had files, which was invisible while the IDE was only ever reached by way of
+     * the rail and obvious the moment Code became a destination of its own.
      */
     const ensureProjectFiles = useCallback(async (projectId: string) => {
         if (!projectId || filesByProjectRef.current.has(projectId)) return;
@@ -537,7 +545,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             if (editingProject?.id === projectId) setEditingProject(updatedProject);
         }
     };
-    const handleToggleProjectPanel = () => setIsProjectPanelCollapsed(prev => !prev);
     
     // AI & Persona Handlers
     const handleAddCustomStyle = async (name: string, instructions: string) => {
@@ -620,7 +627,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 setSelectedProjectIds(new Set([agent.projectId]));
                 setSelectedPersonaId(agent.personaId);
             }
-            setActiveTab('projects');
+            /* Choosing an expert changes who you are talking to, so it lands you in the
+               conversation. It used to select a tab in a rail — a selection whose only
+               visible effect was somewhere you were not. */
+            setSurface('chat');
         } else {
             setSelectedProjectIds(new Set());
             setSelectedPersonaId(null);
@@ -1121,7 +1131,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             await aiCreateFile(newProject.id, path, content);
         }
         resetWebAppBuild();
-        setActiveTab('projects');
         /* Order matters: deselecting an agent clears the project selection, so the
            new project has to be selected *after*, not before. */
         handleSelectAgent(null);
@@ -1193,7 +1202,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             memory,
             status: { isLoading: false, log: [], message: `Loaded "${build.name}"` },
         });
-        setActiveTab('tools');
+        setSurface('build');
     };
 
     const removeSavedBuild = (id: string) => {
@@ -1208,13 +1217,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
 
     const value = {
-        projects, selectedProjectIds, filesByProject, activeProjectView, editingProject, isProjectPanelCollapsed, analyzingProjects,
+        projects, selectedProjectIds, filesByProject, activeProjectView, editingProject, analyzingProjects,
         ensureProjectFiles,
-        activeTab, setActiveTab,
         surface, setSurface,
         handleCreateProject, handleDeleteProject, handleToggleProjectSelection, handleViewProjectFiles, handleAddFile, handleDeleteFile,
         aiCreateFile, aiUpdateFile, aiDeleteFile,
-        handleSaveFileContent, handleOpenProjectSettings, handleCloseProjectSettings, handleRenameProject, handleToggleProjectPanel,
+        handleSaveFileContent, handleOpenProjectSettings, handleCloseProjectSettings, handleRenameProject,
         setSelectedProjectIds,
         useWebSearch, setUseWebSearch, lowLatencyMode, setLowLatencyMode,
         selectedModel, setSelectedModel, catalog, modelDefaults,

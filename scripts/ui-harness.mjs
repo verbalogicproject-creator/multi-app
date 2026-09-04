@@ -10,7 +10,7 @@
  * walk the same list.
  */
 import { chromium } from 'playwright-core';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 
 /** Chromium 1228 — the revision the pinned playwright-core expects. 1234 is 151. */
 const CANDIDATES = [
@@ -78,34 +78,48 @@ const CONVERSATION = [
 ];
 
 /**
- * Scoped, and visibility-aware.
+ * Move to a destination — the dock's **live** copy, and only that one.
  *
- * Both of these were wrong on the first run. `getByRole('button', {name:'Projects'})`
- * matched two elements — the rail tab and the bottom-bar tab — and Playwright's
- * strict mode refused, so two surfaces went unvisited. And `md:hidden` removes
- * an element from view without removing it from the DOM, so a `.count()` check
- * happily clicked a bar that is not on screen at desktop width and then timed
- * out. Scope by container, gate on visibility, never on existence.
+ * Two things were wrong here before the dock, and both are worth keeping in mind. A
+ * bare `getByRole('button', {name:'Projects'})` matched the rail tab *and* the bottom
+ * bar, so strict mode refused and two surfaces went unvisited; and `md:hidden` removes
+ * an element from view without removing it from the DOM, so an existence check happily
+ * clicked a bar that was off screen and then timed out.
+ *
+ * The dock adds a third: it renders its children three times to fake an endless strip,
+ * so every destination exists three times in the DOM. Two of the three sets are
+ * `aria-hidden` and `inert`; only the live one carries `data-dock-live`. A CSS query
+ * honours neither attribute and would match all three. Scope to the live set — which is
+ * now the whole of navigation, at every width, so there is nothing else to scope to.
  */
-const railTab = async (page, name) => {
-    await page.locator('aside').getByRole('button', { name, exact: true }).first().click();
+export const dockTo = async (page, name) => {
+    await page.locator('[data-dock-live] button', { hasText: name }).first().click();
     await page.waitForTimeout(400);
-};
-
-const bottomBar = page => page.locator('nav[aria-label="Sections"]');
-
-const bottomTab = async (page, name) => {
-    const bar = bottomBar(page);
-    if (!(await bar.isVisible().catch(() => false))) return false;   // desktop: no bar
-    await bar.locator('button', { hasText: name }).click();
-    await page.waitForTimeout(400);
-    return true;
 };
 
 /**
- * Every surface, and how to reach it. `phone` and `desktop` say where each one
- * is meaningful — the bottom bar does not exist above md:, and the rail is not a
- * destination below it.
+ * Code and Preview both need a project open, and the dock disables them until one is.
+ * Ticking the seeded project is what makes them reachable — the IDE follows a project,
+ * not an agent, since `b8399a7`.
+ */
+export const openProjectThen = async (page, destination) => {
+    await dockTo(page, 'Projects');
+    const box = page.getByRole('checkbox', { name: 'Harbour Dashboard' });
+    if (!(await box.isChecked().catch(() => true))) await box.check();
+    await page.waitForTimeout(300);
+    await dockTo(page, destination);
+    await page.waitForTimeout(500);
+};
+
+/**
+ * Every surface, and how to reach it.
+ *
+ * `phone` and `desktop` used to say where each surface *existed*, because the shell
+ * had two navigation models and some surfaces only had a door in one of them. There is
+ * one layout now, so every destination is meaningful at both widths and the two flags
+ * mean what they should have meant all along: which viewports to audit it at. The two
+ * that stay phone-only are drawers the wide layout does not need — the file sheet and
+ * the editor's terminal, which sit beside the code above `md:` instead of over it.
  */
 /**
  * The wizard's five steps are only reachable from an in-progress build, so they
@@ -155,6 +169,33 @@ const wizard = extra => ({ gemini_builder_state: {
     isActive: true, idea: 'A dashboard showing harbour berth occupancy.',
     plan: PLAN, theme: THEME, generatedFiles: null, evidence: EVIDENCE, ...extra } });
 
+/**
+ * The destinations the app itself declares, read out of `types/ui.ts` rather than
+ * copied here.
+ *
+ * A hardcoded list would pass while drifting, which is the failure this exists to
+ * catch: a `Surface` added to the union and never given a dock item is a page with no
+ * door, and a dock item for a surface nothing renders is a door to nowhere. Both look
+ * like a clean run from the outside, so the gate reads the declaration and compares it
+ * to what the live dock actually renders.
+ */
+export const DECLARED_DESTINATIONS = (() => {
+    const src = readFileSync(new URL('../types/ui.ts', import.meta.url), 'utf8');
+    const order = src.match(/SURFACE_ORDER: Surface\[\] = \[([^\]]*)\]/)?.[1] ?? '';
+    const names = [...order.matchAll(/'([^']+)'/g)].map(m => m[1]);
+    const labels = Object.fromEntries(
+        [...(src.match(/SURFACE_LABEL: Record<Surface, string> = \{([^}]*)\}/)?.[1] ?? '')
+            .matchAll(/(\w[\w-]*):\s*'([^']*)'/g)].map(m => [m[1], m[2]]),
+    );
+    const missing = names.filter(n => !labels[n]);
+    if (!names.length || missing.length) {
+        throw new Error(`could not read SURFACE_ORDER/SURFACE_LABEL from types/ui.ts (missing: ${missing.join(', ') || 'all'})`);
+    }
+    /* Memory is a dock item without being a destination — it opens a drawer over
+       wherever you are — so it is expected in the dock and absent from `Surface`. */
+    return [...names.map(n => labels[n]), 'Memory'];
+})();
+
 export const SURFACES = [
     { name: 'wizard-1-idea',     phone: true, desktop: true, seed: wizard({ currentStep: 1 }),                        reach: async () => {} },
     { name: 'wizard-2-plan',     phone: true, desktop: true, seed: wizard({ currentStep: 2 }),                        reach: async () => {} },
@@ -171,73 +212,56 @@ export const SURFACES = [
           { severity: 'warning', code: 'placeholder-content', message: 'Lorem ipsum remains in the hero copy.', file: 'src/App.tsx' },
       ] } }) },
     { name: 'wizard-5-export',   phone: true, desktop: true, seed: wizard({ currentStep: 5, generatedFiles: FILES, validation: { ok: true, checked: 2, issues: [] } }), reach: async () => {} },
-    { name: 'projects',        phone: true,  desktop: true,  reach: async p => { await bottomTab(p, 'Projects'); await railTab(p, 'Projects'); } },
-    { name: 'agents',          phone: true,  desktop: true,  reach: async p => { await bottomTab(p, 'Projects'); await railTab(p, 'Agents'); } },
-    { name: 'ai-tools',        phone: true,  desktop: true,  reach: async p => { await bottomTab(p, 'Projects'); await railTab(p, 'AI Tools'); } },
-    // The one the last pass missed. It holds the sliders, toggles and selects —
-    // the densest collection of native controls in the app.
-    { name: 'ai-settings',     phone: true,  desktop: true,  reach: async p => { await bottomTab(p, 'Projects'); await railTab(p, 'AI Settings'); } },
-    { name: 'chat-general',    phone: true,  desktop: true,  reach: async p => { await bottomTab(p, 'Chat'); } },
-    { name: 'builder-wizard',  phone: true,  desktop: true,  reach: async p => {
-        await bottomTab(p, 'Projects'); await railTab(p, 'AI Tools');
-        await bottomTab(p, 'Build');
+    // Every route below goes through the dock, because the dock is the only thing that
+    // moves you between destinations now. The rail's tab strip is gone: Projects is a
+    // destination, Agents and AI Settings are the Harness, and `AI Tools` was dead —
+    // its tab lived in one destination while its content rendered in another.
+    { name: 'projects',        phone: true,  desktop: true,  reach: async p => { await dockTo(p, 'Projects'); } },
+    { name: 'harness-experts', phone: true,  desktop: true,  reach: async p => {
+        await dockTo(p, 'Harness');
+        await p.getByRole('tab', { name: 'Experts' }).click(); await p.waitForTimeout(400);
     } },
+    // The densest collection of native controls in the app — sliders, toggles, selects.
+    { name: 'harness-config',  phone: true,  desktop: true,  reach: async p => {
+        await dockTo(p, 'Harness');
+        await p.getByRole('tab', { name: 'Configuration' }).click(); await p.waitForTimeout(400);
+    } },
+    { name: 'chat-general',    phone: true,  desktop: true,  reach: async p => { await dockTo(p, 'Chat'); } },
+    { name: 'builder-wizard',  phone: true,  desktop: true,  reach: async p => { await dockTo(p, 'Build'); } },
     { name: 'agent-chat',      phone: true,  desktop: true,  reach: async p => {
-        await bottomTab(p, 'Projects'); await railTab(p, 'Agents');
+        await dockTo(p, 'Harness');
         await p.getByText('Harbour Builder').click(); await p.waitForTimeout(500);
-        await bottomTab(p, 'Chat');
+        await dockTo(p, 'Chat');
     } },
-    { name: 'code',            phone: true,  desktop: true,  reach: async p => {
-        await bottomTab(p, 'Projects'); await railTab(p, 'Agents');
-        await p.getByText('Harbour Builder').click(); await p.waitForTimeout(500);
-        await bottomTab(p, 'Code');
-    } },
+    { name: 'code',            phone: true,  desktop: true,  reach: async p => { await openProjectThen(p, 'Code'); } },
     { name: 'code-tree-sheet', phone: true,  desktop: false, reach: async p => {
-        await bottomTab(p, 'Projects'); await railTab(p, 'Agents');
-        await p.getByText('Harbour Builder').click(); await p.waitForTimeout(500);
-        await bottomTab(p, 'Code');
+        await openProjectThen(p, 'Code');
         await p.getByRole('button', { name: /^Choose file/ }).click(); await p.waitForTimeout(400);
     } },
-    // The bottom block is a tab strip now, so these are tabs, not buttons. The
-    // audit caught the change by failing to reach the surface at all, which is
-    // the point of treating an unreachable surface as a failure.
     { name: 'code-terminal',   phone: true,  desktop: false, reach: async p => {
-        await bottomTab(p, 'Projects'); await railTab(p, 'Agents');
-        await p.getByText('Harbour Builder').click(); await p.waitForTimeout(500);
-        await bottomTab(p, 'Code');
+        await openProjectThen(p, 'Code');
         await p.getByRole('tab', { name: /Terminal/ }).first().click(); await p.waitForTimeout(400);
     } },
-    // The seeded project carries a deliberate type error, so this surface is the
-    // populated panel rather than its empty state. Given the checker is a
-    // subprocess, it needs longer than the other surfaces to have anything to show.
+    // The seeded project carries a deliberate type error, so this is the populated panel
+    // rather than its empty state. The checker is a subprocess, so it needs longer than
+    // the other surfaces to have anything to show.
     { name: 'code-problems',   phone: true,  desktop: true,  reach: async p => {
-        await bottomTab(p, 'Projects'); await railTab(p, 'Agents');
-        await p.getByText('Harbour Builder').click(); await p.waitForTimeout(500);
-        await bottomTab(p, 'Code');
+        await openProjectThen(p, 'Code');
         await p.getByRole('tab', { name: /Problems/ }).first().click();
         await p.waitForTimeout(6000);
     } },
-    // The preview tab: a bundle, a sandboxed frame, and an app that has to be
-    // running by the time the shot is taken. The wait covers the host's 400 ms
-    // debounce plus a real esbuild + Tailwind pass on this device.
-    { name: 'code-preview',    phone: true,  desktop: true,  reach: async p => {
-        await bottomTab(p, 'Projects'); await railTab(p, 'Agents');
-        await p.getByText('Harbour Builder').click(); await p.waitForTimeout(500);
-        await bottomTab(p, 'Code');
-        await p.getByRole('tab', { name: /Preview/ }).first().click();
+    // Preview is its own destination now rather than a tab inside the IDE. The wait
+    // covers the host's 400ms debounce plus a real esbuild + Tailwind pass.
+    { name: 'preview',         phone: true,  desktop: true,  reach: async p => {
+        await openProjectThen(p, 'Preview');
         await p.waitForTimeout(6000);
     } },
     { name: 'memory',          phone: true,  desktop: true,  reach: async p => {
-        // Phone: the bottom bar. Desktop: the floating trigger, whose accessible
-        // name is "Memory" or "Memory — something needs you". The drawer's own
-        // close control is "Close memory", so anchoring at the start is enough.
-        if (!(await bottomTab(p, 'Memory'))) {
-            await p.getByRole('button', { name: /^Memory($| —)/ }).click();
-        }
+        await dockTo(p, 'Memory');
         await p.waitForTimeout(800);
     } },
     { name: 'project-settings', phone: true, desktop: true,  reach: async p => {
-        await bottomTab(p, 'Projects'); await railTab(p, 'Projects');
+        await dockTo(p, 'Projects');
         await p.getByRole('button', { name: /^Settings for/ }).first().click(); await p.waitForTimeout(500);
     } },
 ];

@@ -21,7 +21,7 @@ const chip =
 const BuildShelf: React.FC = () => {
     const {
         startWebAppBuild, savedBuilds, loadSavedBuild, removeSavedBuild, exportSavedBuild,
-        projects, setActiveTab,
+        projects, setSurface,
     } = useAppContext();
 
     return (
@@ -97,7 +97,10 @@ const BuildShelf: React.FC = () => {
                     <p className="text-xs text-metal-300">
                         You also have {projects.length} project{projects.length === 1 ? '' : 's'} in the IDE.
                     </p>
-                    <button onClick={() => setActiveTab('projects')}
+                    {/* Sends you to the Projects destination. It used to set a rail tab,
+                        which after the dock landed meant the one control on this screen
+                        that promised to take you somewhere took you nowhere. */}
+                    <button onClick={() => setSurface('projects')}
                         className="tap px-2 -mx-1 rounded-lg text-xs text-metal-200 underline underline-offset-2
                                    transition-colors duration-200 ease-fluid md:hover:text-metal-100 md:hover:bg-metal-700">
                         Open projects

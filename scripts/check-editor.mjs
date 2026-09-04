@@ -19,7 +19,7 @@
  * "nothing changed" can pass is a test that passes when the editor is dead.
  */
 import { spawn } from 'node:child_process';
-import { launch, openPage, assertBackend, DESKTOP } from './ui-harness.mjs';
+import { launch, openPage, assertBackend, dockTo, DESKTOP } from './ui-harness.mjs';
 
 const PORT = 5312;
 const URL = `http://127.0.0.1:${PORT}`;
@@ -94,17 +94,21 @@ const run = async () => {
         // the two properties apart.
         ok('no editor before anything is chosen', await page.locator('.cm-editor').count() === 0,
            'something was already open; this section proves nothing');
+        await dockTo(page, 'Projects');
         await page.getByRole('checkbox', { name: 'Harbour Dashboard' }).check();
+        await dockTo(page, 'Code');
         const openedByProject = await page.waitForSelector('.cm-editor', { timeout: 15000 })
             .then(() => true).catch(() => false);
         ok('ticking a project opens its code, with no agent anywhere', openedByProject,
            'the IDE never mounted — it is still gated on an active agent');
 
-        // Reach the code surface: an agent, then its IDE.
-        await page.locator('aside').getByRole('button', { name: 'Agents', exact: true }).first().click();
-        await page.waitForTimeout(400);
+        /* And again with an agent, which is the other way a project becomes the IDE's.
+           Choosing an expert now lands you in the conversation, so the dock is what
+           brings you back to the code — the same two clicks a person makes. */
+        await dockTo(page, 'Harness');
         await page.getByText('Harbour Builder').click();
         await page.waitForTimeout(800);
+        await dockTo(page, 'Code');
 
         // CodeMirror mounted at all — and it is CodeMirror, not the textarea it replaced.
         await page.waitForSelector('.cm-editor', { timeout: 15000 });

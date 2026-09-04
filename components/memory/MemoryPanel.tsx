@@ -253,21 +253,11 @@ const MemoryPanel: React.FC<MemoryPanelProps> = ({ open: openProp, onOpenChange,
 
     return (
         <>
-            {/* Trigger — desktop only. On a phone the tab bar is the way in, and two
-                ways in at the same corner is one too many. */}
-            <button
-                onClick={() => setOpen(true)}
-                aria-label={needsYou ? 'Memory — something needs you' : 'Memory'}
-                className="tap fixed bottom-4 right-4 z-40 hidden md:flex items-center gap-2 px-4 rounded-full
-                           bg-metal-700 text-metal-100 text-sm font-medium
-                           shadow-[inset_0_1px_0_rgb(255_255_255/0.08)]
-                           transition-[background-color,transform] duration-200 ease-fluid
-                           md:hover:bg-[#33333a] active:scale-[0.98]"
-                style={{ marginBottom: 'env(safe-area-inset-bottom)' }}
-            >
-                {needsYou && <span aria-hidden className="w-1.5 h-1.5 rounded-full bg-accent" />}
-                Memory
-            </button>
+            {/* No trigger of its own. This component used to carry a floating desktop
+                button, on the reasoning that a phone had the tab bar and "two ways in at
+                the same corner is one too many". The dock runs at every width now, so
+                that reasoning applies at every width: Memory is a dock item, and this is
+                only the drawer it opens. */}
 
             {/* Backdrop */}
             <div
