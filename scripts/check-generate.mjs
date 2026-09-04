@@ -22,10 +22,13 @@
  *
  *   npm run check:generate
  */
+import * as esbuild from 'esbuild';
+import { Buffer } from 'node:buffer';
 import { salvageFiles, isTruncation } from '../providers/salvage.js';
 import { toBuildIssues } from '../typecheck/parse.js';
 import { proposalsFor, unmappedCodes, PROPOSAL_TABLE, NOT_A_LESSON } from '../memory/proposals.js';
 import { normaliseManifest, manifestGaps, missingFrom, manifestInstruction, fileInstruction, generateFromManifest, filesNeedingRepair, importedPaths, repairInstruction, repairRound } from '../providers/generate.js';
+import { scaffoldFor, packageJsonFor, importedPackages, SCAFFOLD_PATHS } from '../providers/scaffold.js';
 
 let failures = 0;
 const ok = (label, cond, detail = '') => {
@@ -339,6 +342,128 @@ ok('the fix replaces it in the record', record['src/TideCard.tsx'].includes('=> 
 ok('and a file nobody blamed is untouched', record['src/Untouched.tsx'] === 'export const U = 1;',
     'repair must not rewrite working code');
 ok('the repaired file is reported', round.repaired.includes('src/TideCard.tsx'), JSON.stringify(round.repaired));
+
+// ── 9. The files nobody should pay a model to retype ─────────────────────────
+// The generate prompt dictates tsconfig's compilerOptions verbatim, pins package.json
+// versions, mandates @tailwindcss/vite and `@import "tailwindcss"`. There is no
+// judgement left in any of it — and these are the files where a mistake is least
+// recoverable, since a wrong tsconfig breaks every file after it.
+console.log('\n9. the scaffold is written, not requested');
+
+const sc = scaffoldFor({ plan: { projectName: 'Tide Clock' }, theme: { colors: { bg: '#001122', primary: '#00aaff' } } });
+ok('four files are written outright', Object.keys(sc).length === 4, Object.keys(sc).join(', '));
+ok('tsconfig matches what the prompt pins',
+    JSON.parse(sc['tsconfig.json']).compilerOptions.moduleResolution === 'bundler'
+    && JSON.parse(sc['tsconfig.json']).compilerOptions.jsx === 'react-jsx');
+ok('the theme reaches the stylesheet', sc['src/index.css'].includes('--color-primary: #00aaff'));
+ok('and Tailwind is imported the way v4 needs', sc['src/index.css'].startsWith('@import "tailwindcss";'));
+ok('the title is the project, escaped', sc['index.html'].includes('<title>Tide Clock</title>'));
+ok('and the entry is a module script', sc['index.html'].includes('type="module" src="/src/main.tsx"'));
+
+const escaped = scaffoldFor({ plan: { projectName: 'A <script> & "quote"' }, theme: {} });
+ok('a hostile project name cannot break out of the title',
+    !escaped['index.html'].includes('<script>&'), 'model output reaches this string');
+
+/* package.json is derived from the imports the code actually contains. A list a model
+   writes can disagree with the code it wrote; a list read from the code cannot. */
+const src = {
+    'src/App.tsx': "import { Menu } from 'lucide-react';\nimport clsx from 'clsx';\nimport { x } from './local';",
+    'src/main.tsx': "import { createRoot } from 'react-dom/client';\nimport path from 'node:path';",
+};
+const pkgs = importedPackages(src);
+ok('bare specifiers are found', pkgs.includes('lucide-react') && pkgs.includes('clsx'), pkgs.join(', '));
+ok('and relative imports are not packages', !pkgs.some(p => p.startsWith('.')));
+ok('a subpath belongs to its package', pkgs.includes('react-dom'), pkgs.join(', '));
+
+const pkg = JSON.parse(packageJsonFor({ plan: { projectName: 'Tide Clock' }, record: src }));
+ok('the derived name is safe for npm', pkg.name === 'tide-clock', pkg.name);
+ok('imports become dependencies', 'lucide-react' in pkg.dependencies && 'clsx' in pkg.dependencies);
+ok('node builtins do not', !('node:path' in pkg.dependencies) && !('node' in pkg.dependencies));
+ok('build tools stay in devDependencies',
+    !('vite' in pkg.dependencies) && 'vite' in pkg.devDependencies);
+ok('react is present even if nothing imported it directly', 'react' in pkg.dependencies);
+
+/* The point of the exercise: these paths never reach the queue. */
+const scaffoldRun = await (async () => {
+    const calls = [];
+    const provider = {
+        async generateJson() {
+            return { object: { files: [
+                { path: 'index.html', purpose: 'shell', exports: [] },
+                { path: 'tsconfig.json', purpose: 'config', exports: [] },
+                { path: 'src/main.tsx', purpose: 'mount', exports: [] },
+                { path: 'src/App.tsx', purpose: 'routes', exports: ['default App'] },
+            ] } };
+        },
+        async *streamJson({ prompt }) {
+            const path = /Write exactly one file: `([^`]+)`/.exec(prompt)?.[1];
+            calls.push(path);
+            yield { text: JSON.stringify({ path, content: 'export default () => null;' }) };
+        },
+    };
+    const result = await generateFromManifest({
+        models: ['stub'],
+        run: async (m, a, s2) => { const r = await a(m[0]); s2?.(m[0]); return r; },
+        getProvider: () => provider, systemFor: () => 'sys', basePrompt: 'PLAN',
+        emit: () => {}, schemas: { manifest: {}, file: {} },
+        prefill: scaffoldFor({ plan: { projectName: 'X' }, theme: {} }),
+        provided: ['package.json'],
+    });
+    return { calls, result };
+})();
+ok('scaffolded paths are never requested',
+    !scaffoldRun.calls.includes('index.html') && !scaffoldRun.calls.includes('tsconfig.json'),
+    `requested: ${scaffoldRun.calls.join(', ')}`);
+ok('only the real work is', scaffoldRun.calls.length === 2, scaffoldRun.calls.join(', '));
+ok('and the scaffold is in the result anyway',
+    typeof scaffoldRun.result.record['index.html'] === 'string'
+    && typeof scaffoldRun.result.record['tsconfig.json'] === 'string');
+ok('so nothing the manifest promised is missing', scaffoldRun.result.missing.length === 0,
+    JSON.stringify(scaffoldRun.result.missing));
+
+// ── 10. Whose fault is a bundle failure? ─────────────────────────────────────
+// The rule that decides what the lesson ladder is allowed to learn from a build that
+// would not bundle. Bundled with esbuild and run under Node — the pattern AGENTS.md
+// describes for the pure TS modules — because a rule that decides what a model gets
+// taught must be checkable without a browser, a network or a model.
+console.log('\n10. a bundle failure is attributed before it teaches anything');
+
+const bundled = await esbuild.build({
+    entryPoints: ['services/previewVerdict.ts'],
+    bundle: true, write: false, format: 'esm', platform: 'neutral', logLevel: 'silent',
+});
+const { attributeBundleErrors } = await import(
+    `data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0].text).toString('base64')}`);
+
+const withDep = { 'package.json': JSON.stringify({ dependencies: { 'lucide-react': '^0.4.0' } }) };
+const declaredMissing = attributeBundleErrors(
+    [{ text: 'Could not resolve "lucide-react" — the package is not installed in this preview.', file: 'src/Footer.tsx' }],
+    withDep);
+/* Observed on a real build: the model declared lucide-react correctly and our preview
+   simply does not have it. Teaching from that would tell the model to stop using
+   dependencies it declared properly. */
+ok('a package the project declared is the environment, not the model', declaredMissing.length === 0,
+    JSON.stringify(declaredMissing));
+
+const undeclared = attributeBundleErrors(
+    [{ text: 'Could not resolve "chart.js" — the package is not installed in this preview.', file: 'src/Chart.tsx' }],
+    withDep);
+ok('a package it never declared is the model', undeclared[0]?.code === 'unresolved-import',
+    JSON.stringify(undeclared));
+ok('and the file is named', undeclared[0]?.file === 'src/Chart.tsx');
+
+const scoped = attributeBundleErrors(
+    [{ text: 'Could not resolve "@tanstack/react-query/build" — nope', file: 'a.tsx' }],
+    { 'package.json': JSON.stringify({ dependencies: { '@tanstack/react-query': '^5' } }) });
+ok('a scoped subpath belongs to its scoped package', scoped.length === 0, JSON.stringify(scoped));
+
+const other = attributeBundleErrors([{ text: 'Unexpected "}" in src/App.tsx', file: 'src/App.tsx' }], withDep);
+ok('a failure that names no package is a bundle-error', other[0]?.code === 'bundle-error', JSON.stringify(other));
+
+const noPkgJson = attributeBundleErrors(
+    [{ text: 'Could not resolve "react" — nope', file: 'a.tsx' }], {});
+ok('an unparseable package.json blames the model rather than crashing',
+    noPkgJson[0]?.code === 'unresolved-import', JSON.stringify(noPkgJson));
 
 console.log(failures === 0 ? '\ngenerate ok' : `\n${failures} CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);
