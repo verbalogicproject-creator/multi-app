@@ -35,8 +35,10 @@ export const manifestInstruction = () => `
 
 **This request is the file manifest only — no code.**
 
-List every file the project needs, each with a one-line purpose describing what it
-contains and what it exports. Include the config and entry files (index.html,
+List every file the project needs, each with a one-line purpose and **the exact names it
+exports**. The export list is a contract every other file will be held to, so name each
+export precisely and mark a default export as \`default Name\`. Config, CSS and HTML files
+export nothing. Include the config and entry files (index.html,
 package.json, tsconfig.json, vite.config.ts, src/main.tsx, src/index.css), every page and
 component from the plan, and any context, hook, type or data module the app requires.
 
@@ -52,7 +54,14 @@ files are requested individually afterwards.`;
  * risk this shape introduces, and the cheapest possible guard against it.
  */
 export const fileInstruction = ({ manifest, path, purpose, written }) => {
-    const listing = manifest.map(f => `- ${f.path} — ${f.purpose}`).join('\n');
+    /* Each entry carries its exports, because the manifest's job is the contract, not
+       the file tree. Paths agreeing was never the failure; names were. */
+    const listing = manifest.map(f => {
+        const exports = Array.isArray(f.exports) && f.exports.length > 0
+            ? ` — exports: ${f.exports.join(', ')}`
+            : ' — exports nothing';
+        return `- ${f.path} — ${f.purpose}${exports}`;
+    }).join('\n');
     const done = written.length > 0
         ? `\n\nAlready written, and safe to import from: ${written.join(', ')}.`
         : '';
@@ -66,8 +75,12 @@ The complete project manifest, so your imports match the files that will exist:
 ${listing}${done}
 
 Return only that one file's full contents. It must be complete and syntactically valid on
-its own — every brace, bracket and JSX tag closed, every string terminated. Import only
-from paths in the manifest above or from packages in package.json.`;
+its own — every brace, bracket and JSX tag closed, every string terminated.
+
+**Honour the manifest's export contract exactly.** Export precisely the names the manifest
+lists for this file — \`default X\` means \`export default\`, anything else is a named export.
+Import only names another file's manifest entry actually lists, from paths in the manifest
+above or from packages in package.json. Do not invent, rename or re-spell an export.`;
 };
 
 /**
@@ -108,7 +121,11 @@ export const normaliseManifest = (files, max = 60) => {
         const path = typeof entry?.path === 'string' ? entry.path.replace(/^\.?\//, '').trim() : '';
         if (!path || seen.has(path)) continue;
         seen.add(path);
-        out.push({ path, purpose: typeof entry?.purpose === 'string' ? entry.purpose : '' });
+        out.push({
+            path,
+            purpose: typeof entry?.purpose === 'string' ? entry.purpose : '',
+            exports: Array.isArray(entry?.exports) ? entry.exports.filter(e => typeof e === 'string') : [],
+        });
         if (out.length >= max) break;
     }
     return out;

@@ -1,4 +1,33 @@
-import 'dotenv/config';
+import { config as loadEnv } from 'dotenv';
+
+/**
+ * A second env file, for credentials kept apart from the rest.
+ *
+ * `.env.auth` holds the Google AI key on its own so it can be rotated without
+ * touching everything else. It is already ignored by `.gitignore`'s `.env.*`, and
+ * this repository is public — that separation is the point, not a preference.
+ *
+ * `override: true` because the whole reason for a newer key in a separate file is
+ * that it should win over the older one in `.env`. Without it dotenv keeps the
+ * first value it saw and the new key would load, sit there, and change nothing.
+ */
+/* Anything the caller put in the actual environment, captured before any file is
+   read. It outranks every file, and that is not a preference — `smoke:memory` boots
+   the server with a deliberately invalid key so a builder call is *supposed* to fail
+   at the model, and a file that overrode it would turn that proof into a real spend.
+   The gate caught exactly that: "it succeeded — a real key leaked into the smoke". */
+const fromShell = new Set(Object.keys(process.env));
+
+loadEnv();
+
+/* `.env.auth` holds the Google AI key on its own so it can be rotated without touching
+   anything else; `.gitignore`'s `.env.*` already covers it, and this repo is public.
+   It replaces values from `.env` — a newer key in a separate file exists to win — but
+   never a value the caller set. Precedence: shell > .env.auth > .env. */
+const authFile = loadEnv({ path: '.env.auth', processEnv: {} }).parsed ?? {};
+for (const [name, value] of Object.entries(authFile)) {
+    if (!fromShell.has(name)) process.env[name] = value;
+}
 import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
@@ -44,7 +73,12 @@ app.use('/api/typecheck', typecheckRouter);
 app.use('/api/preview', previewRouter);
 
 // Initialize Google GenAI
-const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+/* `GEMINI_AI_KEY` first: it is the name the current Google AI Studio console hands
+   out, and the newer credential is the one to prefer when both are present.
+   Adding a name here means adding it to `scripts/smoke-memory.mjs`'s env block too —
+   that check proves a builder call fails at the model, and a name it does not blank
+   turns the proof into a real spend. */
+const apiKey = process.env.GEMINI_AI_KEY || process.env.GEMINI_API_KEY || process.env.API_KEY;
 if (!apiKey) {
     throw new Error("GEMINI_API_KEY environment variable is not set.");
 }

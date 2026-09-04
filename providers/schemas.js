@@ -64,7 +64,14 @@ export const DIRECTIONS_SCHEMA = obj({
 export const MANIFEST_SCHEMA = obj({
     files: arr(obj({
         path: str("Full file path relative to the project root, e.g. 'src/pages/HomePage.tsx'."),
-        purpose: str('One line: what this file contains and what it exports. No code.'),
+        purpose: str('One line: what this file contains. No code.'),
+        /* Measured, not anticipated: with `purpose` alone, sixteen files written by
+           sixteen requests agreed on every path and still produced 28 type errors —
+           `types/tide.ts` exported `CoastalStation` while `Header.tsx` imported
+           `Station`, and `App.tsx` default-imported a named export. Paths were never
+           the hard part. The contract is. */
+        exports: arr(str("One export, e.g. 'default HomePage' or 'CoastalStation'."),
+            'Every name this file exports. Prefix the default export with "default". Config and CSS files export nothing.'),
     }), 'Every file the project needs, including config, entry points, pages and components.'),
 });
 

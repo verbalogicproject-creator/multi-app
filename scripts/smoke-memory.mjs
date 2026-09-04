@@ -50,10 +50,18 @@ async function startServer(port) {
             ...process.env,
             PORT: String(port),
             MEMORY_DB_DIR: scratch,
-            // Present so the server boots, invalid so nothing can be spent. dotenv
-            // does not override an env var that is already set, so .env.local
-            // cannot quietly put a real key back.
+            // Present so the server boots, invalid so nothing can be spent. The server
+            // treats the caller's environment as outranking every env file, so nothing
+            // on disk can put a real key back.
+            //
+            // **Every name that can satisfy the Gemini credential must be listed here.**
+            // `GEMINI_AI_KEY` was added after this check failed for real: a working key
+            // arrived in `.env.auth` under a name this block did not blank, the builder
+            // call succeeded, and the assertion reported it — "a real key leaked into
+            // the smoke". A new key name is a new line here, or this proof quietly
+            // becomes a real spend against a real quota.
             GEMINI_API_KEY: 'smoke-memory-deliberately-invalid',
+            GEMINI_AI_KEY: '', API_KEY: '',
             ANTHROPIC_API_KEY: '', OPENAI_API_KEY: '', NVIDIA_API_KEY: '',
         },
         stdio: ['ignore', 'pipe', 'pipe'],

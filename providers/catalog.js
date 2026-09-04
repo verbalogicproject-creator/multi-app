@@ -75,7 +75,7 @@ export const PROVIDER_LABELS = { google: 'Google Gemini', anthropic: 'Anthropic 
 
 /** Provider -> env var holding its key. A provider with no key is hidden entirely. */
 export const PROVIDER_KEYS = {
-    google: () => process.env.GEMINI_API_KEY || process.env.API_KEY,
+    google: () => process.env.GEMINI_AI_KEY || process.env.GEMINI_API_KEY || process.env.API_KEY,
     anthropic: () => process.env.ANTHROPIC_API_KEY,
     openai: () => process.env.OPENAI_API_KEY,
     nvidia: () => process.env.NVIDIA_API_KEY,
