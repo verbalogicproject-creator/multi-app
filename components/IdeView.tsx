@@ -2,7 +2,6 @@ import React, { useState, useEffect, useMemo, useCallback, Suspense, lazy } from
 import FileExplorer from './FileExplorer';
 import Terminal from './Terminal';
 import ProblemsPanel from './ProblemsPanel';
-import PreviewHost from './PreviewHost';
 import { useDiagnostics, useErrorCounts } from '../hooks/useDiagnostics';
 import type { TscDiagnostic } from '../types/diagnostics';
 
@@ -17,9 +16,12 @@ interface IdeViewProps {
 }
 
 /** Three panels, one row of chrome. Order is left-to-right in the strip. */
-const DRAWER_TABS = ['terminal', 'problems', 'preview'] as const;
+/* Preview was the third tab here until it became a destination of its own. Two doors
+   to one room is the duplication the dock was built to remove, and the drawer is for
+   what the *editor* has to say — what the compiler found, what the terminal printed. */
+const DRAWER_TABS = ['terminal', 'problems'] as const;
 type DrawerTab = (typeof DRAWER_TABS)[number];
-const TAB_LABEL: Record<DrawerTab, string> = { terminal: 'Terminal', problems: 'Problems', preview: 'Preview' };
+const TAB_LABEL: Record<DrawerTab, string> = { terminal: 'Terminal', problems: 'Problems' };
 
 /**
  * One component, two layouts.
@@ -212,27 +214,6 @@ const IdeView: React.FC<IdeViewProps> = ({ projectId }) => {
                     <div className={`flex-1 min-h-0 ${drawerOpen ? 'flex' : 'hidden'} md:flex`}>
                         {drawerTab === 'terminal' && <Terminal projectId={projectId} />}
                         {drawerTab === 'problems' && <ProblemsPanel state={diagnostics} onSelect={handleProblemSelect} />}
-                        {/* Kept mounted while another tab is showing, so its built
-                            document survives a trip to the Terminal, but told it is
-                            inactive so a save does not bundle a project nobody is
-                            looking at.
-
-                            `active` deliberately tracks the selected tab and not
-                            visibility. Whether the drawer is open is a CSS fact at the
-                            `md:` breakpoint, and this app has no JavaScript media query
-                            anywhere — adding one here would put the breakpoint in a
-                            second place that can drift from the first. The cost is a
-                            phone that rebuilds while Preview is selected but collapsed;
-                            the cost of the alternative is a breakpoint that lies. */}
-                        <div className={`flex-1 min-h-0 overflow-y-auto p-3 ${drawerTab === 'preview' ? '' : 'hidden'}`}>
-                            <PreviewHost
-                                projectId={projectId}
-                                files={fileRecord}
-                                title="Preview of the open project"
-                                active={drawerTab === 'preview'}
-                                className="h-64 md:h-full md:min-h-[12rem]"
-                            />
-                        </div>
                     </div>
                 </div>
             </div>

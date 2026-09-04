@@ -24,7 +24,7 @@
  */
 import { mkdirSync } from 'node:fs';
 import { spawn } from 'node:child_process';
-import { launch, openPage, assertBackend, SURFACES, PHONE, DESKTOP } from './ui-harness.mjs';
+import { launch, openPage, assertBackend, SURFACES, DECLARED_DESTINATIONS, PHONE, DESKTOP } from './ui-harness.mjs';
 
 const arg = (flag, fallback) => {
     const i = process.argv.indexOf(flag);
@@ -133,9 +133,13 @@ const startPreview = async () => {
     process.exit(1);
 };
 const URL = arg('--url', `http://127.0.0.1:${PORT}/`);
+/* `--only <substring>` narrows the walk while iterating on one surface. It is never
+   how the gate runs — a filtered pass is not a pass — so the summary says so out loud
+   and refuses to print the all-clear. */
+const ONLY = arg('--only', null);
 
 /** Runs inside the page. Returns findings for the surface currently shown. */
-const AUDIT = () => {
+const AUDIT = (expected) => {
     const visible = el => {
         const r = el.getBoundingClientRect();
         if (r.width === 0 || r.height === 0) return false;
@@ -148,7 +152,7 @@ const AUDIT = () => {
         return `${el.tagName.toLowerCase()}${cls ? '.' + cls : ''}${text ? ` "${text}"` : ''}`;
     };
 
-    const findings = { tokens: [], targets: [], clipping: [], overflow: [] };
+    const findings = { tokens: [], targets: [], clipping: [], overflow: [], duplicates: [] };
 
     // --- tokens: a utility whose declaration the browser dropped --------------
     // Each entry: the class, the property it must change, and the value that
@@ -307,6 +311,56 @@ const AUDIT = () => {
         findings.overflow.push(`cross-origin resource: <${el.tagName.toLowerCase()}> ${url.origin}${url.pathname} — breaks under COEP`);
     }
 
+    // --- duplicates: one reachable control per destination -------------------
+    // The dock renders its children three times to fake an endless strip, so every
+    // destination exists three times in the DOM. Two sets must be `inert` — not merely
+    // `aria-hidden`, which leaves a focusable button a keyboard walks into and a screen
+    // reader then refuses to describe. It shipped wrong once: React 19 takes `inert` as
+    // a boolean and silently drops `inert=""`, giving eighteen focusable controls for
+    // six destinations, with every name announced three times.
+    // Scoped to the dock itself. A first attempt counted matching names across the whole
+    // page and reported 98 findings that were all real controls with the same label — the
+    // rail's own Projects tab, the floating Memory trigger. The hazard being guarded is
+    // narrower than "two things share a name": it is *the same control rendered three
+    // times*, which is a property of the dock and of nothing else.
+    const dockRoot = document.querySelector('[data-dock-live]')?.parentElement;
+    if (dockRoot) {
+        const inDock = [...dockRoot.querySelectorAll('button, a[href], [role="button"]')]
+            .filter(el => !el.closest('[inert]') && !el.closest('[aria-hidden="true"]'));
+        const byName = new Map();
+        for (const el of inDock) {
+            const name = (el.getAttribute('aria-label') || el.textContent || '').trim();
+            if (name) byName.set(name, (byName.get(name) ?? 0) + 1);
+        }
+        for (const [name, count] of byName) {
+            if (count > 1) {
+                findings.duplicates.push(`dock: "${name}" is reachable ${count} times — a clone that is not inert`);
+            }
+        }
+        const copies = dockRoot.children.length;
+        const inertCopies = [...dockRoot.children].filter(c => c.hasAttribute('inert')).length;
+        if (copies > 1 && inertCopies !== copies - 1) {
+            findings.duplicates.push(`dock: ${copies} copies but ${inertCopies} inert — every copy but one must be inert`);
+        }
+
+        /* The dock is the only navigation, so its contents are the whole answer to
+           "what can I get to". A destination declared in `types/ui.ts` with no item
+           here is a page with no door; an item here for nothing declared is a door to
+           nowhere. Both render perfectly and audit clean, which is why this is
+           compared rather than eyeballed. `expected` is read from the app's own
+           declaration by the harness, not restated. */
+        /* `lastElementChild`, not `querySelector('span:last-child')`: the accent dot is
+           also a last child, of the icon wrapper, and document order reaches it first.
+           The label is the button's own last element child, which is unambiguous. */
+        const present = new Set([...inDock].map(el => el.lastElementChild?.textContent?.trim()).filter(Boolean));
+        for (const name of expected) {
+            if (!present.has(name)) findings.duplicates.push(`dock: "${name}" is declared but has no item — a destination with no door`);
+        }
+        for (const name of present) {
+            if (!expected.includes(name)) findings.duplicates.push(`dock: "${name}" is an item for nothing declared — a door to nowhere`);
+        }
+    }
+
     // --- overflow: the page itself must never scroll sideways ----------------
     const de = document.documentElement;
     if (de.scrollWidth > de.clientWidth + 1) {
@@ -354,13 +408,14 @@ const run = async () => {
     for (const [profileName, profile] of [['phone', PHONE], ['desktop', DESKTOP]]) {
         for (const surface of SURFACES) {
             if (!surface[profileName]) continue;
+            if (ONLY && !surface.name.includes(ONLY)) continue;
             const { context, page } = await openPage(browser, profile, URL, surface.seed);
             const where = `${profileName}/${surface.name}`;
             try {
                 await surface.reach(page);
                 await page.waitForTimeout(500);
                 if (SHOTS) await page.screenshot({ path: `${SHOTS}/${profileName}-${surface.name}.png` });
-                const f = await page.evaluate(AUDIT);
+                const f = await page.evaluate(AUDIT, DECLARED_DESTINATIONS);
                 /* Inner frame overflow, measured from outside.
                    The page probe cannot see this: a `sandbox=""` frame has an opaque
                    origin, so `contentDocument` is unreachable from the page — which is
@@ -389,7 +444,7 @@ const run = async () => {
         console.log('');
     }
 
-    for (const kind of ['tokens', 'targets', 'clipping', 'overflow', 'framed']) {
+    for (const kind of ['tokens', 'targets', 'clipping', 'overflow', 'framed', 'duplicates']) {
         const hits = report.filter(r => r[kind]?.length);
         if (!hits.length) continue;
         console.log(`${kind.toUpperCase()}`);
@@ -401,13 +456,14 @@ const run = async () => {
     }
 
     const visited = report.length - unreachable.length;
-    console.log(`${visited} surface(s) audited, ${total} finding(s).`);
+    console.log(`${visited} surface(s) audited, ${total} finding(s).${ONLY ? ` (filtered by --only ${ONLY}: NOT a full pass)` : ''}`);
     await browser.close();
     stopPreview(preview);
 
     // A surface we could not reach is a coverage hole, and a coverage hole is
     // indistinguishable from a pass. Fail on it.
     if (total > 0 || unreachable.length > 0) process.exit(2);
+    if (ONLY) { console.log('filtered run clean — run without --only before calling it green'); process.exit(0); }
     console.log('ui ok');
     process.exit(0);
 };

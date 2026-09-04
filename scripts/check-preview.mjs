@@ -21,7 +21,7 @@
  *   npm run check:preview
  */
 import { spawn } from 'node:child_process';
-import { launch, assertBackend, openPage, SURFACES, DESKTOP } from './ui-harness.mjs';
+import { launch, assertBackend, openPage, SURFACES, openProjectThen, dockTo, DESKTOP } from './ui-harness.mjs';
 
 const API = process.env.API_TARGET || 'http://localhost:8050';
 /* 5311 is the audit's, 5312 the editor's. Three gates, three ports, no waiting. */
@@ -374,13 +374,12 @@ const run = async () => {
     const vite = await startPreview();
     const clientBrowser = await launch();
     try {
-        // -- mount one: the IDE's Preview tab --
+        /* -- mount one: the Preview destination --
+           It was a tab inside the IDE, sharing the drawer with the terminal and the
+           problems list. It is its own dock destination now: on a phone the preview
+           needs the whole width, and a tab in a drawer cannot give it that. */
         const ide = await openPage(clientBrowser, DESKTOP, URL);
-        await ide.page.locator('aside').getByRole('button', { name: 'Agents', exact: true }).first().click();
-        await ide.page.waitForTimeout(400);
-        await ide.page.getByText('Harbour Builder').click();
-        await ide.page.waitForTimeout(800);
-        await ide.page.getByRole('tab', { name: /Preview/ }).first().click();
+        await openProjectThen(ide.page, 'Preview');
 
         const ideFrame = ide.page.locator('iframe[title="Preview of the open project"]');
         const ideBuilt = await ideFrame.waitFor({ timeout: 45_000 }).then(() => true).catch(() => false);
@@ -399,11 +398,19 @@ const run = async () => {
         ok('and the seeded project is running inside it', ideText?.includes('harbour') === true,
             ideText === null ? 'nothing rendered in #root' : `#root reads "${ideText}"`);
 
-        /* -- and it follows the code --
-           The IDE's whole claim over the wizard's is that the preview tracks what you
-           are editing. Nothing above proves that: a host that builds once and never
-           again passes every assertion so far. So change the rendered text, save, and
-           look for the new text inside the frame.
+        /* -- and it follows the code, across a navigation --
+           The preview's whole claim over the wizard's is that it tracks what you are
+           editing. Nothing above proves that: a host that builds once and never again
+           passes every assertion so far. So change the rendered text, save, and look
+           for the new text inside the frame.
+
+           Code and Preview are separate destinations now, which makes this a stronger
+           test than it was as one tab: the edit happens on one surface and the frame is
+           read on another, so a host that only rebuilds while it is on screen — or one
+           that keeps a stale document across a trip away — fails here. Surfaces are
+           hidden rather than unmounted, so the editor is in the DOM the whole time and
+           *invisible*; clicking it from the Preview destination times out on
+           visibility, which is the correct refusal and not a flake.
 
            The caret is placed by arrow keys from a known line ending, which is only
            safe because the fixture is ours — so the document is asserted *before* the
@@ -411,6 +418,7 @@ const run = async () => {
            by name, instead of the frame assertion failing for a reason that has
            nothing to do with the preview. */
         if (ideBuilt) {
+            await dockTo(ide.page, 'Code');
             const harbourLine = ide.page.locator('.cm-line').filter({ hasText: 'harbour' }).first();
             await harbourLine.click();
             await ide.page.keyboard.press('End');
@@ -423,6 +431,7 @@ const run = async () => {
                 'the caret was not where this assertion assumed; the frame check below would have been meaningless');
 
             await ide.page.keyboard.press('Control+s');
+            await dockTo(ide.page, 'Preview');
             const updated = await ide.page.frameLocator('iframe[title="Preview of the open project"]')
                 .locator('#root')
                 .filter({ hasText: 'harbour-tideworks' })
