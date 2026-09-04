@@ -42,6 +42,11 @@ export nothing. Include the config and entry files (index.html,
 package.json, tsconfig.json, vite.config.ts, src/main.tsx, src/index.css), every page and
 component from the plan, and any context, hook, type or data module the app requires.
 
+Still list \`index.html\`, \`package.json\`, \`tsconfig.json\`, \`vite.config.ts\` and
+\`src/index.css\` so the other files can rely on them — but they are written for you from
+the plan and the theme, so give them a one-line purpose and no exports and spend no
+thought on their contents.
+
 Order the list so that a file appears after anything it imports — types and data first,
 then components, then pages, then App and main. Do not write any file contents here; the
 files are requested individually afterwards.`;
@@ -100,8 +105,8 @@ export const missingFrom = (manifest, record) =>
  * Checked before any file is generated, because spending N requests against a manifest
  * that was never going to produce a runnable app is the expensive way to find out.
  */
-export const manifestGaps = (manifest) => {
-    const paths = new Set((manifest ?? []).map(entry => entry?.path));
+export const manifestGaps = (manifest, alreadyHave = []) => {
+    const paths = new Set([...(manifest ?? []).map(entry => entry?.path), ...alreadyHave]);
     const hasMain = [...paths].some(p => /^src\/main\.(tsx|ts|jsx|js)$/.test(p));
     return MANIFEST_FLOOR.filter(required =>
         required === 'src/main.tsx' ? !hasMain : !paths.has(required));
@@ -146,7 +151,7 @@ export const normaliseManifest = (files, max = 60) => {
  */
 export const generateFromManifest = async ({
     models, run, getProvider, systemFor, basePrompt, recalled = '', trialled = '',
-    emit, schemas, concurrency = 3, onServed,
+    emit, schemas, concurrency = 3, onServed, prefill = {}, provided = [],
 }) => {
     let manifest = null;
     try {
@@ -162,7 +167,10 @@ export const generateFromManifest = async ({
             });
         }, onServed);
         const candidate = normaliseManifest(object?.files);
-        const gaps = manifestGaps(candidate);
+        /* `prefill` is written before generation; `provided` is guaranteed by the
+           caller afterwards — `package.json` is derived from the finished imports, so
+           it cannot be prefilled and must not count as a gap either. */
+        const gaps = manifestGaps(candidate, [...Object.keys(prefill), ...provided]);
         if (candidate.length >= 3 && gaps.length === 0) manifest = candidate;
         else return { unusable: `${candidate.length} files, missing ${gaps.join(', ') || 'nothing'}` };
     } catch (error) {
@@ -171,10 +179,16 @@ export const generateFromManifest = async ({
 
     emit({ manifest: manifest.map(f => f.path) });
 
-    const record = {};
+    /* The scaffold goes in before anything is requested, and its paths leave the
+       queue. These files are dictated by the prompt itself — generating them buys
+       nothing and can go wrong in ways nothing downstream recovers from. */
+    const record = { ...prefill };
+    const scaffolded = Object.keys(prefill);
+    for (const path of scaffolded) emit({ file: path, scaffolded: true });
+
     const truncatedFiles = [];
     let bytes = 0;
-    const queue = [...manifest];
+    const queue = manifest.filter(entry => !(entry.path in record));
 
     const writeOne = async (entry) => {
         const written = Object.keys(record);
@@ -221,7 +235,10 @@ export const generateFromManifest = async ({
         }
     }));
 
-    return { manifest, record, missing: missingFrom(manifest, record), truncatedFiles, bytes };
+    return {
+        manifest, record, missing: missingFrom(manifest, record), truncatedFiles, bytes,
+        scaffolded, requested: manifest.length - scaffolded.filter(p => manifest.some(f => f.path === p)).length,
+    };
 };
 
 /* Imported lazily to keep this module dependency-free for the pure tests above. */

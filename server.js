@@ -43,6 +43,7 @@ import { toolsForRequest } from './providers/tools.js';
 import { PLAN_SCHEMA, DIRECTIONS_SCHEMA, GENERATE_SCHEMA, MANIFEST_SCHEMA, FILE_SCHEMA, filesArrayToRecord } from './providers/schemas.js';
 import { salvageFiles, isTruncation } from './providers/salvage.js';
 import { generateFromManifest, repairRound } from './providers/generate.js';
+import { scaffoldFor, packageJsonFor } from './providers/scaffold.js';
 import { buildSystemPrompt, builderPreamble } from './providers/prompts.js';
 import { memoryRouter } from './memory/routes.js';
 import * as memory from './memory/bridge.js';
@@ -702,6 +703,56 @@ ${Array.isArray(plan?.acceptanceCriteria) && plan.acceptanceCriteria.length > 0
         let servingModel = null;
         const onServed = (model) => { servingModel = model; };
 
+        /**
+         * Let the compiler correct what it just rejected.
+         *
+         * Shared by both generation paths. The whole-app fallback is the one that most
+         * needs it — it runs when the manifest step failed, so its output has had the
+         * least structure imposed on it — and for a while it was the one path that did
+         * not get it.
+         *
+         * Snapshot, repair, measure, and put the originals back if the error count did
+         * not fall. A build that was going to fail should fail as the model wrote it,
+         * not as a failed repair left it.
+         */
+        const repairIfNeeded = async (record, manifest, skip) => {
+            const none = { preRepairErrors: 0, postRepairErrors: 0, repairedFiles: [], repairRounds: 0, repairReverted: false };
+            if (skip) return none;
+
+            const before = await typecheck({ projectId: `${buildId ?? 'build'}-pre`, files: record });
+            if (!before.completed || before.ok) return none;
+            const preRepairErrors = before.diagnostics.length;
+
+            const snapshot = { ...record };
+            const round = await repairRound({
+                models: builderModelChain(requestedModel),
+                run: withModelFallback,
+                getProvider: providerForModel,
+                systemFor: (model) => builderPreamble(getModel(model).provider),
+                basePrompt: prompt,
+                manifest,
+                record,
+                diagnostics: before.diagnostics,
+                emit: (event) => res.write(JSON.stringify(event) + '\n'),
+                schemas: { file: FILE_SCHEMA },
+                onServed,
+            });
+            if (round.repaired.length === 0) return { ...none, preRepairErrors, postRepairErrors: preRepairErrors };
+
+            /* Measure, never assume: until this existed, "repaired" only meant the
+               model returned something, and the sole witness to the change was the
+               thing that made it. */
+            const after = await typecheck({ projectId: `${buildId ?? 'build'}-post`, files: record });
+            const postRepairErrors = after.completed ? after.diagnostics.length : preRepairErrors;
+
+            if (after.completed && after.diagnostics.length >= preRepairErrors) {
+                for (const [path, content] of Object.entries(snapshot)) record[path] = content;
+                res.write(JSON.stringify({ repairReverted: true, preRepairErrors, postRepairErrors }) + '\n');
+                return { ...none, preRepairErrors, postRepairErrors, repairReverted: true };
+            }
+            return { preRepairErrors, postRepairErrors, repairedFiles: round.repaired, repairRounds: 1, repairReverted: false };
+        };
+
         /* ---- The manifest, and then one request per file --------------------
          *
          * This is what moves the output ceiling out of reach rather than
@@ -737,12 +788,24 @@ ${Array.isArray(plan?.acceptanceCriteria) && plan.acceptanceCriteria.length > 0
             emit: (event) => res.write(JSON.stringify(event) + '\n'),
             schemas: { manifest: MANIFEST_SCHEMA, file: FILE_SCHEMA },
             onServed,
+            /* Written, not requested. See providers/scaffold.js — these four are
+               dictated verbatim by the prompt above, so asking a model for them costs
+               four requests and adds four ways to be wrong. */
+            prefill: scaffoldFor({ plan, theme }),
+            /* Derived from the finished imports below, so it is never a gap. */
+            provided: ['package.json'],
         });
 
         if (run.unusable) {
             console.warn(`Builder generate: manifest unusable (${run.unusable}) — falling back to the whole-app path`);
         } else if (Object.keys(run.record).length > 0) {
             const cut = run.truncatedFiles.length > 0;
+
+            /* `package.json` last, and derived rather than declared: its dependencies
+               are read out of the imports the generated files actually contain. A list
+               a model writes can disagree with the code it wrote; a list read from the
+               code cannot. */
+            run.record['package.json'] = packageJsonFor({ plan, record: run.record });
 
             /* ---- The repair pass -------------------------------------------
              *
@@ -760,59 +823,8 @@ ${Array.isArray(plan?.acceptanceCriteria) && plan.acceptanceCriteria.length > 0
              * it on the fourth attempt either, and an unbounded loop burns quota to
              * reach the same answer more slowly.
              */
-            let preRepairErrors = 0;
-            let postRepairErrors = 0;
-            let repairedFiles = [];
-            let repairRounds = 0;
-            let repairReverted = false;
-            if (!cut) {
-                const before = await typecheck({ projectId: `${buildId ?? 'build'}-pre`, files: run.record });
-                if (before.completed && !before.ok) {
-                    preRepairErrors = before.diagnostics.length;
-
-                    /* The baseline, byte for byte, before anything is changed.
-                       A repair is a change like any other, and a change you cannot
-                       undo is one you cannot safely make. */
-                    const snapshot = { ...run.record };
-
-                    const round = await repairRound({
-                        models: builderModelChain(requestedModel),
-                        run: withModelFallback,
-                        getProvider: providerForModel,
-                        systemFor: (model) => builderPreamble(getModel(model).provider),
-                        basePrompt: prompt,
-                        manifest: run.manifest,
-                        record: run.record,
-                        diagnostics: before.diagnostics,
-                        emit: (event) => res.write(JSON.stringify(event) + '\n'),
-                        schemas: { file: FILE_SCHEMA },
-                        onServed,
-                    });
-
-                    if (round.repaired.length > 0) {
-                        /* Measure, do not assume. Until this ran, "repaired" meant the
-                           model returned something — a repair that made the project
-                           worse was indistinguishable from one that fixed it, because
-                           the only witness was the thing that made the change. */
-                        const after = await typecheck({ projectId: `${buildId ?? 'build'}-post`, files: run.record });
-                        postRepairErrors = after.completed ? after.diagnostics.length : preRepairErrors;
-
-                        if (after.completed && after.diagnostics.length >= preRepairErrors) {
-                            /* No better, or worse. Put the original files back: a build
-                               that was going to fail should fail as the model wrote it,
-                               not as a failed repair left it. */
-                            for (const [path, content] of Object.entries(snapshot)) run.record[path] = content;
-                            repairReverted = true;
-                            res.write(JSON.stringify({
-                                repairReverted: true, preRepairErrors, postRepairErrors,
-                            }) + '\n');
-                        } else {
-                            repairedFiles = round.repaired;
-                            repairRounds = 1;
-                        }
-                    }
-                }
-            }
+            const fix = await repairIfNeeded(run.record, run.manifest, cut);
+            const { preRepairErrors, postRepairErrors, repairedFiles, repairRounds, repairReverted } = fix;
             res.write(JSON.stringify({
                 files: run.record,
                 manifest: run.manifest.map(f => f.path),
@@ -902,7 +914,21 @@ ${Array.isArray(plan?.acceptanceCriteria) && plan.acceptanceCriteria.length > 0
             // { path: content } map it has always consumed.
             const files = filesArrayToRecord(JSON.parse(accumulated.text).files);
             if (Object.keys(files).length === 0) throw new Error('no files in response');
-            res.write(JSON.stringify({ files }) + '\n');
+
+            /* The fallback gets the repair pass too. It runs precisely when the
+               manifest step failed, so its output has had the least structure imposed
+               on it — it is the path that needs correcting most, and for a while it
+               was the only one that never got it. There is no manifest here, so the
+               repair works from the compiler's diagnostics alone. */
+            const fix = await repairIfNeeded(files, [], false);
+
+            res.write(JSON.stringify({
+                files,
+                ...(fix.repairedFiles.length > 0
+                    ? { repaired: fix.repairedFiles, repairRounds: fix.repairRounds, preRepairErrors: fix.preRepairErrors, postRepairErrors: fix.postRepairErrors }
+                    : {}),
+                ...(fix.repairReverted ? { repairReverted: true, preRepairErrors: fix.preRepairErrors, postRepairErrors: fix.postRepairErrors } : {}),
+            }) + '\n');
 
             // A candidate exists. Whether it is any GOOD is the validator's
             // verdict, which the client reports separately as
@@ -918,6 +944,9 @@ ${Array.isArray(plan?.acceptanceCriteria) && plan.acceptanceCriteria.length > 0
                     fileCount: Object.keys(files).length,
                     bytes: accumulated.text.length,
                     memoryInjected: recalled !== '',
+                    ...(fix.preRepairErrors > 0
+                        ? { preRepairErrors: fix.preRepairErrors, postRepairErrors: fix.postRepairErrors, repairRounds: fix.repairRounds, repairedFiles: fix.repairedFiles, repairReverted: fix.repairReverted }
+                        : {}),
                 },
             });
         } catch (parseError) {
