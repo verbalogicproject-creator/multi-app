@@ -80,8 +80,11 @@ export const PROPOSAL_TABLE = {
         trigger: 'A generated file does not parse',
         recommendation:
             'Emit complete, syntactically valid files. Close every brace, bracket and JSX ' +
-            'tag, terminate every string, and escape quotes inside JSX text — ' +
-            'setQuote("I can\'t do this"), never setQuote(\'I can\'t do this\').',
+            'tag and terminate every string. Escape quotes inside JSX text — ' +
+            'setQuote("I can\'t do this"), never setQuote(\'I can\'t do this\'). And never ' +
+            'store code as data inside a template literal: a snippet containing a backtick ' +
+            'or ${ ends the literal holding it and breaks the whole file. Use a ' +
+            'double-quoted string with \\n, or escape every backtick and ${ in the content.',
     },
     'runtime-error': {
         trigger: 'The generated app threw once it was running',
@@ -125,8 +128,15 @@ export const NOT_A_LESSON = {
     'no-files': 'The generator returned nothing. "Return some files" is not guidance a model can act on.',
     'missing-src-main': 'A warning, not a failure. The build still runs.',
     'file-too-short': 'A warning, and often correct — some files really are three lines.',
-    'plan-page-missing': 'A warning about plan drift, which is a judgement the human makes, not a rule.',
-    'plan-component-missing': 'The same judgement.',
+    /* These became errors when the plan stopped being a suggestion. They still teach
+       nothing, but for a different reason than before: the manifest is now made to
+       cover the plan before any request is spent (`coverPlan`), so by the time this
+       fires the entry existed and the *file request* failed to deliver it. That is a
+       generation gap, already carried by `missing`, and the lesson it would propose —
+       "emit every page the plan names" — describes something the model was not given
+       the chance to get wrong. */
+    'plan-page-missing': 'The manifest is made to cover the plan, so this now means a file request failed, not that the model forgot the page.',
+    'plan-component-missing': 'The same: a delivery gap, not a planning one.',
 };
 
 /** Any code the table has never been asked about — the thing this file exists to surface. */

@@ -120,6 +120,35 @@ export default defineConfig({
 </html>
 `,
         'src/index.css': css,
+        /**
+         * The entry, written rather than requested.
+         *
+         * Observed on a real four-page build: `main.tsx` mounted `<App />` with no
+         * Router at all while `App.tsx` used `Routes`, `Route` and `useLocation`.
+         * `tsc` passed — `useLocation` is validly typed wherever it appears — esbuild
+         * passed, and the app threw on its first render and drew nothing. Every judge
+         * that reads the code was satisfied by a completely broken app.
+         *
+         * There is no creativity in this file and total cost to getting it wrong, so
+         * the Router is now structural rather than something a model must remember.
+         */
+        'src/main.tsx': `import { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
+import { BrowserRouter } from 'react-router-dom';
+import App from './App';
+import './index.css';
+
+const rootElement = document.getElementById('root');
+if (!rootElement) throw new Error('Root element #root was not found');
+
+createRoot(rootElement).render(
+    <StrictMode>
+        <BrowserRouter>
+            <App />
+        </BrowserRouter>
+    </StrictMode>,
+);
+`,
     };
 };
 
@@ -171,4 +200,4 @@ export const packageJsonFor = ({ plan, record }) => {
 };
 
 /** Paths the scaffold owns. The model is never asked for these. */
-export const SCAFFOLD_PATHS = ['tsconfig.json', 'vite.config.ts', 'index.html', 'src/index.css', 'package.json'];
+export const SCAFFOLD_PATHS = ['tsconfig.json', 'vite.config.ts', 'index.html', 'src/index.css', 'src/main.tsx', 'package.json'];
