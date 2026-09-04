@@ -76,6 +76,13 @@ export const PROPOSAL_TABLE = {
             'do not assign across incompatible types, and do not reference identifiers ' +
             'that were never declared or imported.',
     },
+    'syntax-error': {
+        trigger: 'A generated file does not parse',
+        recommendation:
+            'Emit complete, syntactically valid files. Close every brace, bracket and JSX ' +
+            'tag, terminate every string, and escape quotes inside JSX text — ' +
+            'setQuote("I can\'t do this"), never setQuote(\'I can\'t do this\').',
+    },
     'unresolved-html-ref': {
         trigger: 'index.html references a file that was never generated',
         recommendation:
@@ -114,6 +121,23 @@ export function unmappedCodes(codes) {
  */
 export function proposalsFor(payload) {
     if (!payload || payload.ok !== false) return [];
+    /**
+     * An instrument that failed has no opinion about the work.
+     *
+     * When a generation is cut off by its output budget, the validators run over a
+     * half-written project and report exactly what you would expect: unbalanced
+     * braces, unterminated strings, a missing entry point. Every one of those is true
+     * of the *text* and false of the *model* — it did not forget `index.html`, it was
+     * stopped before it got there.
+     *
+     * Proposing from that teaches the next attempt to fix mistakes nobody made, and a
+     * single passing build afterwards promotes the lie to `qualified`. Measured on a
+     * real build: three lessons, all three wrong, all three from one truncation.
+     *
+     * So an inconclusive verdict proposes nothing. It is not a pass and not a
+     * failure; it is the absence of a verdict, and the ladder must be told so.
+     */
+    if (payload.inconclusive === true) return [];
 
     const codes = payload.codes ?? {};
     return Object.keys(codes)

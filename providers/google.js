@@ -100,6 +100,12 @@ export const createGoogleProvider = ({ apiKey }) => {
                 if (chunk.text) event.text = chunk.text;
                 const usage = usageOf(chunk.usageMetadata);
                 if (usage) event.usage = usage;
+                /* Why the model stopped. `MAX_TOKENS` here is the difference between
+                   "the model wrote bad JSON" and "the model was cut off mid-sentence",
+                   and dropping it is what made a budget overrun arrive disguised as a
+                   quality failure for as long as it did. */
+                const finishReason = chunk.candidates?.[0]?.finishReason;
+                if (finishReason) event.finishReason = finishReason;
                 if (Object.keys(event).length) yield event;
             }
         },

@@ -123,10 +123,21 @@ export const declaredPackages = (packageJson) => {
  * @param {TscDiagnostic[]} diagnostics
  * @returns {{severity: 'error'|'warning', code: 'type-error', file: string, message: string}[]}
  */
+/**
+ * TypeScript numbers its grammar errors in the 1xxx range and its JSX-structure
+ * errors in 17xxx; everything a *type* checker has an opinion about is 2xxx and up.
+ *
+ * The distinction is not cosmetic, because these codes feed the lesson ladder. A file
+ * that was cut off mid-string produces a wall of TS1002/TS1005, and calling those
+ * "type errors" proposed the lesson "annotate your props and state" for a failure that
+ * had nothing to do with types. Observed on a real build, not imagined.
+ */
+const SYNTAX = /^TS(1\d{3}|17\d{3})$/;
+
 export const toBuildIssues = (diagnostics) =>
     diagnostics.map((d) => ({
         severity: 'error',
-        code: 'type-error',
+        code: SYNTAX.test(d.code) ? 'syntax-error' : 'type-error',
         file: d.path,
         message: `${d.code}: ${d.message.split('\n')[0]} (${d.line}:${d.col})`,
     }));

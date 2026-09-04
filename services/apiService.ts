@@ -1,6 +1,7 @@
 
 import { CustomAiStyle, Message, MessagePart, Persona, Project, ProjectFile } from "../types/index";
 import { updateProject as updateProjectInStorage } from "./geminiService";
+import type { GenerateResult } from '../types/build';
 
 export interface CatalogModel {
     id: string;
@@ -170,7 +171,7 @@ export interface BuilderProgressEvent {
     model?: string;      // which model is serving this attempt (fallback-aware)
 }
 
-export const generateWebAppCode = async (plan: any, theme: any, model?: string, onProgress?: (event: BuilderProgressEvent) => void, memory?: MemoryRef): Promise<Record<string, string>> => {
+export const generateWebAppCode = async (plan: any, theme: any, model?: string, onProgress?: (event: BuilderProgressEvent) => void, memory?: MemoryRef): Promise<GenerateResult> => {
     const response = await fetch('/api/builder/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -183,13 +184,22 @@ export const generateWebAppCode = async (plan: any, theme: any, model?: string, 
     const decoder = new TextDecoder();
     let carry = '';
     let files: Record<string, string> | null = null;
+    let truncated = false;
+    let salvagedCount = 0;
+    let finishReason: string | null = null;
 
     const handleLine = (line: string) => {
         if (!line.trim()) return;
         const event = JSON.parse(line);
         if (event.error) throw new Error(event.error);
-        if (event.files) files = event.files;
-        else if (onProgress) onProgress(event as BuilderProgressEvent);
+        if (event.files) {
+            files = event.files;
+            /* A truncated result still carries files. This flag is what stops them
+               being mistaken for a finished candidate downstream. */
+            truncated = event.truncated === true;
+            salvagedCount = event.salvagedCount ?? 0;
+            finishReason = event.finishReason ?? null;
+        } else if (onProgress) onProgress(event as BuilderProgressEvent);
     };
 
     while (true) {
@@ -203,5 +213,5 @@ export const generateWebAppCode = async (plan: any, theme: any, model?: string, 
     if (tail.trim()) handleLine(tail);
 
     if (!files) throw new Error('Generation stream ended without a result. Please try again.');
-    return files;
+    return { files, truncated, salvagedCount, finishReason };
 };
