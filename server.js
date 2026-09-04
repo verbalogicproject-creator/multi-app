@@ -719,38 +719,103 @@ ${Array.isArray(plan?.acceptanceCriteria) && plan.acceptanceCriteria.length > 0
             const none = { preRepairErrors: 0, postRepairErrors: 0, repairedFiles: [], repairRounds: 0, repairReverted: false };
             if (skip) return none;
 
-            const before = await typecheck({ projectId: `${buildId ?? 'build'}-pre`, files: record });
-            if (!before.completed || before.ok) return none;
-            const preRepairErrors = before.diagnostics.length;
+            const first = await typecheck({ projectId: `${buildId ?? 'build'}-pre`, files: record });
+            if (!first.completed || first.ok) return none;
+            const preRepairErrors = first.diagnostics.length;
 
-            const snapshot = { ...record };
-            const round = await repairRound({
-                models: builderModelChain(requestedModel),
-                run: withModelFallback,
-                getProvider: providerForModel,
-                systemFor: (model) => builderPreamble(getModel(model).provider),
-                basePrompt: prompt,
-                manifest,
-                record,
-                diagnostics: before.diagnostics,
-                emit: (event) => res.write(JSON.stringify(event) + '\n'),
-                schemas: { file: FILE_SCHEMA },
-                onServed,
-            });
-            if (round.repaired.length === 0) return { ...none, preRepairErrors, postRepairErrors: preRepairErrors };
+            const countByFile = (diagnostics) => {
+                const counts = new Map();
+                for (const d of diagnostics) counts.set(d.path, (counts.get(d.path) ?? 0) + 1);
+                return counts;
+            };
 
-            /* Measure, never assume: until this existed, "repaired" only meant the
-               model returned something, and the sole witness to the change was the
-               thing that made it. */
-            const after = await typecheck({ projectId: `${buildId ?? 'build'}-post`, files: record });
-            const postRepairErrors = after.completed ? after.diagnostics.length : preRepairErrors;
+            /**
+             * Repair while it is working, and stop the moment it is not.
+             *
+             * One round was reasoning ahead of evidence. On a real four-page build a
+             * single round took 32 errors to 1 and then stopped by rule, leaving a
+             * named, located, obviously fixable error on the table. "A model that
+             * cannot fix a file will not fix it on the fourth attempt" is true and is
+             * not an argument against a second attempt that the first one earned.
+             *
+             * So the bound is progress, not a count: another round only happens if the
+             * previous one strictly reduced the error total, and the cap exists only to
+             * stop a pathological oscillation. A round that does not improve things is
+             * the last one either way.
+             */
+            const MAX_ROUNDS = 3;
+            let current = first;
+            let rounds = 0;
+            const kept = [];
+            let anyReverted = false;
 
-            if (after.completed && after.diagnostics.length >= preRepairErrors) {
-                for (const [path, content] of Object.entries(snapshot)) record[path] = content;
-                res.write(JSON.stringify({ repairReverted: true, preRepairErrors, postRepairErrors }) + '\n');
-                return { ...none, preRepairErrors, postRepairErrors, repairReverted: true };
+            while (rounds < MAX_ROUNDS && !current.ok && current.diagnostics.length > 0) {
+                const snapshot = { ...record };
+                const round = await repairRound({
+                    models: builderModelChain(requestedModel),
+                    run: withModelFallback,
+                    getProvider: providerForModel,
+                    systemFor: (model) => builderPreamble(getModel(model).provider),
+                    basePrompt: prompt,
+                    manifest,
+                    record,
+                    diagnostics: current.diagnostics,
+                    emit: (event) => res.write(JSON.stringify(event) + '\n'),
+                    schemas: { file: FILE_SCHEMA },
+                    onServed,
+                });
+                if (round.repaired.length === 0) break;
+
+                const after = await typecheck({ projectId: `${buildId ?? 'build'}-r${rounds}`, files: record });
+                if (!after.completed) {
+                    /* The instrument did not answer. Undo the round rather than keep
+                       changes nothing has judged. */
+                    for (const path of round.repaired) record[path] = snapshot[path];
+                    break;
+                }
+
+                /* Judged per file, not in aggregate. All-or-nothing threw away every
+                   good repair because one file got worse — observed on a real build
+                   where a data file went 7 -> 64 and took three sound fixes with it.
+                   Attribution is imperfect (repairing A can change B), so this asks
+                   only what it can answer: did *this file* get better? */
+                const wasBroken = countByFile(current.diagnostics);
+                const nowBroken = countByFile(after.diagnostics);
+                const reverted = [];
+                for (const path of round.repaired) {
+                    if ((nowBroken.get(path) ?? 0) < (wasBroken.get(path) ?? 0)) kept.push(path);
+                    else { record[path] = snapshot[path]; reverted.push(path); }
+                }
+                if (reverted.length > 0) {
+                    anyReverted = true;
+                    res.write(JSON.stringify({ repairReverted: reverted }) + '\n');
+                }
+
+                /* Some files went back, so the count from a moment ago describes a
+                   project that no longer exists. Ask again rather than report a number
+                   that was true of something else. */
+                const settled = reverted.length > 0
+                    ? await typecheck({ projectId: `${buildId ?? 'build'}-s${rounds}`, files: record })
+                    : after;
+                if (!settled.completed) break;
+
+                rounds += 1;
+                res.write(JSON.stringify({
+                    repairRound: rounds, errors: settled.diagnostics.length, from: current.diagnostics.length,
+                }) + '\n');
+
+                /* The bound: no strict improvement, no further round. */
+                if (settled.diagnostics.length >= current.diagnostics.length) { current = settled; break; }
+                current = settled;
             }
-            return { preRepairErrors, postRepairErrors, repairedFiles: round.repaired, repairRounds: 1, repairReverted: false };
+
+            return {
+                preRepairErrors,
+                postRepairErrors: current.completed ? current.diagnostics.length : preRepairErrors,
+                repairedFiles: [...new Set(kept)],
+                repairRounds: rounds,
+                repairReverted: anyReverted,
+            };
         };
 
         /* ---- The manifest, and then one request per file --------------------
@@ -792,6 +857,8 @@ ${Array.isArray(plan?.acceptanceCriteria) && plan.acceptanceCriteria.length > 0
                dictated verbatim by the prompt above, so asking a model for them costs
                four requests and adds four ways to be wrong. */
             prefill: scaffoldFor({ plan, theme }),
+            /* So a manifest that dropped an approved page can have it put back. */
+            plan,
             /* Derived from the finished imports below, so it is never a gap. */
             provided: ['package.json'],
         });
@@ -842,7 +909,11 @@ ${Array.isArray(plan?.acceptanceCriteria) && plan.acceptanceCriteria.length > 0
                 /* A file the budget cut short is an instrument failure; a file the model
                    simply did not produce is a real gap in a real answer. Only the first
                    is barred from the lesson ladder. */
-                kind: cut ? 'candidate.truncated' : 'candidate.created',
+                /* `candidate.truncated` is not in the engine's declared vocabulary and
+                   every such event was silently refused — the same invariant AGENTS.md
+                   states for `domain`, violated on the adjacent field. `repair.attempted`
+                   is the declared kind for a run that did not deliver cleanly. */
+                kind: cut ? 'repair.attempted' : 'candidate.created',
                 surface: 'builder.generate',
                 ...attributionFor(servingModel),
                 payload: {
@@ -978,7 +1049,7 @@ ${Array.isArray(plan?.acceptanceCriteria) && plan.acceptanceCriteria.length > 0
                 memory.appendEventSafe({
                     buildId,
                     episodeId,
-                    kind: 'candidate.truncated',
+                    kind: 'repair.attempted',
                     surface: 'builder.generate',
                     ...attributionFor(servingModel),
                     payload: {

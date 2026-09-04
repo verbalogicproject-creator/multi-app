@@ -42,10 +42,14 @@ export nothing. Include the config and entry files (index.html,
 package.json, tsconfig.json, vite.config.ts, src/main.tsx, src/index.css), every page and
 component from the plan, and any context, hook, type or data module the app requires.
 
-Still list \`index.html\`, \`package.json\`, \`tsconfig.json\`, \`vite.config.ts\` and
-\`src/index.css\` so the other files can rely on them — but they are written for you from
-the plan and the theme, so give them a one-line purpose and no exports and spend no
-thought on their contents.
+Still list \`index.html\`, \`package.json\`, \`tsconfig.json\`, \`vite.config.ts\`,
+\`src/index.css\` and \`src/main.tsx\` so the other files can rely on them — but they are
+written for you from the plan and the theme, so give them a one-line purpose and no
+exports and spend no thought on their contents.
+
+**\`src/main.tsx\` already mounts the app and already wraps it in a \`<BrowserRouter>\`.**
+\`src/App.tsx\` must therefore contain \`<Routes>\` and \`<Route>\` directly and must **not**
+create a Router of its own — a second one nested inside the first breaks routing.
 
 Order the list so that a file appears after anything it imports — types and data first,
 then components, then pages, then App and main. Do not write any file contents here; the
@@ -82,6 +86,15 @@ ${listing}${done}
 Return only that one file's full contents. It must be complete and syntactically valid on
 its own — every brace, bracket and JSX tag closed, every string terminated.
 
+**If this file is \`src/App.tsx\`**, it is rendered inside a \`<BrowserRouter>\` that
+\`src/main.tsx\` already provides. Use \`<Routes>\`/\`<Route>\` and router hooks directly;
+do not add another Router.
+
+**If this file stores code as data** — snippets, examples, documentation — do not put it in
+a template literal. A snippet containing a backtick or \`\${\` terminates the literal that
+holds it and breaks the file. Use a normal double-quoted string with \`\\n\` for newlines,
+or escape every backtick and \`\${\` in the content.
+
 **Honour the manifest's export contract exactly.** Export precisely the names the manifest
 lists for this file — \`default X\` means \`export default\`, anything else is a named export.
 Import only names another file's manifest entry actually lists, from paths in the manifest
@@ -110,6 +123,56 @@ export const manifestGaps = (manifest, alreadyHave = []) => {
     const hasMain = [...paths].some(p => /^src\/main\.(tsx|ts|jsx|js)$/.test(p));
     return MANIFEST_FLOOR.filter(required =>
         required === 'src/main.tsx' ? !hasMain : !paths.has(required));
+};
+
+/**
+ * Which of the plan's pages and components the manifest forgot.
+ *
+ * The plan is what the user approved. The manifest is what the model proposed. Until
+ * this existed nothing compared them, and the two checks either side of the gap both
+ * reported success: `missingFrom` measures files against the *manifest*, so a page the
+ * manifest never listed was never promised and never missing, and `validateBuild`
+ * measures files against the *plan* but only as a warning, after the whole build.
+ *
+ * A build could therefore omit every page the user approved, report "missing: none",
+ * pass validation, and be promoted. Observed in the field as five
+ * `plan-page-missing` warnings on a build that was accepted.
+ *
+ * Matched on the component name appearing in a path, which is how `validateBuild`
+ * decides the same question — the two must agree or one of them is lying.
+ */
+export const planCoverage = (manifest, plan) => {
+    const paths = (manifest ?? []).map(entry => entry?.path ?? '').join('\n');
+    const wanted = [
+        ...(Array.isArray(plan?.pages) ? plan.pages : []).map(p => ({ kind: 'page', name: p?.name })),
+        ...(Array.isArray(plan?.components) ? plan.components : []).map(c => ({ kind: 'component', name: c?.name })),
+    ];
+    return wanted.filter(w => typeof w.name === 'string' && w.name && !paths.includes(w.name));
+};
+
+/**
+ * Put back what the manifest dropped.
+ *
+ * Appending rather than rejecting, because the plan is authoritative and the manifest
+ * is a proposal: a model that forgot a page does not need the whole run thrown away,
+ * it needs the page. The entry carries the same shape the model would have written, so
+ * everything downstream — the file request, the export contract, the coverage check —
+ * treats it identically.
+ */
+export const coverPlan = (manifest, plan) => {
+    const missing = planCoverage(manifest, plan);
+    if (missing.length === 0) return manifest;
+    const describe = (kind, name) => (Array.isArray(plan?.[kind === 'page' ? 'pages' : 'components'])
+        ? plan[kind === 'page' ? 'pages' : 'components'].find(x => x?.name === name)?.description
+        : '') || `The ${name} ${kind} from the approved plan.`;
+    return [
+        ...manifest,
+        ...missing.map(({ kind, name }) => ({
+            path: kind === 'page' ? `src/pages/${name}.tsx` : `src/components/${name}.tsx`,
+            purpose: describe(kind, name),
+            exports: [`default ${name}`],
+        })),
+    ];
 };
 
 /**
@@ -151,7 +214,7 @@ export const normaliseManifest = (files, max = 60) => {
  */
 export const generateFromManifest = async ({
     models, run, getProvider, systemFor, basePrompt, recalled = '', trialled = '',
-    emit, schemas, concurrency = 3, onServed, prefill = {}, provided = [],
+    emit, schemas, concurrency = 3, onServed, prefill = {}, provided = [], plan = null,
 }) => {
     let manifest = null;
     try {
@@ -166,7 +229,14 @@ export const generateFromManifest = async ({
                 maxOutputTokens: 8192,
             });
         }, onServed);
-        const candidate = normaliseManifest(object?.files);
+        /* The plan is a contract, not a suggestion. A manifest that forgot a page the
+           user approved gets the page put back, before a single request is spent. */
+        const proposed = normaliseManifest(object?.files);
+        const uncovered = planCoverage(proposed, plan);
+        if (uncovered.length > 0) {
+            emit({ planRestored: uncovered.map(u => u.name) });
+        }
+        const candidate = coverPlan(proposed, plan);
         /* `prefill` is written before generation; `provided` is guaranteed by the
            caller afterwards — `package.json` is derived from the finished imports, so
            it cannot be prefilled and must not count as a gap either. */

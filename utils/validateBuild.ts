@@ -226,11 +226,25 @@ export const validateBuild = (files: Record<string, string>, plan?: any): BuildV
 
     // Did the build deliver what the approved plan promised?
     const allPaths = paths.join('\n');
+    /*
+     * An error, not a warning.
+     *
+     * The plan is what the user read and approved. A build that silently drops a page
+     * from it has not "passed with a note" — it is a different product from the one
+     * that was agreed to, and a warning let it promote anyway. Observed in the field:
+     * a build accepted while carrying five of these, missing every page it promised.
+     *
+     * Safe to raise now that the manifest is made to cover the plan before generation
+     * (`coverPlan` in providers/generate.js). Before that, a model naming a page
+     * `Home.tsx` instead of `HomePage.tsx` would have failed the build for a naming
+     * choice rather than a missing feature; now the path comes from the plan's own
+     * name, so this check is a statement about a real gap.
+     */
     for (const page of Array.isArray(plan?.pages) ? plan.pages : []) {
-        if (page?.name && !allPaths.includes(page.name)) add('warning', 'plan-page-missing', `The plan included a "${page.name}" page, but no matching file was generated.`);
+        if (page?.name && !allPaths.includes(page.name)) add('error', 'plan-page-missing', `The plan included a "${page.name}" page, but no matching file was generated.`);
     }
     for (const component of Array.isArray(plan?.components) ? plan.components : []) {
-        if (component?.name && !allPaths.includes(component.name)) add('warning', 'plan-component-missing', `The plan included a "${component.name}" component, but no matching file was generated.`);
+        if (component?.name && !allPaths.includes(component.name)) add('error', 'plan-component-missing', `The plan included a "${component.name}" component, but no matching file was generated.`);
     }
 
     return { ok: !issues.some(i => i.severity === 'error'), issues, checked: paths.length };

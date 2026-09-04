@@ -27,7 +27,7 @@ import { Buffer } from 'node:buffer';
 import { salvageFiles, isTruncation } from '../providers/salvage.js';
 import { toBuildIssues } from '../typecheck/parse.js';
 import { proposalsFor, unmappedCodes, PROPOSAL_TABLE, NOT_A_LESSON } from '../memory/proposals.js';
-import { normaliseManifest, manifestGaps, missingFrom, manifestInstruction, fileInstruction, generateFromManifest, filesNeedingRepair, importedPaths, repairInstruction, repairRound } from '../providers/generate.js';
+import { normaliseManifest, manifestGaps, missingFrom, manifestInstruction, fileInstruction, generateFromManifest, filesNeedingRepair, importedPaths, repairInstruction, repairRound, planCoverage, coverPlan } from '../providers/generate.js';
 import { scaffoldFor, packageJsonFor, importedPackages, SCAFFOLD_PATHS } from '../providers/scaffold.js';
 
 let failures = 0;
@@ -351,7 +351,15 @@ ok('the repaired file is reported', round.repaired.includes('src/TideCard.tsx'),
 console.log('\n9. the scaffold is written, not requested');
 
 const sc = scaffoldFor({ plan: { projectName: 'Tide Clock' }, theme: { colors: { bg: '#001122', primary: '#00aaff' } } });
-ok('four files are written outright', Object.keys(sc).length === 4, Object.keys(sc).join(', '));
+ok('five files are written outright', Object.keys(sc).length === 5, Object.keys(sc).join(', '));
+/* The one that came from a broken build rather than from reasoning: main.tsx mounted
+   <App /> with no Router while App.tsx used Routes and useLocation. tsc passed, esbuild
+   passed, and the app threw on first render and drew nothing. */
+ok('the entry mounts the root', sc['src/main.tsx'].includes("document.getElementById('root')"));
+ok('and wraps the app in a Router, structurally',
+    /<BrowserRouter>[\s\S]*<App \/>[\s\S]*<\/BrowserRouter>/.test(sc['src/main.tsx']),
+    'a router the model has to remember is a router that goes missing');
+ok('and imports the stylesheet', sc['src/main.tsx'].includes("import './index.css'"));
 ok('tsconfig matches what the prompt pins',
     JSON.parse(sc['tsconfig.json']).compilerOptions.moduleResolution === 'bundler'
     && JSON.parse(sc['tsconfig.json']).compilerOptions.jsx === 'react-jsx');
@@ -412,9 +420,10 @@ const scaffoldRun = await (async () => {
     return { calls, result };
 })();
 ok('scaffolded paths are never requested',
-    !scaffoldRun.calls.includes('index.html') && !scaffoldRun.calls.includes('tsconfig.json'),
+    !['index.html', 'tsconfig.json', 'src/main.tsx'].some(p => scaffoldRun.calls.includes(p)),
     `requested: ${scaffoldRun.calls.join(', ')}`);
-ok('only the real work is', scaffoldRun.calls.length === 2, scaffoldRun.calls.join(', '));
+ok('only the real work is', scaffoldRun.calls.length === 1 && scaffoldRun.calls[0] === 'src/App.tsx',
+    scaffoldRun.calls.join(', '));
 ok('and the scaffold is in the result anyway',
     typeof scaffoldRun.result.record['index.html'] === 'string'
     && typeof scaffoldRun.result.record['tsconfig.json'] === 'string');
@@ -464,6 +473,96 @@ const noPkgJson = attributeBundleErrors(
     [{ text: 'Could not resolve "react" — nope', file: 'a.tsx' }], {});
 ok('an unparseable package.json blames the model rather than crashing',
     noPkgJson[0]?.code === 'unresolved-import', JSON.stringify(noPkgJson));
+
+// ── 11. The plan is a contract, not a suggestion ─────────────────────────────
+// Two checks sat either side of a gap and both reported success: `missingFrom`
+// measures files against the *manifest*, so a page the manifest never listed was
+// never promised; `validateBuild` measures files against the *plan* but only as a
+// warning, after the build. A build could drop every approved page, report
+// "missing: none", pass, and promote. Seen in the field as five plan-*-missing
+// warnings on a build that was accepted.
+console.log('\n11. a manifest that forgot an approved page has it put back');
+
+const PLAN = {
+    pages: [{ name: 'HomePage', description: 'the home page' }, { name: 'ArticlePage', description: 'one article' }],
+    components: [{ name: 'Navbar', description: 'top nav' }],
+};
+const skimpy = [
+    { path: 'index.html', purpose: 'shell', exports: [] },
+    { path: 'src/main.tsx', purpose: 'mount', exports: [] },
+    { path: 'src/App.tsx', purpose: 'routes', exports: ['default App'] },
+    { path: 'src/pages/HomePage.tsx', purpose: 'home', exports: ['default HomePage'] },
+];
+
+const forgot = planCoverage(skimpy, PLAN);
+ok('a dropped page and component are both found',
+    forgot.length === 2 && forgot.some(f => f.name === 'ArticlePage') && forgot.some(f => f.name === 'Navbar'),
+    forgot.map(f => `${f.kind} ${f.name}`).join(', '));
+
+const covered = coverPlan(skimpy, PLAN);
+ok('they are appended rather than the run being thrown away', covered.length === 6,
+    'the plan is authoritative; a model that forgot a page needs the page, not a re-roll');
+ok('a page lands under src/pages', covered.some(f => f.path === 'src/pages/ArticlePage.tsx'));
+ok('a component lands under src/components', covered.some(f => f.path === 'src/components/Navbar.tsx'));
+ok('and each carries the export contract the rest will import by',
+    covered.find(f => f.path === 'src/pages/ArticlePage.tsx')?.exports[0] === 'default ArticlePage');
+ok('the plan\'s own description becomes the purpose',
+    covered.find(f => f.path === 'src/components/Navbar.tsx')?.purpose === 'top nav');
+ok('nothing is left uncovered afterwards', planCoverage(covered, PLAN).length === 0);
+ok('and a complete manifest is untouched', coverPlan(covered, PLAN).length === covered.length,
+    'restoring must be a no-op when there is nothing to restore');
+ok('no plan at all is not a gap', planCoverage(skimpy, null).length === 0);
+
+/* End to end: the restored entries must actually be requested. */
+const restoredCalls = [];
+const restoreProvider = {
+    async generateJson() { return { object: { files: skimpy } }; },
+    async *streamJson({ prompt }) {
+        const path = /Write exactly one file: `([^`]+)`/.exec(prompt)?.[1];
+        restoredCalls.push(path);
+        yield { text: JSON.stringify({ path, content: 'export default () => null;' }) };
+    },
+};
+const restoredRun = await generateFromManifest({
+    models: ['stub'],
+    run: async (m, a, s2) => { const r = await a(m[0]); s2?.(m[0]); return r; },
+    getProvider: () => restoreProvider, systemFor: () => 'sys', basePrompt: 'PLAN',
+    emit: () => {}, schemas: { manifest: {}, file: {} },
+    prefill: scaffoldFor({ plan: { projectName: 'X' }, theme: {} }),
+    provided: ['package.json'],
+    plan: PLAN,
+});
+ok('the page the manifest forgot is actually generated',
+    restoredCalls.includes('src/pages/ArticlePage.tsx'), restoredCalls.join(', '));
+ok('and App is told not to nest a second Router',
+    /must \*\*not\*\*\s*\n?create a Router|do not add another Router/i.test(
+        fileInstruction({ manifest: [{ path: 'src/App.tsx', purpose: 'routes', exports: ['default App'] }], path: 'src/App.tsx', purpose: 'routes', written: [] })),
+    'main.tsx provides the Router now, so App nesting one would break routing');
+ok('and so is the component', restoredCalls.includes('src/components/Navbar.tsx'));
+ok('so the finished build has every page the plan promised',
+    ['HomePage', 'ArticlePage', 'Navbar'].every(n => Object.keys(restoredRun.record).some(p => p.includes(n))),
+    Object.keys(restoredRun.record).join(', '));
+
+// ── 12. Code stored as data ──────────────────────────────────────────────────
+// From a real four-page build: a mock-data file held code snippets in template
+// literals, one snippet contained a backtick and ${…}, and it ended the literal
+// holding it. Seven TS1005 on one line, and esbuild refused the whole project.
+console.log('\n12. the file request warns about code stored as data');
+
+const dataInstruction = fileInstruction({
+    manifest: [{ path: 'src/data/mockData.ts', purpose: 'snippets', exports: ['snippets'] }],
+    path: 'src/data/mockData.ts', purpose: 'snippets', written: [],
+});
+ok('a file request says not to put code in a template literal',
+    /template literal/i.test(dataInstruction), 'the failure that broke a real build');
+ok('and names the two characters that end one', /backtick/i.test(dataInstruction) && dataInstruction.includes('${'));
+
+const syntaxLesson = proposalsFor({ ok: false, codes: { 'syntax-error': 1 } })[0]?.recommendation ?? '';
+/* The lesson used to say "escape quotes inside JSX text", which is true and was not
+   the cause. A lesson aimed at the wrong failure teaches the wrong habit. */
+ok('and the lesson it would teach covers the same cause',
+    /template literal/i.test(syntaxLesson) && /backtick/i.test(syntaxLesson),
+    syntaxLesson.slice(-90));
 
 console.log(failures === 0 ? '\ngenerate ok' : `\n${failures} CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);
