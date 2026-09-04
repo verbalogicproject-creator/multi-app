@@ -42,13 +42,13 @@ import { getModel, modelChain, pickModel } from './providers/catalog.js';
 import { toolsForRequest } from './providers/tools.js';
 import { PLAN_SCHEMA, DIRECTIONS_SCHEMA, GENERATE_SCHEMA, MANIFEST_SCHEMA, FILE_SCHEMA, filesArrayToRecord } from './providers/schemas.js';
 import { salvageFiles, isTruncation } from './providers/salvage.js';
-import { generateFromManifest } from './providers/generate.js';
+import { generateFromManifest, repairRound } from './providers/generate.js';
 import { buildSystemPrompt, builderPreamble } from './providers/prompts.js';
 import { memoryRouter } from './memory/routes.js';
 import * as memory from './memory/bridge.js';
 import typecheckRouter from './typecheck/routes.js';
 import previewRouter from './preview/routes.js';
-import { clean as cleanTypecheckScratch, killAll as killTypecheckRuns } from './typecheck/runner.js';
+import { typecheck, clean as cleanTypecheckScratch, killAll as killTypecheckRuns } from './typecheck/runner.js';
 
 const app = express();
 const port = process.env.PORT || 8050;
@@ -743,10 +743,52 @@ ${Array.isArray(plan?.acceptanceCriteria) && plan.acceptanceCriteria.length > 0
             console.warn(`Builder generate: manifest unusable (${run.unusable}) — falling back to the whole-app path`);
         } else if (Object.keys(run.record).length > 0) {
             const cut = run.truncatedFiles.length > 0;
+
+            /* ---- The repair pass -------------------------------------------
+             *
+             * `tsc` is a separate process with no stake in the generation being
+             * right, and it has just said exactly which files are wrong and why.
+             * Re-requesting only those, with their diagnostics and the real source
+             * of what they import, is the cheapest correction available: a project
+             * with two bad files pays for two requests, not sixteen.
+             *
+             * It exists because the export contract fixed the failures it targeted
+             * and revealed the next layer — files agreeing on names and disagreeing
+             * on *shapes*. No manifest can carry that without carrying the code.
+             *
+             * One round, deliberately. A model that cannot fix a file will not fix
+             * it on the fourth attempt either, and an unbounded loop burns quota to
+             * reach the same answer more slowly.
+             */
+            let preRepairErrors = 0;
+            let repairedFiles = [];
+            let repairRounds = 0;
+            if (!cut) {
+                const before = await typecheck({ projectId: `${buildId ?? 'build'}-pre`, files: run.record });
+                if (before.completed && !before.ok) {
+                    preRepairErrors = before.diagnostics.length;
+                    const round = await repairRound({
+                        models: builderModelChain(requestedModel),
+                        run: withModelFallback,
+                        getProvider: providerForModel,
+                        systemFor: (model) => builderPreamble(getModel(model).provider),
+                        basePrompt: prompt,
+                        manifest: run.manifest,
+                        record: run.record,
+                        diagnostics: before.diagnostics,
+                        emit: (event) => res.write(JSON.stringify(event) + '\n'),
+                        schemas: { file: FILE_SCHEMA },
+                        onServed,
+                    });
+                    repairedFiles = round.repaired;
+                    repairRounds = round.repaired.length > 0 ? 1 : 0;
+                }
+            }
             res.write(JSON.stringify({
                 files: run.record,
                 manifest: run.manifest.map(f => f.path),
                 missing: run.missing,
+                ...(repairedFiles.length > 0 ? { repaired: repairedFiles, repairRounds } : {}),
                 ...(cut ? { truncated: true, salvagedCount: Object.keys(run.record).length } : {}),
             }) + '\n');
 
@@ -766,6 +808,11 @@ ${Array.isArray(plan?.acceptanceCriteria) && plan.acceptanceCriteria.length > 0
                     missingCount: run.missing.length,
                     bytes: run.bytes,
                     memoryInjected: recalled !== '',
+                    /* Kept even though nothing consumes it yet. A build that needed
+                       rescuing must not read as one that never did — recording only
+                       the final state would let the ladder learn "this always works"
+                       from an attempt that did not. */
+                    ...(preRepairErrors > 0 ? { preRepairErrors, repairRounds, repairedFiles } : {}),
                     ...(cut ? { inconclusive: true, truncatedFiles: run.truncatedFiles } : {}),
                 },
             });
