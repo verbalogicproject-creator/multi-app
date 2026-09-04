@@ -761,12 +761,20 @@ ${Array.isArray(plan?.acceptanceCriteria) && plan.acceptanceCriteria.length > 0
              * reach the same answer more slowly.
              */
             let preRepairErrors = 0;
+            let postRepairErrors = 0;
             let repairedFiles = [];
             let repairRounds = 0;
+            let repairReverted = false;
             if (!cut) {
                 const before = await typecheck({ projectId: `${buildId ?? 'build'}-pre`, files: run.record });
                 if (before.completed && !before.ok) {
                     preRepairErrors = before.diagnostics.length;
+
+                    /* The baseline, byte for byte, before anything is changed.
+                       A repair is a change like any other, and a change you cannot
+                       undo is one you cannot safely make. */
+                    const snapshot = { ...run.record };
+
                     const round = await repairRound({
                         models: builderModelChain(requestedModel),
                         run: withModelFallback,
@@ -780,15 +788,39 @@ ${Array.isArray(plan?.acceptanceCriteria) && plan.acceptanceCriteria.length > 0
                         schemas: { file: FILE_SCHEMA },
                         onServed,
                     });
-                    repairedFiles = round.repaired;
-                    repairRounds = round.repaired.length > 0 ? 1 : 0;
+
+                    if (round.repaired.length > 0) {
+                        /* Measure, do not assume. Until this ran, "repaired" meant the
+                           model returned something — a repair that made the project
+                           worse was indistinguishable from one that fixed it, because
+                           the only witness was the thing that made the change. */
+                        const after = await typecheck({ projectId: `${buildId ?? 'build'}-post`, files: run.record });
+                        postRepairErrors = after.completed ? after.diagnostics.length : preRepairErrors;
+
+                        if (after.completed && after.diagnostics.length >= preRepairErrors) {
+                            /* No better, or worse. Put the original files back: a build
+                               that was going to fail should fail as the model wrote it,
+                               not as a failed repair left it. */
+                            for (const [path, content] of Object.entries(snapshot)) run.record[path] = content;
+                            repairReverted = true;
+                            res.write(JSON.stringify({
+                                repairReverted: true, preRepairErrors, postRepairErrors,
+                            }) + '\n');
+                        } else {
+                            repairedFiles = round.repaired;
+                            repairRounds = 1;
+                        }
+                    }
                 }
             }
             res.write(JSON.stringify({
                 files: run.record,
                 manifest: run.manifest.map(f => f.path),
                 missing: run.missing,
-                ...(repairedFiles.length > 0 ? { repaired: repairedFiles, repairRounds } : {}),
+                ...(repairedFiles.length > 0
+                    ? { repaired: repairedFiles, repairRounds, preRepairErrors, postRepairErrors }
+                    : {}),
+                ...(repairReverted ? { repairReverted: true, preRepairErrors, postRepairErrors } : {}),
                 ...(cut ? { truncated: true, salvagedCount: Object.keys(run.record).length } : {}),
             }) + '\n');
 
@@ -812,7 +844,9 @@ ${Array.isArray(plan?.acceptanceCriteria) && plan.acceptanceCriteria.length > 0
                        rescuing must not read as one that never did — recording only
                        the final state would let the ladder learn "this always works"
                        from an attempt that did not. */
-                    ...(preRepairErrors > 0 ? { preRepairErrors, repairRounds, repairedFiles } : {}),
+                    ...(preRepairErrors > 0
+                        ? { preRepairErrors, postRepairErrors, repairRounds, repairedFiles, repairReverted }
+                        : {}),
                     ...(cut ? { inconclusive: true, truncatedFiles: run.truncatedFiles } : {}),
                 },
             });

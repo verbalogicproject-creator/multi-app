@@ -31,7 +31,16 @@ const ENTRIES = [
     // and 3.1-pro-preview reject MINIMAL, so `none` must clamp up to low there.
     { id: 'gemini-3.5-flash', provider: 'google', label: '3.5 Flash', hint: 'Fast, free tier — default for chat and coding', tools: true, jsonMode: 'native', thinking: true, efforts: ['none', 'low', 'medium', 'high'], priceIn: 0, priceOut: 0, dailyLimit: 250, fallback: ['gemini-3.5-flash-lite'] },
     { id: 'gemini-3.5-flash-lite', provider: 'google', label: '3.5 Flash-Lite', hint: 'Cheapest and fastest Gemini', tools: true, jsonMode: 'native', thinking: true, efforts: ['none', 'low', 'medium', 'high'], priceIn: 0, priceOut: 0, dailyLimit: 1000, fallback: [] },
-    { id: 'gemini-3.7-flash', provider: 'google', label: '3.7 Flash', hint: 'Strong coding and agentic work — low daily quota', tools: true, jsonMode: 'native', thinking: true, efforts: ['low', 'medium', 'high'], priceIn: 0, priceOut: 0, dailyLimit: 20, fallback: ['gemini-3.5-flash'] },
+    // Verified 2026-09-04 with `smoke:providers`: streaming, tool calls and the tool
+    // result round-trip all pass. Its **schema-JSON** path returned 503 on two separate
+    // runs while the same model's other paths answered — consistently, not randomly.
+    // That is a load signal rather than a proven capability gap, so the declaration
+    // stays honest and the model stays out of the builder default: the builder is
+    // entirely schema-JSON, and its fallback chain resolves a 503 to 3.6 anyway.
+    { id: 'gemini-3.8-flash', provider: 'google', label: '3.8 Flash', hint: 'Newest flash — structured output was unreachable when last checked', tools: true, jsonMode: 'native', thinking: true, efforts: ['low', 'medium', 'high'], priceIn: 0, priceOut: 0, dailyLimit: 20, fallback: ['gemini-3.6-flash', 'gemini-3.5-flash'] },
+    // Verified 2026-09-04: all four contract checks pass, schema JSON included.
+    { id: 'gemini-3.6-flash', provider: 'google', label: '3.6 Flash', hint: 'Verified across streaming, tools and structured output', tools: true, jsonMode: 'native', thinking: true, efforts: ['low', 'medium', 'high'], priceIn: 0, priceOut: 0, dailyLimit: 20, fallback: ['gemini-3.5-flash'] },
+    { id: 'gemini-3.7-flash', provider: 'google', label: '3.7 Flash', hint: 'Strong coding and agentic work — low daily quota', tools: true, jsonMode: 'native', thinking: true, efforts: ['low', 'medium', 'high'], priceIn: 0, priceOut: 0, dailyLimit: 20, fallback: ['gemini-3.6-flash', 'gemini-3.5-flash'] },
     { id: 'gemini-3.1-pro-preview', provider: 'google', label: '3.1 Pro (preview)', hint: 'Deepest Gemini reasoning, slowest', tools: true, jsonMode: 'native', thinking: true, efforts: ['low', 'medium', 'high'], priceIn: 0, priceOut: 0, dailyLimit: 25, fallback: ['gemini-3.7-flash', 'gemini-3.5-flash'] },
 
     // ---- Anthropic (paid) ---------------------------------------------------

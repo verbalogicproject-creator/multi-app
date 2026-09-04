@@ -152,7 +152,13 @@ const opening = new Map();
 
 /** The GraphMemory for one build, or null. Never throws. */
 export async function forBuild(buildId) {
-    if (!buildId || !VALID_BUILD_ID.test(buildId)) return note('forBuild', new Error(`invalid buildId "${buildId}"`));
+    /* No build id is not a failure. A caller that never opened an episode — an API
+       consumer, a smoke script, the builder before memory is wired — simply has no
+       memory to reach, and logging that as a failure trains the reader to ignore the
+       log. A *malformed* id is different: something meant to be a build id and was
+       not, which is worth saying out loud. */
+    if (!buildId) return null;
+    if (!VALID_BUILD_ID.test(buildId)) return note('forBuild', new Error(`invalid buildId "${buildId}"`));
 
     const cached = open.get(buildId);
     if (cached) {
