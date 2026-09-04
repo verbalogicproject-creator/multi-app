@@ -117,8 +117,10 @@ export const createAnthropicProvider = ({ apiKey }) => {
             } else if (event.type === 'message_start') {
                 const usage = usageOf(event.message?.usage);
                 if (usage) yield { usage };
-            } else if (event.type === 'message_delta' && event.usage) {
-                yield { usage: { inputTokens: 0, outputTokens: event.usage.output_tokens ?? 0 } };
+            } else if (event.type === 'message_delta') {
+                /* `max_tokens` is Anthropic's word for the same cut. See google.js. */
+                if (event.delta?.stop_reason) yield { finishReason: event.delta.stop_reason };
+                if (event.usage) yield { usage: { inputTokens: 0, outputTokens: event.usage.output_tokens ?? 0 } };
             }
         }
     }

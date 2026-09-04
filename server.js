@@ -12,6 +12,7 @@ import { providerForModel, usableModels, isModelUsable } from './providers/index
 import { getModel, modelChain, pickModel } from './providers/catalog.js';
 import { toolsForRequest } from './providers/tools.js';
 import { PLAN_SCHEMA, DIRECTIONS_SCHEMA, GENERATE_SCHEMA, filesArrayToRecord } from './providers/schemas.js';
+import { salvageFiles, isTruncation } from './providers/salvage.js';
 import { buildSystemPrompt, builderPreamble } from './providers/prompts.js';
 import { memoryRouter } from './memory/routes.js';
 import * as memory from './memory/bridge.js';
@@ -669,6 +670,10 @@ ${Array.isArray(plan?.acceptanceCriteria) && plan.acceptanceCriteria.length > 0
             const provider = providerForModel(model);
             let acc = '';
             let usage = null;
+            let finishReason = null;
+            /* How far the path scanner has already looked. Without it the regex re-ran
+               over the entire accumulator on every chunk — O(n²) across ~200 KB. */
+            let scanned = 0;
             const seenFiles = new Set();
             for await (const event of provider.streamJson({
                 model,
@@ -679,10 +684,16 @@ ${Array.isArray(plan?.acceptanceCriteria) && plan.acceptanceCriteria.length > 0
                 maxOutputTokens: 65536,
             })) {
                 if (event.usage) usage = event.usage;
+                /* The reason the model stopped. Kept because "it ran out of room" and
+                   "it wrote nonsense" need opposite responses, and until now both
+                   arrived as the same sentence. */
+                if (event.finishReason) finishReason = event.finishReason;
                 if (event.text) {
                     if (acc === '') res.write(JSON.stringify({ phase: 'writing', model }) + '\n');
                     acc += event.text;
-                    FILE_PATH_RE.lastIndex = 0;
+                    /* Overlap by a path's worth so one split across a chunk boundary is
+                       still seen; `seenFiles` makes the re-match harmless. */
+                    FILE_PATH_RE.lastIndex = Math.max(0, scanned - 200);
                     let match;
                     while ((match = FILE_PATH_RE.exec(acc)) !== null) {
                         if (!seenFiles.has(match[1])) {
@@ -690,10 +701,11 @@ ${Array.isArray(plan?.acceptanceCriteria) && plan.acceptanceCriteria.length > 0
                             res.write(JSON.stringify({ file: match[1] }) + '\n');
                         }
                     }
+                    scanned = acc.length;
                     res.write(JSON.stringify({ progress: acc.length }) + '\n');
                 }
             }
-            return { text: acc, usage };
+            return { text: acc, usage, finishReason };
         }, (model) => { servingModel = model; });
 
         try {
@@ -720,8 +732,57 @@ ${Array.isArray(plan?.acceptanceCriteria) && plan.acceptanceCriteria.length > 0
                 },
             });
         } catch (parseError) {
-            console.error('Builder generate: model returned malformed JSON', parseError.message);
-            res.write(JSON.stringify({ error: 'The model returned malformed JSON. Please try again.' }) + '\n');
+            /**
+             * The response did not parse whole. That is two different situations
+             * wearing one error message, and they need opposite handling.
+             *
+             * If the model was cut off by its output budget, everything before the cut
+             * is intact — measured: eleven complete files thrown away because the
+             * twelfth was half-written. Keep them, and say plainly that this is an
+             * instrument failure rather than a verdict on the code, so the lesson
+             * ladder does not learn "you forgot index.html" from a model that was
+             * stopped before it got there.
+             */
+            const { files: recovered, salvaged } = salvageFiles(accumulated.text);
+            const truncated = isTruncation(accumulated.finishReason) || salvaged;
+
+            if (salvaged) {
+                const files = filesArrayToRecord(recovered);
+                console.warn(`Builder generate: truncated (${accumulated.finishReason ?? 'no finish reason'}) — salvaged ${recovered.length} file(s) from ${accumulated.text.length} bytes`);
+                res.write(JSON.stringify({
+                    files,
+                    /* The client must not treat this as a candidate to judge. */
+                    truncated: true,
+                    salvagedCount: recovered.length,
+                    finishReason: accumulated.finishReason ?? null,
+                }) + '\n');
+
+                memory.appendEventSafe({
+                    buildId,
+                    episodeId,
+                    kind: 'candidate.truncated',
+                    surface: 'builder.generate',
+                    ...attributionFor(servingModel),
+                    payload: {
+                        ...servedPayload(requestedModel, servingModel),
+                        fileCount: recovered.length,
+                        bytes: accumulated.text.length,
+                        finishReason: accumulated.finishReason ?? null,
+                        /* Recorded so the journal shows an instrument failure, not a
+                           quality failure. Nothing downstream may promote this. */
+                        inconclusive: true,
+                    },
+                });
+            } else {
+                console.error('Builder generate: unparseable response', parseError.message);
+                res.write(JSON.stringify({
+                    error: truncated
+                        ? 'The model ran out of output budget before finishing, and nothing complete could be recovered.'
+                        : 'The model returned malformed JSON. Please try again.',
+                    truncated,
+                    finishReason: accumulated.finishReason ?? null,
+                }) + '\n');
+            }
         }
         res.end();
 

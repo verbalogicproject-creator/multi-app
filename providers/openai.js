@@ -114,6 +114,10 @@ export const createOpenAIProvider = ({ apiKey, baseURL, id = 'openai' }) => {
                 case 'response.incomplete': {
                     const usage = usageOf(event.response?.usage);
                     if (usage) yield { usage };
+                    /* `max_output_tokens` is OpenAI's word for the same cut. The reason
+                       was being read and discarded here; now it travels. */
+                    const reason = event.response?.incomplete_details?.reason;
+                    if (reason) yield { finishReason: reason };
                     break;
                 }
                 default:

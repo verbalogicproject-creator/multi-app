@@ -946,7 +946,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         let servingModel = 'Gemini';      // for the user-facing evidence line
         let servedModelId: string | null = null;   // a real catalog id, or nothing
         try {
-            const files = await apiService.generateWebAppCode(builderState.plan, theme, selectedModel === 'auto' ? undefined : selectedModel, (event) => {
+            const generated = await apiService.generateWebAppCode(builderState.plan, theme, selectedModel === 'auto' ? undefined : selectedModel, (event) => {
                 if (event.model) { servingModel = event.model; servedModelId = event.model; }
                 setBuilderState(prev => {
                     let message = prev.status.message;
@@ -964,6 +964,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             }, { buildId, episodeId });
             bumpQuotaTick();
             // The model's word is not evidence: check the files before adopting them.
+            /**
+             * A truncated generation is an instrument failure, not a verdict.
+             *
+             * The files that arrived are real and worth keeping — but the validators are
+             * about to run over a project that is missing everything after the cut, and
+             * will report exactly what you would expect: unbalanced braces, a missing
+             * entry point. Every one of those is true of the text and false of the model.
+             * `inconclusive` is what stops the lesson ladder learning from it; measured on
+             * a real build, three lessons were proposed and all three were wrong.
+             */
+            const { files, truncated } = generated;
             const lexical = validateBuild(files, builderState.plan);
 
             /*
@@ -1010,6 +1021,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                     warnings: validation.issues.length - errors,
                     codes: issueCodes(validation),
                     fileCount,
+                    /* Read by `proposalsFor`, which refuses to propose from it. */
+                    ...(truncated ? { inconclusive: true } : {}),
                 },
                 evidenceKeys: ['validation'],
             }], [{
@@ -1033,8 +1046,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                     ...prev,
                     candidateFiles: files,
                     validation,
-                    evidence: withEvidence(prev.evidence, `${servingModel} wrote ${fileCount} files — validation failed with ${errors} error${errors === 1 ? '' : 's'}, held for review`),
-                    status: { ...prev.status, isLoading: false, message: 'Generation finished, but the result did not pass validation.' },
+                    /* A truncated run must not be described as a failed one. The
+                       errors below are real, but they describe a project that was cut
+                       short — not a model that wrote it badly, and saying otherwise
+                       teaches the reader the same false lesson the ladder is now
+                       guarded against. */
+                    evidence: withEvidence(prev.evidence, truncated
+                        ? `${servingModel} was cut off by its output budget — ${fileCount} complete file${fileCount === 1 ? '' : 's'} recovered, held for review`
+                        : `${servingModel} wrote ${fileCount} files — validation failed with ${errors} error${errors === 1 ? '' : 's'}, held for review`),
+                    status: { ...prev.status, isLoading: false, message: truncated
+                        ? `The model ran out of output budget. ${fileCount} complete file${fileCount === 1 ? '' : 's'} were recovered; the rest were never written.`
+                        : 'Generation finished, but the result did not pass validation.' },
                 }));
                 return;
             }

@@ -19,6 +19,12 @@ export type BuildIssueCode =
     | 'invalid-json'
     | 'placeholder-content'
     | 'unbalanced-braces'
+    /**
+     * A generated file does not parse. Produced server-side by `tsc`, and kept
+     * distinct from `type-error` because the two want opposite advice: this one is
+     * almost always a truncated file or a mis-escaped quote, not a typing mistake.
+     */
+    | 'syntax-error'
     | 'unresolved-import'
     | 'unresolved-html-ref'
     | 'plan-page-missing'

@@ -92,6 +92,10 @@ export const createNvidiaProvider = ({ apiKey }) => {
                 if (call.function?.arguments) entry.args += call.function.arguments;
                 pending.set(call.index, entry);
             }
+            /* 'length' is NVIDIA/OpenAI-compatible for the same cut. See google.js. */
+            if (choice?.finish_reason && choice.finish_reason !== 'tool_calls') {
+                yield { finishReason: choice.finish_reason };
+            }
             if (choice?.finish_reason === 'tool_calls') {
                 for (const entry of pending.values()) {
                     let args = {};
