@@ -164,6 +164,26 @@ ok('a complete project is missing nothing',
     missingFrom(promised, { ...got, 'src/pages/Home.tsx': 'export default () => null;' }).length === 0);
 
 ok('the manifest request forbids code', /no code/i.test(manifestInstruction()));
+ok('and asks for the export contract, not just paths', /exports/i.test(manifestInstruction()),
+    'paths agreeing was never the failure — names were');
+
+/* Measured on a real 16-file build: every path resolved and tsc still found 28 errors,
+   because `types/tide.ts` exported `CoastalStation` while `Header.tsx` imported
+   `Station`, and `App.tsx` default-imported a named export. The manifest carries the
+   contract now for exactly that reason. */
+const contract = normaliseManifest([
+    { path: 'src/types/tide.ts', purpose: 'types', exports: ['CoastalStation', 'TideEvent'] },
+    { path: 'src/components/Header.tsx', purpose: 'nav', exports: ['default Header'] },
+    { path: 'src/index.css', purpose: 'styles', exports: [] },
+]);
+ok('normalisation keeps the exports', contract[0].exports.length === 2, JSON.stringify(contract[0]));
+ok('and tolerates an entry that exports nothing', Array.isArray(contract[2].exports) && contract[2].exports.length === 0);
+
+const withContract = fileInstruction({ manifest: contract, path: 'src/components/Header.tsx', purpose: 'nav', written: [] });
+ok('every manifest line names what it exports', withContract.includes('exports: CoastalStation, TideEvent'),
+    'a file cannot import a name it was never told about');
+ok('a file that exports nothing says so', withContract.includes('exports nothing'));
+ok('and the request is held to the contract', /Honour the manifest's export contract/.test(withContract));
 
 const instruction = fileInstruction({
     manifest: [{ path: 'src/types.ts', purpose: 'shared types' }, { path: 'src/App.tsx', purpose: 'routes' }],
