@@ -103,8 +103,12 @@ const Step_Theme: React.FC = () => {
         }));
     };
 
+    /* No horizontal padding here: `WebAppBuilder` already applies `px-4 md:px-6` to
+       the scroll container every step renders inside. Applying it twice cost 64px of a
+       390px viewport before a single card was drawn, which is most of why the
+       art-direction previews had nowhere to be. */
     return (
-        <div className="w-full max-w-4xl mx-auto px-4 md:px-6 py-10 md:py-14">
+        <div className="w-full max-w-4xl mx-auto py-10 md:py-14">
             <h2 className="font-display text-2xl md:text-3xl tracking-[-0.03em] text-metal-100 text-center">
                 Choose a Visual Style
             </h2>
@@ -222,7 +226,7 @@ const Step_Theme: React.FC = () => {
                                         colors={direction.colors}
                                         typography={findTypography(direction.typography)}
                                         projectName={plan?.projectName}
-                                        className="w-full h-40 rounded-md bg-white pointer-events-none overflow-hidden"
+                                        className="w-full h-44 rounded-md bg-white pointer-events-none overflow-hidden"
                                     />
                                     <p className="mt-3 text-sm font-medium text-metal-100">{direction.name}</p>
                                     <p className="text-xs text-metal-300 leading-snug mt-1 flex-1">{direction.rationale}</p>
