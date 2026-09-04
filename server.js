@@ -16,6 +16,7 @@ import { buildSystemPrompt, builderPreamble } from './providers/prompts.js';
 import { memoryRouter } from './memory/routes.js';
 import * as memory from './memory/bridge.js';
 import typecheckRouter from './typecheck/routes.js';
+import previewRouter from './preview/routes.js';
 import { clean as cleanTypecheckScratch, killAll as killTypecheckRuns } from './typecheck/runner.js';
 
 const app = express();
@@ -38,6 +39,7 @@ app.use('/api/memory', memoryRouter);
 // The typechecker, mounted for the same reason and with the same shape. Both must
 // sit ahead of the `app.get('*')` SPA fallback at the bottom of this file.
 app.use('/api/typecheck', typecheckRouter);
+app.use('/api/preview', previewRouter);
 
 // Initialize Google GenAI
 const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
