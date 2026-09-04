@@ -20,7 +20,8 @@
     "check:css": "node scripts/check-css.mjs",
     "audit:ui": "npm run build && node scripts/audit-ui.mjs",
     "shoot:ui": "npm run build && node scripts/audit-ui.mjs --shots /tmp/ui-shots",
-    "check:editor": "npm run build && node scripts/check-editor.mjs"
+    "check:editor": "npm run build && node scripts/check-editor.mjs",
+    "check:preview": "node scripts/check-preview.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.122.0",
