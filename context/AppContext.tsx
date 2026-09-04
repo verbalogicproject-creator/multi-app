@@ -8,6 +8,7 @@ import * as buildStorage from '../services/buildStorage';
 import type { SavedBuild } from '../services/buildStorage';
 import * as memoryService from '../services/memoryService';
 import { runTypecheck } from '../services/typecheckService';
+import { previewVerdict } from '../services/previewVerdict';
 import type { EpisodeOutcome, MemoryEvent, MemoryEvidence } from '../services/memoryService';
 import { DEFAULT_PALETTE, sanitizeColors, type ArtDirection, type ThemeColors } from '../utils/palettes';
 import { validateBuild, type BuildValidation } from '../utils/validateBuild';
@@ -1005,13 +1006,37 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
              */
             setBuilderState(prev => ({ ...prev, status: { ...prev.status, message: 'Checking types…' } }));
             const typecheck = await runTypecheck(buildId ?? 'build', files, 0);
-            const validation: BuildValidation = typecheck?.completed
+            const typed: BuildValidation = typecheck?.completed
                 ? {
                     ok: lexical.ok && typecheck.ok,
                     issues: [...lexical.issues, ...typecheck.issues],
                     checked: lexical.checked,
                 }
                 : lexical;
+
+            /*
+             * And last, the only judge that does not read the code.
+             *
+             * Everything above can pass over an app that mounts a blank page: braces
+             * balance, types agree, modules resolve, and nothing renders. The preview
+             * bundles the project and runs it in a sandboxed frame, so "it threw" and
+             * "it drew nothing" become verdicts instead of something a person notices
+             * later — the first evidence in this pipeline that comes from behaviour
+             * rather than from text, and impossible to collect before the preview
+             * could execute a build at all.
+             *
+             * Same contract as the typechecker: `null` is no opinion, never a pass.
+             * A judge that did not run must not be able to certify or condemn.
+             */
+            setBuilderState(prev => ({ ...prev, status: { ...prev.status, message: 'Running it…' } }));
+            const behaviour = await previewVerdict(buildId ?? 'build', files);
+            const validation: BuildValidation = behaviour
+                ? {
+                    ok: typed.ok && behaviour.length === 0,
+                    issues: [...typed.issues, ...behaviour],
+                    checked: typed.checked,
+                }
+                : typed;
 
             const fileCount = Object.keys(files).length;
             const errors = validation.issues.filter(i => i.severity === 'error').length;

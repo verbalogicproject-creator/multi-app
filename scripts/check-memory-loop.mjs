@@ -156,6 +156,53 @@ const tsState = await bridge.listBuildState(tsBuild);
 const tsLesson = tsState.lessons.find(l => l.id === tsProposed[0].lessonId);
 check('a passing attempt qualifies it', tsLesson?.status === 'qualified', tsLesson?.status);
 
+// ---- the ladder learns from behaviour, not only from text ---------------------
+// Every earlier judge reads the code. These two come from running it, and were
+// impossible to observe before the preview could execute a build at all: an app that
+// type-checks, bundles, and mounts a blank page passed every check there was.
+const behaveBuild = 'build-behaviour';
+const behaveEpi = await bridge.openEpisodeSafe({ buildId: behaveBuild, objective: 'generate Tide Clock' });
+const behaveEv = await bridge.recordEvidenceSafe({
+    buildId: behaveBuild, kind: 'validation', ref: `build://${behaveBuild}/e1/v`,
+    summary: 'built and ran; mounted nothing',
+});
+const behaveVerdict = { ok: false, checked: 12, errors: 1, warnings: 0, codes: { 'renders-nothing': 1 } };
+const behaveProposals = proposals.proposalsFor(behaveVerdict);
+check('an app that renders nothing proposes a lesson', behaveProposals.length === 1, JSON.stringify(behaveProposals.map(p => p.code)));
+check('and it is about mounting, not about types',
+    /mount|createRoot|route/i.test(behaveProposals[0]?.recommendation ?? ''),
+    behaveProposals[0]?.recommendation?.slice(0, 60));
+
+const threwProposals = proposals.proposalsFor({ ok: false, checked: 12, errors: 1, warnings: 0, codes: { 'runtime-error': 1 } });
+check('an app that threw proposes a different lesson', threwProposals[0]?.code === 'runtime-error');
+check('and it is about guarding values a render can meet',
+    /guard|absent|initial value|undefined/i.test(threwProposals[0]?.recommendation ?? ''),
+    threwProposals[0]?.recommendation?.slice(0, 60));
+
+await bridge.appendEventSafe({
+    buildId: behaveBuild, episodeId: behaveEpi, kind: 'verification.completed', domain: 'build',
+    surface: 'builder.generate', payload: behaveVerdict, evidenceIds: [behaveEv.id],
+});
+const behaveProposed = await bridge.proposeLessonsSafe({
+    buildId: behaveBuild, episodeId: behaveEpi, evidenceIds: [behaveEv.id], proposals: behaveProposals,
+});
+await bridge.closeEpisodeSafe({ buildId: behaveBuild, episodeId: behaveEpi, outcome: 'failed' });
+
+const behaveEpi2 = await bridge.openEpisodeSafe({ buildId: behaveBuild, objective: 'generate Tide Clock — again' });
+const behaveTrial = await bridge.trialBlock({ buildId: behaveBuild, episodeId: behaveEpi2 });
+check('the next attempt is told about it', /mount|createRoot/i.test(behaveTrial), behaveTrial.slice(0, 70));
+
+const behaveEv2 = await bridge.recordEvidenceSafe({ buildId: behaveBuild, kind: 'validation', ref: `build://${behaveBuild}/e2/v`, summary: 'renders' });
+await bridge.appendEventSafe({
+    buildId: behaveBuild, episodeId: behaveEpi2, kind: 'verification.completed', domain: 'build',
+    payload: { ok: true, checked: 12, errors: 0, warnings: 0, codes: {} }, evidenceIds: [behaveEv2.id],
+});
+await bridge.closeEpisodeSafe({ buildId: behaveBuild, episodeId: behaveEpi2, outcome: 'verified' });
+await bridge.recordReuseSafe({ buildId: behaveBuild, episodeId: behaveEpi2 });
+const behaveState = await bridge.listBuildState(behaveBuild);
+const behaveLesson = behaveState.lessons.find(l => l.id === behaveProposed[0]?.lessonId);
+check('and an app that renders promotes it', behaveLesson?.status === 'qualified', behaveLesson?.status);
+
 // ---- independence: the property the whole ladder rests on ---------------------
 // A lesson may only be promoted by an episode that did NOT propose it. Without
 // that, a single failing-then-passing attempt would certify its own guesses, and
