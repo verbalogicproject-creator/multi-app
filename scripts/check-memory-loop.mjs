@@ -156,6 +156,35 @@ const tsState = await bridge.listBuildState(tsBuild);
 const tsLesson = tsState.lessons.find(l => l.id === tsProposed[0].lessonId);
 check('a passing attempt qualifies it', tsLesson?.status === 'qualified', tsLesson?.status);
 
+// ---- independence: the property the whole ladder rests on ---------------------
+// A lesson may only be promoted by an episode that did NOT propose it. Without
+// that, a single failing-then-passing attempt would certify its own guesses, and
+// "qualified" would mean nothing more than "it was tried once".
+//
+// This was verified by hand and protected by nothing, which is the same as not
+// being true: the engine enforces it today, and a change to the engine or to
+// `recordReuseSafe` would retire the guarantee in silence.
+const selfBuild = 'build-self-qualify';
+const selfEpi = await bridge.openEpisodeSafe({ buildId: selfBuild, objective: 'one episode, fail then pass' });
+const selfEv1 = await bridge.recordEvidenceSafe({ buildId: selfBuild, kind: 'validation', ref: `build://${selfBuild}/e1/v`, summary: 'failed' });
+const selfBad = { ok: false, checked: 3, errors: 1, warnings: 0, codes: { 'unresolved-import': 1 } };
+await bridge.appendEventSafe({ buildId: selfBuild, episodeId: selfEpi, kind: 'verification.completed', domain: 'build', payload: selfBad, evidenceIds: [selfEv1.id] });
+const selfProposed = await bridge.proposeLessonsSafe({
+    buildId: selfBuild, episodeId: selfEpi, evidenceIds: [selfEv1.id], proposals: proposals.proposalsFor(selfBad),
+});
+check('an episode proposes a lesson', selfProposed.length === 1);
+
+// The same episode now succeeds and closes verified — the strongest case it has.
+const selfEv2 = await bridge.recordEvidenceSafe({ buildId: selfBuild, kind: 'validation', ref: `build://${selfBuild}/e1/v2`, summary: 'passed' });
+await bridge.appendEventSafe({ buildId: selfBuild, episodeId: selfEpi, kind: 'verification.completed', domain: 'build', payload: { ok: true, checked: 3, errors: 0, warnings: 0, codes: {} }, evidenceIds: [selfEv2.id] });
+await bridge.closeEpisodeSafe({ buildId: selfBuild, episodeId: selfEpi, outcome: 'verified' });
+const selfQualified = await bridge.recordReuseSafe({ buildId: selfBuild, episodeId: selfEpi });
+
+const selfState = await bridge.listBuildState(selfBuild);
+const selfLesson = selfState.lessons.find(l => l.id === selfProposed[0]?.lessonId);
+check('and cannot promote it by passing itself', selfQualified.length === 0, JSON.stringify(selfQualified));
+check('so it is still only proposed', selfLesson?.status === 'proposed', selfLesson?.status);
+
 bridge.closeAll();
 rmSync(scratch, { recursive: true, force: true });
 console.log(failures === 0 ? '\nTHE LOOP CLOSES' : `\n${failures} CHECK(S) FAILED`);
