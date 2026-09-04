@@ -9,7 +9,7 @@ const solidButton = `${button} bg-metal-700 text-metal-100 shadow-[inset_0_1px_0
 const quietButton = `${button} bg-transparent text-metal-300 hairline md:hover:text-metal-100`;
 
 const Step_Generate: React.FC = () => {
-    const { builderState, promoteCandidate, discardCandidate, generateWebAppCode } = useAppContext();
+    const { builderState, promoteCandidate, discardCandidate, generateWebAppCode, globalError, setBuilderState } = useAppContext();
     const { status, candidateFiles, validation } = builderState;
 
     const fileList = status.log;
@@ -62,6 +62,61 @@ const Step_Generate: React.FC = () => {
                 </div>
                 <p className="mt-4 text-center text-xs text-metal-300">
                     “Generate again” costs another model request. “Keep it anyway” opens the export screen so you can inspect or fix the files.
+                </p>
+            </div>
+        );
+    }
+
+    /**
+     * The attempt ended and produced nothing.
+     *
+     * There was no branch for this. The render below mounts a spinner
+     * unconditionally and pulses "writing…", so a failed generation showed a
+     * stopped build as a running one — the error banner, a spinning indicator and a
+     * list of filenames that no longer existed, all at once. Observed on a real
+     * device before it was described here.
+     *
+     * `currentStep: 4` and `isLoading: true` are set in the same update, so reaching
+     * this branch means the run is genuinely over rather than not yet begun.
+     */
+    if (!status.isLoading && !candidateFiles) {
+        return (
+            <div className="w-full max-w-2xl mx-auto text-center">
+                <h2 className="font-display text-xl md:text-2xl tracking-[-0.02em] text-metal-100">
+                    {/* A stopped build is the definition of something that needs you. */}
+                    <span aria-hidden className="inline-block w-1.5 h-1.5 rounded-full bg-accent align-middle mr-2" />
+                    Generation stopped before it finished
+                </h2>
+                <p className="mt-3 text-sm text-metal-300">
+                    {globalError || status.message || 'The model did not return a usable result.'}
+                </p>
+
+                {fileList.length > 0 && (
+                    <div className="mt-6 w-full max-w-md mx-auto text-left bg-raised rounded-card hairline
+                                    p-4 max-h-48 overflow-y-auto meta text-xs">
+                        {/* Named as what arrived, not as progress. The same list under a
+                            spinner is what made a finished failure look like work in
+                            flight. */}
+                        <p className="text-metal-300 mb-2">Reached before it stopped:</p>
+                        {fileList.map((file, index) => (
+                            <p key={index} className="text-metal-200">
+                                <span aria-hidden className="text-metal-400">✓</span> {file}
+                            </p>
+                        ))}
+                    </div>
+                )}
+
+                <div className="mt-8 flex flex-col sm:flex-row justify-center gap-3">
+                    <button onClick={generateWebAppCode} className={solidButton}>Generate again</button>
+                    <button
+                        onClick={() => setBuilderState(prev => ({ ...prev, currentStep: 3 }))}
+                        className={quietButton}
+                    >
+                        Back to style
+                    </button>
+                </div>
+                <p className="mt-4 text-xs text-metal-400">
+                    Nothing has overwritten your saved builds.
                 </p>
             </div>
         );
