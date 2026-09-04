@@ -167,8 +167,9 @@ export const generateWebAppPlan = async (idea: string, model?: string, refine?: 
 export interface BuilderProgressEvent {
     progress?: number;   // total characters generated so far
     file?: string;       // a file path Gemini just started writing
-    phase?: 'thinking' | 'writing';
+    phase?: 'thinking' | 'writing' | 'planning';
     model?: string;      // which model is serving this attempt (fallback-aware)
+    manifest?: string[]; // the file list, declared before any file is written
 }
 
 export const generateWebAppCode = async (plan: any, theme: any, model?: string, onProgress?: (event: BuilderProgressEvent) => void, memory?: MemoryRef): Promise<GenerateResult> => {
@@ -187,6 +188,8 @@ export const generateWebAppCode = async (plan: any, theme: any, model?: string, 
     let truncated = false;
     let salvagedCount = 0;
     let finishReason: string | null = null;
+    let manifest: string[] = [];
+    let missing: string[] = [];
 
     const handleLine = (line: string) => {
         if (!line.trim()) return;
@@ -199,7 +202,14 @@ export const generateWebAppCode = async (plan: any, theme: any, model?: string, 
             truncated = event.truncated === true;
             salvagedCount = event.salvagedCount ?? 0;
             finishReason = event.finishReason ?? null;
-        } else if (onProgress) onProgress(event as BuilderProgressEvent);
+            manifest = Array.isArray(event.manifest) ? event.manifest : manifest;
+            missing = Array.isArray(event.missing) ? event.missing : [];
+        } else {
+            /* The manifest arrives on its own, before any file, so the UI can show
+               the whole list up front instead of a log that grows from nothing. */
+            if (Array.isArray(event.manifest)) manifest = event.manifest;
+            if (onProgress) onProgress(event as BuilderProgressEvent);
+        }
     };
 
     while (true) {
@@ -213,5 +223,5 @@ export const generateWebAppCode = async (plan: any, theme: any, model?: string, 
     if (tail.trim()) handleLine(tail);
 
     if (!files) throw new Error('Generation stream ended without a result. Please try again.');
-    return { files, truncated, salvagedCount, finishReason };
+    return { files, truncated, salvagedCount, finishReason, manifest, missing };
 };

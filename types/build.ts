@@ -15,6 +15,16 @@ export interface GenerateResult {
     truncated: boolean;
     /** How many whole files were recovered from a truncated response. */
     salvagedCount: number;
+    /**
+     * Every file the model said the project needed, declared before any was written.
+     * Empty when the single-shot fallback path served the request.
+     */
+    manifest: string[];
+    /**
+     * Manifest entries with no file. A set difference, not a guess — which is what
+     * makes a stopped build resumable rather than lost.
+     */
+    missing: string[];
     /** The provider's own word for why it stopped — `MAX_TOKENS`, `length`, … */
     finishReason: string | null;
 }

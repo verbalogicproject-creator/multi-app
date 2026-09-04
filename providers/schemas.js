@@ -49,6 +49,31 @@ export const DIRECTIONS_SCHEMA = obj({
     }), 'Exactly three genuinely different art directions.'),
 });
 
+/**
+ * The manifest: what the project is made of, before any of it is written.
+ *
+ * Asking for this separately is what removes the output ceiling. A whole app in one
+ * response reliably exceeds the budget — measured at ~54k output tokens against a
+ * 65,536 cap, shared with thinking — but a list of paths and one-line purposes is a
+ * couple of thousand tokens whatever the app's size, and each file afterwards is
+ * bounded by the size of that one file.
+ *
+ * It also makes a build resumable: the manifest says what should exist, so what is
+ * missing is a set difference rather than a guess.
+ */
+export const MANIFEST_SCHEMA = obj({
+    files: arr(obj({
+        path: str("Full file path relative to the project root, e.g. 'src/pages/HomePage.tsx'."),
+        purpose: str('One line: what this file contains and what it exports. No code.'),
+    }), 'Every file the project needs, including config, entry points, pages and components.'),
+});
+
+/** One file, written on its own. The unit that made the ceiling unreachable. */
+export const FILE_SCHEMA = obj({
+    path: str('The path this file was asked for, repeated back unchanged.'),
+    content: str('The complete file contents.'),
+});
+
 // A Record<path, content> map cannot be expressed in a strict schema (arbitrary keys),
 // so generation returns an array and the server converts it back to the map the
 // client protocol already expects.

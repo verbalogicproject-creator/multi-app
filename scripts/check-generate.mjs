@@ -25,6 +25,7 @@
 import { salvageFiles, isTruncation } from '../providers/salvage.js';
 import { toBuildIssues } from '../typecheck/parse.js';
 import { proposalsFor, unmappedCodes, PROPOSAL_TABLE, NOT_A_LESSON } from '../memory/proposals.js';
+import { normaliseManifest, manifestGaps, missingFrom, manifestInstruction, fileInstruction, generateFromManifest } from '../providers/generate.js';
 
 let failures = 0;
 const ok = (label, cond, detail = '') => {
@@ -122,6 +123,134 @@ const allCodes = Object.fromEntries(
 );
 ok('no code is unmapped', unmappedCodes(allCodes).length === 0, JSON.stringify(unmappedCodes(allCodes)));
 ok('a passing verdict still teaches nothing', proposalsFor({ ok: true, codes: {} }).length === 0);
+
+// ── 6. The manifest is what puts the ceiling out of reach ─────────────────────
+console.log('\n6. the manifest makes the build bounded and resumable');
+
+const raw = [
+    { path: './index.html', purpose: 'entry' },
+    { path: 'index.html', purpose: 'duplicate' },
+    { path: 'src/main.tsx', purpose: 'mount' },
+    { path: '', purpose: 'nameless' },
+    { path: 'src/App.tsx', purpose: 'routes' },
+    { path: 'package.json', purpose: 'deps' },
+];
+const clean = normaliseManifest(raw);
+ok('a leading ./ is not a different file', clean.filter(f => f.path === 'index.html').length === 1,
+    clean.map(f => f.path).join(', '));
+ok('entries with no path are dropped', !clean.some(f => f.path === ''));
+ok('order is preserved', clean[0].path === 'index.html' && clean[1].path === 'src/main.tsx');
+ok('a runaway manifest is capped', normaliseManifest(
+    Array.from({ length: 500 }, (_, i) => ({ path: `src/f${i}.ts`, purpose: 'x' })),
+).length === 60, 'spending 500 requests to discover a runaway is the wrong time to find out');
+
+/* Checked before any file is generated: N requests against a manifest that was never
+   going to produce a runnable app is the expensive way to learn it cannot. */
+ok('a manifest that cannot run is rejected up front',
+    manifestGaps([{ path: 'src/App.tsx' }, { path: 'src/index.css' }]).includes('index.html'),
+    JSON.stringify(manifestGaps([{ path: 'src/App.tsx' }])));
+ok('and a complete one passes', manifestGaps(clean).length === 0, JSON.stringify(manifestGaps(clean)));
+ok('src/main.jsx satisfies the entry requirement too',
+    manifestGaps([{ path: 'index.html' }, { path: 'package.json' }, { path: 'src/main.jsx' }, { path: 'src/App.tsx' }]).length === 0);
+
+/* The set difference is the resume list. Under the single-shot shape a stopped build
+   was simply lost; here what is absent is computable. */
+const promised = [{ path: 'index.html' }, { path: 'src/App.tsx' }, { path: 'src/pages/Home.tsx' }];
+const got = { 'index.html': '<!doctype html>', 'src/App.tsx': 'export default () => null;', 'src/pages/Home.tsx': '   ' };
+ok('a manifest entry with no file is missing', missingFrom(promised, got).includes('src/pages/Home.tsx'),
+    JSON.stringify(missingFrom(promised, got)));
+ok('and a whitespace-only file counts as missing too', missingFrom(promised, got).length === 1);
+ok('a complete project is missing nothing',
+    missingFrom(promised, { ...got, 'src/pages/Home.tsx': 'export default () => null;' }).length === 0);
+
+ok('the manifest request forbids code', /no code/i.test(manifestInstruction()));
+
+const instruction = fileInstruction({
+    manifest: [{ path: 'src/types.ts', purpose: 'shared types' }, { path: 'src/App.tsx', purpose: 'routes' }],
+    path: 'src/App.tsx', purpose: 'routes', written: ['src/types.ts'],
+});
+/* Files are written by separate requests that never see each other's output, so the
+   manifest travelling with each one is the only thing keeping imports agreeing. */
+ok('each file request carries the whole manifest', instruction.includes('src/types.ts') && instruction.includes('shared types'));
+ok('and names exactly the file it wants', instruction.includes('Write exactly one file: `src/App.tsx`'));
+ok('and says what already exists to import from', /Already written[^]*src\/types\.ts/.test(instruction));
+
+// ── 7. The whole run, driven by a stub ───────────────────────────────────────
+// The branches that matter most here are the ones that occur least: a manifest that
+// cannot produce a runnable app, and a single file cut short. Neither can be reached
+// on demand with a real model, which is why the orchestration takes its dependencies
+// as arguments — so this can reach both without one.
+console.log('\n7. the orchestration, without a model');
+
+const PATH_RE = /Write exactly one file: `([^`]+)`/;
+
+const stub = ({ manifest, content = () => 'export const x = 1;', truncate = [] }) => {
+    const calls = { manifest: 0, files: [] };
+    const provider = {
+        async generateJson() { calls.manifest++; return { object: { files: manifest } }; },
+        async *streamJson({ prompt }) {
+            const path = PATH_RE.exec(prompt)?.[1];
+            calls.files.push(path);
+            if (truncate.includes(path)) {
+                /* Exactly what a budget overrun looks like: valid JSON, cut mid-string. */
+                yield { text: `{"path":"${path}","content":"export const half = ` };
+                yield { finishReason: 'MAX_TOKENS' };
+                return;
+            }
+            yield { text: JSON.stringify({ path, content: content(path) }) };
+        },
+    };
+    return { calls, provider };
+};
+
+const drive = async ({ manifest, truncate = [], content }) => {
+    const { calls, provider } = stub({ manifest, truncate, content });
+    const emitted = [];
+    const result = await generateFromManifest({
+        models: ['stub-model'],
+        run: async (models, attempt, onServed) => { const r = await attempt(models[0]); onServed?.(models[0]); return r; },
+        getProvider: () => provider,
+        systemFor: () => 'system',
+        basePrompt: 'PLAN',
+        emit: (e) => emitted.push(e),
+        schemas: { manifest: {}, file: {} },
+        concurrency: 2,
+    });
+    return { result, calls, emitted };
+};
+
+const GOOD_MANIFEST = [
+    { path: 'index.html', purpose: 'entry' },
+    { path: 'package.json', purpose: 'deps' },
+    { path: 'src/main.tsx', purpose: 'mount' },
+    { path: 'src/App.tsx', purpose: 'routes' },
+];
+
+const happy = await drive({ manifest: GOOD_MANIFEST });
+ok('every manifest entry is requested once',
+    happy.calls.files.length === 4 && new Set(happy.calls.files).size === 4, happy.calls.files.join(', '));
+ok('and every one lands in the result', Object.keys(happy.result.record).length === 4,
+    Object.keys(happy.result.record).join(', '));
+ok('so nothing is missing', happy.result.missing.length === 0, JSON.stringify(happy.result.missing));
+ok('the manifest is announced before any file is written',
+    happy.emitted.findIndex(e => e.manifest) < happy.emitted.findIndex(e => e.file),
+    JSON.stringify(happy.emitted.slice(0, 3)));
+
+const cutRun = await drive({ manifest: GOOD_MANIFEST, truncate: ['src/App.tsx'] });
+ok('one truncated file does not take the others with it',
+    Object.keys(cutRun.result.record).length === 3, Object.keys(cutRun.result.record).join(', '));
+ok('the cut file is named as truncated', cutRun.result.truncatedFiles.includes('src/App.tsx'),
+    JSON.stringify(cutRun.result.truncatedFiles));
+ok('and it is missing rather than half-written',
+    cutRun.result.missing.includes('src/App.tsx') && cutRun.result.record['src/App.tsx'] === undefined,
+    'a file cut mid-string must never be stored as content');
+
+/* The expensive mistake this guards: N file requests against a manifest that could
+   never produce a runnable app. Assert the requests were not made. */
+const doomed = await drive({ manifest: [{ path: 'src/App.tsx', purpose: 'routes' }, { path: 'src/index.css', purpose: 'style' }, { path: 'README.md', purpose: 'docs' }] });
+ok('a manifest with no entry point is refused', Boolean(doomed.result.unusable), JSON.stringify(doomed.result).slice(0, 90));
+ok('and not one file request is spent on it', doomed.calls.files.length === 0,
+    `${doomed.calls.files.length} request(s) were made against a manifest that cannot run`);
 
 console.log(failures === 0 ? '\ngenerate ok' : `\n${failures} CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);
