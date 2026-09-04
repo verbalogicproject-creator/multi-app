@@ -3,6 +3,7 @@ import { Project, ProjectFile, CustomAiStyle, Persona, Agent, AiResponseStyle } 
 import * as storageService from '../services/geminiService';
 import * as apiService from '../services/apiService';
 import type { CatalogModel } from '../services/apiService';
+import type { MobileSurface } from '../types/ui';
 import * as buildStorage from '../services/buildStorage';
 import type { SavedBuild } from '../services/buildStorage';
 import * as memoryService from '../services/memoryService';
@@ -203,6 +204,13 @@ interface AppContextType {
     analyzingProjects: Set<string>;
     activeTab: AppTab;
     setActiveTab: React.Dispatch<React.SetStateAction<AppTab>>;
+    /**
+     * Which destination the phone is showing. It lives here, not in `App`, because
+     * things that are not the tab bar need to move you — the builder's hand-off has
+     * to be able to land you in the IDE it just filled.
+     */
+    surface: MobileSurface;
+    setSurface: React.Dispatch<React.SetStateAction<MobileSurface>>;
     handleCreateProject: (name: string) => Promise<Project>;
     handleDeleteProject: (id: string) => Promise<void>;
     handleToggleProjectSelection: (id: string) => void;
@@ -319,6 +327,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const [activePersona, setActivePersona] = useState<Persona>(defaultPersona);
     const [agents, setAgents] = useState<Agent[]>([]);
     const [activeAgentId, setActiveAgentId] = useState<string | null>(null);
+    const [surface, setSurface] = useState<MobileSurface>('main');
 
     const [globalError, setGlobalError] = useState<string | null>(null);
     // Bumped after every served model request so quota badges refetch.
@@ -1052,8 +1061,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         }
         resetWebAppBuild();
         setActiveTab('projects');
-        handleSelectAgent(null); // Ensure no agent is active
-        handleToggleProjectSelection(newProject.id); // Select the new project
+        /* Order matters: deselecting an agent clears the project selection, so the
+           new project has to be selected *after*, not before. */
+        handleSelectAgent(null);
+        handleToggleProjectSelection(newProject.id);
+        /* And then actually open it. This button is named "Open in IDE"; until now
+           it created the project, wrote every file, and left you looking at a list.
+           On a phone that is the difference between the feature existing and the
+           feature being reachable — from `md:` up the IDE is already on screen. */
+        setSurface('code');
     };
 
     const exportGeneratedProject = async () => {
@@ -1134,6 +1150,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         projects, selectedProjectIds, filesByProject, activeProjectView, editingProject, isProjectPanelCollapsed, analyzingProjects,
         ensureProjectFiles,
         activeTab, setActiveTab,
+        surface, setSurface,
         handleCreateProject, handleDeleteProject, handleToggleProjectSelection, handleViewProjectFiles, handleAddFile, handleDeleteFile,
         aiCreateFile, aiUpdateFile, aiDeleteFile,
         handleSaveFileContent, handleOpenProjectSettings, handleCloseProjectSettings, handleRenameProject, handleToggleProjectPanel,
