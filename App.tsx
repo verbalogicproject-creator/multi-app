@@ -6,7 +6,7 @@ import IdeView from './components/IdeView';
 import WebAppBuilder from './components/builders/WebAppBuilder';
 import ProjectSettingsModal from './components/ProjectSettingsModal';
 import MemoryPanel from './components/memory/MemoryPanel';
-import MobileTabBar, { type MobileSurface } from './components/MobileTabBar';
+import MobileTabBar from './components/MobileTabBar';
 
 /**
  * The shell, and the one place the phone and the desktop part company.
@@ -22,20 +22,39 @@ import MobileTabBar, { type MobileSurface } from './components/MobileTabBar';
  */
 const AppContent: React.FC = () => {
     const {
-        globalError, setGlobalError, activeAgentId, agents, activeTab,
+        globalError, setGlobalError, activeAgentId, agents, activeTab, selectedProjectIds,
+        surface, setSurface,
         editingProject, filesByProject, handleCloseProjectSettings, handleRenameProject, handleAddFile, handleDeleteFile,
     } = useAppContext();
     const activeAgent = agents.find(a => a.id === activeAgentId);
 
-    const [surface, setSurface] = useState<MobileSurface>('main');
+    /**
+     * The project the IDE is editing.
+     *
+     * It used to be `activeAgent.projectId`, full stop — which made the editor
+     * unreachable by the one path built to reach it. "Open in IDE" creates the
+     * project, writes every file, and deselects the agent; with the IDE gated on an
+     * agent, the button whose only job was to open the editor guaranteed it was
+     * closed, and the Code tab stayed grey.
+     *
+     * `IdeView` only ever needed a `projectId`. An agent names one, and otherwise it
+     * is the project you last picked in the rail — a `Set` keeps insertion order, so
+     * "last" is the one you most recently ticked.
+     *
+     * Worth knowing before the layout pass: that checkbox is doing two jobs at once,
+     * choosing chat's context *and* the IDE's target. Making it work is not the same
+     * as making it right.
+     */
+    const ideProjectId = activeAgent?.projectId ?? [...selectedProjectIds].at(-1) ?? null;
+
     const [memoryOpen, setMemoryOpen] = useState(false);
     const [memoryNeedsYou, setMemoryNeedsYou] = useState(false);
 
-    // Code follows the active agent. Deselecting one while looking at it would
+    // Code follows a project. Losing the last one while looking at it would
     // otherwise leave the phone on a destination that no longer has contents.
     useEffect(() => {
-        if (surface === 'code' && !activeAgent) setSurface('main');
-    }, [surface, activeAgent]);
+        if (surface === 'code' && !ideProjectId) setSurface('main');
+    }, [surface, ideProjectId, setSurface]);
 
     const handleNeedsYou = useCallback((needsYou: boolean) => setMemoryNeedsYou(needsYou), []);
 
@@ -58,10 +77,10 @@ const AppContent: React.FC = () => {
             </div>
 
             <div className={`${stageVisibility} flex-1 min-w-0`}>
-                {activeAgent ? (
+                {ideProjectId ? (
                     <>
                         <div className={`min-w-0 ${surface === 'code' ? 'flex flex-1' : 'hidden'} md:flex md:flex-initial md:w-2/3`}>
-                            <IdeView projectId={activeAgent.projectId} />
+                            <IdeView projectId={ideProjectId} />
                         </div>
                         <div className={`min-w-0 ${surface === 'main' ? 'flex flex-1' : 'hidden'} md:flex md:flex-initial md:w-1/3
                                          md:shadow-[inset_1px_0_0_rgb(255_255_255/0.08)]`}>
@@ -86,8 +105,8 @@ const AppContent: React.FC = () => {
                 surface={surface}
                 onSurfaceChange={setSurface}
                 mainLabel={isBuilder ? 'Build' : 'Chat'}
-                codeEnabled={!!activeAgent}
-                codeHint="Select an agent to open its code."
+                codeEnabled={!!ideProjectId}
+                codeHint="Select a project or an agent to open its code."
                 memoryOpen={memoryOpen}
                 onMemoryToggle={() => setMemoryOpen(o => !o)}
                 memoryNeedsYou={memoryNeedsYou}

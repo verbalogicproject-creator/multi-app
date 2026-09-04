@@ -17,3 +17,9 @@ public/memory-preview.html
 # Typecheck/preview scratch. Inside the repo on purpose: tsc's upward node_modules
 # walk finds the real @types from here, which /tmp cannot reach.
 .preview-work/
+
+# Auth integration packs. These carry a live OAuth client secret in plaintext and
+# this repo is public — the values belong in .env (ignored above) and nowhere else.
+# Never committed; keep it that way.
+multi-app-auth-integration.md
+multi-app-how-to-integrate-auth.md

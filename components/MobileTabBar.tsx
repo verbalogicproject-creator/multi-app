@@ -1,4 +1,5 @@
 import React from 'react';
+import type { MobileSurface } from '../types/ui';
 
 /**
  * The phone's navigation, and the phone's only.
@@ -14,7 +15,7 @@ import React from 'react';
  * bar is the Memory dot, and it means exactly what it means everywhere else.
  */
 
-export type MobileSurface = 'projects' | 'main' | 'code';
+export type { MobileSurface } from '../types/ui';
 
 interface MobileTabBarProps {
     surface: MobileSurface;

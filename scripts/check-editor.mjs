@@ -83,6 +83,23 @@ const run = async () => {
     const { context, page } = await openPage(browser, DESKTOP, URL);
 
     try {
+        // ── 0. The IDE belongs to a project, not to an agent ─────────────────
+        // Regression guard for the bug that made "Open in IDE" unable to open the
+        // IDE. The editor was gated on an active agent; the hand-off that fills a
+        // project ends by deselecting the agent, so the one button built to open
+        // the editor guaranteed it stayed shut and the Code tab stayed grey.
+        //
+        // Nothing in this section selects an agent. Put the gate back on the agent
+        // and this fails while everything below still passes — which is what tells
+        // the two properties apart.
+        ok('no editor before anything is chosen', await page.locator('.cm-editor').count() === 0,
+           'something was already open; this section proves nothing');
+        await page.getByRole('checkbox', { name: 'Harbour Dashboard' }).check();
+        const openedByProject = await page.waitForSelector('.cm-editor', { timeout: 15000 })
+            .then(() => true).catch(() => false);
+        ok('ticking a project opens its code, with no agent anywhere', openedByProject,
+           'the IDE never mounted — it is still gated on an active agent');
+
         // Reach the code surface: an agent, then its IDE.
         await page.locator('aside').getByRole('button', { name: 'Agents', exact: true }).first().click();
         await page.waitForTimeout(400);
