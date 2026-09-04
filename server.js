@@ -11,8 +11,9 @@ import { fileURLToPath } from 'url';
 import { providerForModel, usableModels, isModelUsable } from './providers/index.js';
 import { getModel, modelChain, pickModel } from './providers/catalog.js';
 import { toolsForRequest } from './providers/tools.js';
-import { PLAN_SCHEMA, DIRECTIONS_SCHEMA, GENERATE_SCHEMA, filesArrayToRecord } from './providers/schemas.js';
+import { PLAN_SCHEMA, DIRECTIONS_SCHEMA, GENERATE_SCHEMA, MANIFEST_SCHEMA, FILE_SCHEMA, filesArrayToRecord } from './providers/schemas.js';
 import { salvageFiles, isTruncation } from './providers/salvage.js';
+import { generateFromManifest } from './providers/generate.js';
 import { buildSystemPrompt, builderPreamble } from './providers/prompts.js';
 import { memoryRouter } from './memory/routes.js';
 import * as memory from './memory/bridge.js';
@@ -665,6 +666,79 @@ ${Array.isArray(plan?.acceptanceCriteria) && plan.acceptanceCriteria.length > 0
         const trialled = await memory.trialBlock({ buildId, episodeId });
 
         let servingModel = null;
+        const onServed = (model) => { servingModel = model; };
+
+        /* ---- The manifest, and then one request per file --------------------
+         *
+         * This is what moves the output ceiling out of reach rather than
+         * recovering from it. A manifest is a couple of thousand tokens whatever
+         * the app's size; each file after it is bounded by that one file. Neither
+         * request can approach the 65,536 budget the single-shot shape routinely
+         * hit at ~54k.
+         *
+         * If the manifest step itself fails, the old whole-app path below still
+         * runs — it salvages now, so the fallback is a worse answer rather than
+         * no answer. */
+        /* ---- The manifest, and then one request per file --------------------
+         *
+         * This is what moves the output ceiling out of reach rather than recovering
+         * from it. A manifest is a couple of thousand tokens whatever the app's size;
+         * each file after it is bounded by that one file. Neither request can approach
+         * the 65,536 budget the single-shot shape routinely hit at ~54k.
+         *
+         * Every dependency is passed in so the whole path is drivable by a stub in
+         * `check:generate` — the branches that matter most here are the ones that occur
+         * least, and they were unverifiable while this lived inline.
+         *
+         * If the manifest step fails, the whole-app path below still runs. It salvages
+         * now, so the fallback is a worse answer rather than no answer. */
+        const run = await generateFromManifest({
+            models: builderModelChain(requestedModel),
+            run: withModelFallback,
+            getProvider: providerForModel,
+            systemFor: (model) => builderPreamble(getModel(model).provider),
+            basePrompt: prompt,
+            recalled,
+            trialled,
+            emit: (event) => res.write(JSON.stringify(event) + '\n'),
+            schemas: { manifest: MANIFEST_SCHEMA, file: FILE_SCHEMA },
+            onServed,
+        });
+
+        if (run.unusable) {
+            console.warn(`Builder generate: manifest unusable (${run.unusable}) — falling back to the whole-app path`);
+        } else if (Object.keys(run.record).length > 0) {
+            const cut = run.truncatedFiles.length > 0;
+            res.write(JSON.stringify({
+                files: run.record,
+                manifest: run.manifest.map(f => f.path),
+                missing: run.missing,
+                ...(cut ? { truncated: true, salvagedCount: Object.keys(run.record).length } : {}),
+            }) + '\n');
+
+            memory.appendEventSafe({
+                buildId,
+                episodeId,
+                /* A file the budget cut short is an instrument failure; a file the model
+                   simply did not produce is a real gap in a real answer. Only the first
+                   is barred from the lesson ladder. */
+                kind: cut ? 'candidate.truncated' : 'candidate.created',
+                surface: 'builder.generate',
+                ...attributionFor(servingModel),
+                payload: {
+                    ...servedPayload(requestedModel, servingModel),
+                    fileCount: Object.keys(run.record).length,
+                    manifestCount: run.manifest.length,
+                    missingCount: run.missing.length,
+                    bytes: run.bytes,
+                    memoryInjected: recalled !== '',
+                    ...(cut ? { inconclusive: true, truncatedFiles: run.truncatedFiles } : {}),
+                },
+            });
+            res.end();
+            return;
+        }
+
         const accumulated = await withModelFallback(builderModelChain(requestedModel), async (model) => {
             res.write(JSON.stringify({ phase: 'thinking', model }) + '\n');
             const provider = providerForModel(model);
@@ -706,7 +780,7 @@ ${Array.isArray(plan?.acceptanceCriteria) && plan.acceptanceCriteria.length > 0
                 }
             }
             return { text: acc, usage, finishReason };
-        }, (model) => { servingModel = model; });
+        }, onServed);
 
         try {
             // The client protocol is unchanged: the files array becomes the

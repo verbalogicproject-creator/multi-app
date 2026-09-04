@@ -951,12 +951,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 setBuilderState(prev => {
                     let message = prev.status.message;
                     let log = prev.status.log;
-                    if (event.phase === 'thinking') {
+                    if (event.phase === 'planning') {
+                        message = `${event.model ?? 'Gemini'} is deciding what files this needs…`;
+                        log = [];
+                    } else if (event.phase === 'thinking') {
                         message = `${event.model ?? 'Gemini'} is thinking about the architecture…`;
                         log = [];  // a fresh attempt (retry/fallback) restarts the file log
                     } else if (event.phase === 'writing') {
                         message = `${event.model ?? 'Gemini'} is writing code…`;
                     }
+                    /* The manifest names every file before any of them is written, so
+                       the count is known rather than watched. */
+                    if (event.manifest) message = `Writing ${event.manifest.length} files…`;
                     if (event.progress) message = `Writing code… ${(event.progress / 1024).toFixed(1)} KB`;
                     if (event.file && !log.includes(event.file)) log = [...log, event.file];
                     return { ...prev, status: { ...prev.status, message, log } };
@@ -974,7 +980,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
              * `inconclusive` is what stops the lesson ladder learning from it; measured on
              * a real build, three lessons were proposed and all three were wrong.
              */
-            const { files, truncated } = generated;
+            const { files, truncated, missing } = generated;
             const lexical = validateBuild(files, builderState.plan);
 
             /*
@@ -1053,7 +1059,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                        guarded against. */
                     evidence: withEvidence(prev.evidence, truncated
                         ? `${servingModel} was cut off by its output budget — ${fileCount} complete file${fileCount === 1 ? '' : 's'} recovered, held for review`
-                        : `${servingModel} wrote ${fileCount} files — validation failed with ${errors} error${errors === 1 ? '' : 's'}, held for review`),
+                        : missing.length > 0
+                            ? `${servingModel} wrote ${fileCount} of ${fileCount + missing.length} planned files — ${missing.length} never arrived (${missing.slice(0, 3).join(', ')}${missing.length > 3 ? '…' : ''}), held for review`
+                            : `${servingModel} wrote ${fileCount} files — validation failed with ${errors} error${errors === 1 ? '' : 's'}, held for review`),
                     status: { ...prev.status, isLoading: false, message: truncated
                         ? `The model ran out of output budget. ${fileCount} complete file${fileCount === 1 ? '' : 's'} were recovered; the rest were never written.`
                         : 'Generation finished, but the result did not pass validation.' },
