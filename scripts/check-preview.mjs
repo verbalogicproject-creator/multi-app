@@ -20,9 +20,13 @@
  *
  *   npm run check:preview
  */
-import { launch, assertBackend } from './ui-harness.mjs';
+import { spawn } from 'node:child_process';
+import { launch, assertBackend, openPage, SURFACES, DESKTOP } from './ui-harness.mjs';
 
 const API = process.env.API_TARGET || 'http://localhost:8050';
+/* 5311 is the audit's, 5312 the editor's. Three gates, three ports, no waiting. */
+const PORT = 5313;
+const URL = `http://127.0.0.1:${PORT}`;
 
 let failures = 0;
 const ok = (name, cond, detail = '') => {
@@ -30,6 +34,37 @@ const ok = (name, cond, detail = '') => {
     failures++;
     console.log(`  FAIL  ${name}${detail ? `\n          ${detail}` : ''}`);
     return false;
+};
+
+/**
+ * Stop the preview, and mean it — `spawn` gets us `npx`, which starts vite as a
+ * child; killing the parent leaves that child holding the port and the script's
+ * event loop alive. `detached` puts the pair in one process group.
+ */
+const stopPreview = (proc) => {
+    if (!proc) return;
+    try { process.kill(-proc.pid, 'SIGTERM'); }
+    catch { proc.kill('SIGTERM'); }
+};
+
+const startPreview = async () => {
+    const proc = spawn('npx', ['vite', 'preview', '--port', String(PORT), '--strictPort', '--host', '127.0.0.1'], {
+        stdio: ['ignore', 'pipe', 'pipe'], detached: true,
+    });
+    let log = '';
+    proc.stdout.on('data', d => { log += d; });
+    proc.stderr.on('data', d => { log += d; });
+    for (let i = 0; i < 60; i++) {
+        if (proc.exitCode !== null) {
+            console.error(`preview exited (code ${proc.exitCode}):\n${log.trim() || '(no output)'}`);
+            process.exit(1);
+        }
+        try { if ((await fetch(`${URL}/`)).ok) return proc; } catch { /* not up */ }
+        await new Promise(r => setTimeout(r, 500));
+    }
+    console.error(`vite preview never came up on ${PORT}:\n${log}`);
+    stopPreview(proc);
+    process.exit(1);
 };
 
 const build = async (files) => {
@@ -328,6 +363,64 @@ const run = async () => {
             JSON.stringify(namedMessages));
     } finally {
         await browser.close();
+    }
+
+    // ---- 8. the seam, in both places it is mounted -------------------------
+    /* Everything above proves the *server* produces a running document. None of it
+       proves the app ever puts one on screen. `audit:ui` reaches both surfaces, but
+       reaching a tab is not the same as the tab having built anything — a host stuck
+       on "Building…" forever is a reachable surface and a dead preview. */
+    console.log('\n8. the app mounts the preview, in both places');
+    const vite = await startPreview();
+    const clientBrowser = await launch();
+    try {
+        // -- mount one: the IDE's Preview tab --
+        const ide = await openPage(clientBrowser, DESKTOP, URL);
+        await ide.page.locator('aside').getByRole('button', { name: 'Agents', exact: true }).first().click();
+        await ide.page.waitForTimeout(400);
+        await ide.page.getByText('Harbour Builder').click();
+        await ide.page.waitForTimeout(800);
+        await ide.page.getByRole('tab', { name: /Preview/ }).first().click();
+
+        const ideFrame = ide.page.locator('iframe[title="Preview of the open project"]');
+        const ideBuilt = await ideFrame.waitFor({ timeout: 45_000 }).then(() => true).catch(() => false);
+        ok('the IDE builds a preview of the open project', ideBuilt,
+            'no iframe ever appeared — the host never got a document to show');
+
+        const ideSandbox = ideBuilt ? await ideFrame.getAttribute('sandbox') : null;
+        /* The one that must never regress: `allow-scripts` together with
+           `allow-same-origin` is not a sandbox at all, and this document is built
+           from model output. */
+        ok('and sandboxes it with scripts only', ideSandbox === 'allow-scripts', `sandbox="${ideSandbox}"`);
+
+        const ideText = ideBuilt
+            ? await textOf(ide.page.frameLocator('iframe[title="Preview of the open project"]').locator('#root'), 20_000)
+            : null;
+        ok('and the seeded project is running inside it', ideText?.includes('harbour') === true,
+            ideText === null ? 'nothing rendered in #root' : `#root reads "${ideText}"`);
+
+        // -- mount two: the wizard's export step --
+        /* Seeded from the audit's own fixture, so the two gates cannot disagree
+           about what a finished build looks like. */
+        const exportSeed = SURFACES.find((s) => s.name === 'wizard-5-export')?.seed;
+        ok('the export fixture is still where the audit keeps it', Boolean(exportSeed));
+        const wizard = await openPage(clientBrowser, DESKTOP, URL, exportSeed ?? {});
+
+        const wizardFrame = wizard.page.locator('iframe[title*="preview"]');
+        const wizardBuilt = await wizardFrame.waitFor({ timeout: 45_000 }).then(() => true).catch(() => false);
+        ok('the wizard\'s last step builds one too', wizardBuilt,
+            'no iframe appeared on the export step');
+        ok('with the same sandbox', wizardBuilt && await wizardFrame.getAttribute('sandbox') === 'allow-scripts');
+
+        const wizardText = wizardBuilt
+            ? await textOf(wizard.page.frameLocator('iframe[title*="preview"]').locator('#root'), 20_000)
+            : null;
+        ok('and it runs the generated app rather than a picture of it',
+            wizardText?.includes('Harbour Dashboard') === true,
+            wizardText === null ? 'nothing rendered in #root' : `#root reads "${wizardText}"`);
+    } finally {
+        await clientBrowser.close();
+        stopPreview(vite);
     }
 
     console.log(failures === 0 ? '\npreview ok' : `\n${failures} CHECK(S) FAILED`);

@@ -14,7 +14,6 @@ export type BuildIssueCode =
     | 'no-files'
     | 'missing-index-html'
     | 'missing-src-main'
-    | 'missing-preview-html'
     | 'empty-file'
     | 'file-too-short'
     | 'invalid-json'
@@ -163,7 +162,6 @@ export const validateBuild = (files: Record<string, string>, plan?: any): BuildV
     // Entry points
     if (!paths.some(p => p === 'index.html')) add('error', 'missing-index-html', 'index.html is missing, so the app has no entry point.');
     if (!paths.some(p => /^src\/main\.(tsx|ts|jsx|js)$/.test(p))) add('warning', 'missing-src-main', 'No src/main entry file was generated.');
-    if (!files['preview.html']) add('warning', 'missing-preview-html', 'preview.html is missing, so the visual preview will be unavailable.');
 
     for (const [path, content] of Object.entries(files)) {
         const trimmed = (content ?? '').trim();

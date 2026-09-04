@@ -56,7 +56,7 @@ export const GENERATE_SCHEMA = obj({
     files: arr(obj({
         path: str("Full file path relative to the project root, e.g. 'src/App.tsx'."),
         content: str('The complete file contents.'),
-    }), 'Every file of the generated project, including preview.html.'),
+    }), 'Every file of the generated project.'),
 });
 
 /** Converts the generated files array back into the { path: content } map the client expects. */

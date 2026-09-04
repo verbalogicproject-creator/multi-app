@@ -39,8 +39,9 @@ A five-step wizard, reachable from **AI Tools**:
    cost. **Suggest 3 directions** asks Gemini for three distinct art directions with rationale.
 4. **Generate** — streams progress: which model is serving, what phase it is in, and each file as
    it is written. The result is validated before it is accepted (see below).
-5. **Export** — visual preview, ZIP download, "Open in IDE", save/rename in the build library, the
-   validation verdict, and the build record.
+5. **Export** — a **live preview** (the generated project bundled server-side and run in a
+   sandboxed iframe, not a static snapshot), ZIP download, "Open in IDE", save/rename in the build
+   library, the validation verdict, and the build record.
 
 ### Safety rails
 
@@ -262,13 +263,10 @@ Next cycles, in the order chosen:
    publishes bounded context (active project, current step, selection, diagnostics) and accepts
    typed directives, each answered with an effect receipt describing what actually happened. Lets a
    terminal agent drive the app instead of guessing at it.
-3. **Real running preview** — execute generated React in the preview iframe (esbuild-wasm or
-   Sucrase with import maps) instead of a static snapshot, keeping today's static preview as the
-   fallback.
-4. **Git-backed history and a repair loop** — `isomorphic-git` over IndexedDB for real diffs,
+3. **Git-backed history and a repair loop** — `isomorphic-git` over IndexedDB for real diffs,
    revert and branch-per-candidate (also escaping the ~5 MB localStorage ceiling), then use
    validator output to regenerate only the broken file instead of the whole project.
-5. **Skill personas** — personas upgraded from a prose blob to a structured
+4. **Skill personas** — personas upgraded from a prose blob to a structured
    contract (purpose, anti-patterns, allowed tools, output shape) — a per-project record of decisions and failures injected
    into prompts (inspectable, pinnable, forgettable), and personas upgraded from a prose blob to a
    structured contract (purpose, anti-patterns, allowed tools, output shape).

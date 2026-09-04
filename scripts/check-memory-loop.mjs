@@ -38,7 +38,7 @@ const ev1 = await bridge.recordEvidenceSafe({
     summary: 'Validation failed over 9 files: unresolved-import (src/App.tsx)',
 });
 const verdict1 = { ok: false, checked: 9, errors: 2, warnings: 1,
-                   codes: { 'unresolved-import': 2, 'missing-preview-html': 1 }, fileCount: 9 };
+                   codes: { 'unresolved-import': 2, 'missing-src-main': 1 }, fileCount: 9 };
 await bridge.appendEventSafe({
     buildId, episodeId: epi1, kind: 'verification.completed', domain: 'build',
     surface: 'builder.generate', payload: verdict1, evidenceIds: [ev1.id],
@@ -50,7 +50,7 @@ const proposed = await bridge.proposeLessonsSafe({
 check('a failed verdict proposes exactly the mapped lesson', proposed.length === 1, proposed.map(p => p.code).join(', '));
 check('and it starts at the bottom of the ladder', proposed[0]?.status === 'proposed', proposed[0]?.status);
 check('a warning-only code proposes nothing',
-    !proposals.proposalsFor(verdict1).some(p => p.code === 'missing-preview-html'));
+    !proposals.proposalsFor(verdict1).some(p => p.code === 'missing-src-main'));
 
 // idempotency: the same failure again is the same lesson, not a second one
 const again = await bridge.proposeLessonsSafe({

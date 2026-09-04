@@ -93,7 +93,6 @@ export const PROPOSAL_TABLE = {
 export const NOT_A_LESSON = {
     'no-files': 'The generator returned nothing. "Return some files" is not guidance a model can act on.',
     'missing-src-main': 'A warning, not a failure. The build still runs.',
-    'missing-preview-html': 'A warning. It costs the preview, not the project.',
     'file-too-short': 'A warning, and often correct — some files really are three lines.',
     'plan-page-missing': 'A warning about plan drift, which is a judgement the human makes, not a rule.',
     'plan-component-missing': 'The same judgement.',

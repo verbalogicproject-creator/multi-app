@@ -52,6 +52,17 @@ const SEED = {
           content: 'export interface User { id: number; name: string; }\n' },
         { id: 'f4', projectId: PROJECT_ID, path: 'src/Broken.tsx', type: 'text/plain', createdAt: 4,
           content: "import type { User } from './types';\n\nexport const Broken = () => {\n  const user: User = { id: 'not-a-number', name: 'crate' };\n  return <span>{user.name}</span>;\n};\n" },
+        // An entry point and a mount, so the IDE's Preview tab has something to
+        // bundle. Without them the tab is reachable and shows a build error, which
+        // is a real state worth having — but not the one that proves the app runs.
+        // `Broken.tsx` is imported by nothing, so it never reaches the bundler: the
+        // preview builds while the same project still has a type error to report,
+        // which is exactly the pair the IDE has to hold at once.
+        { id: 'f5', projectId: PROJECT_ID, path: 'index.html', type: 'text/plain', createdAt: 5,
+          content: '<!doctype html><html lang="en"><head><meta charset="UTF-8" /><title>Harbour</title></head>'
+              + '<body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body></html>\n' },
+        { id: 'f6', projectId: PROJECT_ID, path: 'src/main.tsx', type: 'text/plain', createdAt: 6,
+          content: "import { createRoot } from 'react-dom/client';\nimport App from './App';\n\ncreateRoot(document.getElementById('root')!).render(<App />);\n" },
     ],
     gemini_personas: [
         { id: 'p1', name: 'React Specialist', baseInstructions: 'You write React.',
@@ -112,9 +123,29 @@ const PLAN = {
 };
 const THEME = { palette: 'Charcoal', typography: 'Grotesk & Bold', colors: {
     bg: '#0b0b0c', surface: '#161617', primary: '#ea580c', accent: '#fb923c', text: '#f4f4f5', muted: '#9a9aa2' } };
+/**
+ * A project the preview bundler can actually build.
+ *
+ * It used to be one component plus a `preview.html` — a static snapshot the model was
+ * asked to hand-write, which the export step rendered in a script-less iframe. That
+ * file is retired, and with it the surface that displayed it: the wizard's last step
+ * now bundles and runs this, so the fixture has to be a real entry point, a real
+ * mount and a real stylesheet or the audited surface is a build error.
+ */
 const FILES = {
-    'src/App.tsx': "export default function App() { return <main>harbour</main>; }\n",
-    'preview.html': '<!doctype html><html><body style="font-family:system-ui;padding:2rem"><h1>Harbour Dashboard</h1><p>Berth occupancy at a glance.</p></body></html>',
+    'index.html': '<!doctype html><html lang="en"><head><meta charset="UTF-8" /><title>Harbour Dashboard</title></head>'
+        + '<body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body></html>',
+    'package.json': '{"name":"harbour","dependencies":{"react":"^19","react-dom":"^19"}}',
+    'src/index.css': '@import "tailwindcss";\n',
+    'src/main.tsx': "import { createRoot } from 'react-dom/client';\nimport App from './App';\nimport './index.css';\n\ncreateRoot(document.getElementById('root')!).render(<App />);\n",
+    'src/App.tsx': "export default function App() {\n"
+        + "    return (\n"
+        + "        <main className=\"max-w-6xl mx-auto px-4 py-16\">\n"
+        + "            <h1 className=\"text-4xl font-bold\">Harbour Dashboard</h1>\n"
+        + "            <p className=\"mt-4 text-slate-600\">Berth occupancy at a glance.</p>\n"
+        + "        </main>\n"
+        + "    );\n"
+        + "}\n",
 };
 const EVIDENCE = [
     { ts: 1756700000000, event: 'Blueprint approved — 1 pages, 1 components, 2 acceptance criteria' },
@@ -133,7 +164,11 @@ export const SURFACES = [
     { name: 'wizard-4-held',     phone: true, desktop: true, reach: async () => {},
       seed: wizard({ currentStep: 4, candidateFiles: FILES, validation: { ok: false, checked: 2, issues: [
           { severity: 'error', code: 'unresolved-import', message: 'src/App.tsx imports ./Chart, which was never emitted.', file: 'src/App.tsx' },
-          { severity: 'warning', code: 'placeholder-text', message: 'Lorem ipsum remains in the hero copy.', file: 'preview.html' },
+          // `placeholder-content` is the real member of BuildIssueCode. This read
+          // `placeholder-text` for a long time and failed nothing, because a fixture's
+          // issues are only ever displayed — a fixture asserting against a vocabulary
+          // that does not exist is still a fixture that has stopped describing the app.
+          { severity: 'warning', code: 'placeholder-content', message: 'Lorem ipsum remains in the hero copy.', file: 'src/App.tsx' },
       ] } }) },
     { name: 'wizard-5-export',   phone: true, desktop: true, seed: wizard({ currentStep: 5, generatedFiles: FILES, validation: { ok: true, checked: 2, issues: [] } }), reach: async () => {} },
     { name: 'projects',        phone: true,  desktop: true,  reach: async p => { await bottomTab(p, 'Projects'); await railTab(p, 'Projects'); } },
@@ -180,6 +215,16 @@ export const SURFACES = [
         await p.getByText('Harbour Builder').click(); await p.waitForTimeout(500);
         await bottomTab(p, 'Code');
         await p.getByRole('tab', { name: /Problems/ }).first().click();
+        await p.waitForTimeout(6000);
+    } },
+    // The preview tab: a bundle, a sandboxed frame, and an app that has to be
+    // running by the time the shot is taken. The wait covers the host's 400 ms
+    // debounce plus a real esbuild + Tailwind pass on this device.
+    { name: 'code-preview',    phone: true,  desktop: true,  reach: async p => {
+        await bottomTab(p, 'Projects'); await railTab(p, 'Agents');
+        await p.getByText('Harbour Builder').click(); await p.waitForTimeout(500);
+        await bottomTab(p, 'Code');
+        await p.getByRole('tab', { name: /Preview/ }).first().click();
         await p.waitForTimeout(6000);
     } },
     { name: 'memory',          phone: true,  desktop: true,  reach: async p => {
