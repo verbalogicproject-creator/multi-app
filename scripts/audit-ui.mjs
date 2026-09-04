@@ -318,6 +318,32 @@ const AUDIT = () => {
     return findings;
 };
 
+/**
+ * Every iframe's own document must fit the frame it was given.
+ *
+ * Playwright reaches a sandboxed frame through CDP, which the page's own JavaScript
+ * cannot. A frame that scrolls sideways is either a document written for a width it
+ * did not get, or one that should have been scaled — and to a reader it is simply
+ * content cut in half.
+ */
+const framedOverflow = async (page) => {
+    const found = [];
+    for (const frame of page.frames()) {
+        if (frame === page.mainFrame()) continue;
+        try {
+            const box = await frame.evaluate(() => {
+                const de = document.documentElement;
+                return { scroll: de.scrollWidth, client: de.clientWidth, title: document.title };
+            });
+            /* 1px of slack for sub-pixel layout; anything more is a real clip. */
+            if (box.client > 0 && box.scroll > box.client + 1) {
+                found.push(`iframe content ${box.scroll}px wide in a ${box.client}px frame ("${box.title || 'untitled'}")`);
+            }
+        } catch { /* a frame that cannot be read is not evidence of a fault */ }
+    }
+    return [...new Set(found)];
+};
+
 const run = async () => {
     if (!arg('--url', null)) { await assertFreshBuild(); await assertBackend(); }
     const preview = arg('--url', null) ? null : await startPreview();
@@ -335,6 +361,14 @@ const run = async () => {
                 await page.waitForTimeout(500);
                 if (SHOTS) await page.screenshot({ path: `${SHOTS}/${profileName}-${surface.name}.png` });
                 const f = await page.evaluate(AUDIT);
+                /* Inner frame overflow, measured from outside.
+                   The page probe cannot see this: a `sandbox=""` frame has an opaque
+                   origin, so `contentDocument` is unreachable from the page — which is
+                   exactly why a document overflowing its own iframe was invisible to
+                   every check here while being the most visible fault on the screen.
+                   The design contract laid out at ~760px inside a ~262px card, clipped
+                   mid-nav, and nothing failed. */
+                f.framed = await framedOverflow(page);
                 const count = Object.values(f).flat().length;
                 total += count;
                 report.push({ where, ...f, count });
@@ -355,7 +389,7 @@ const run = async () => {
         console.log('');
     }
 
-    for (const kind of ['tokens', 'targets', 'clipping', 'overflow']) {
+    for (const kind of ['tokens', 'targets', 'clipping', 'overflow', 'framed']) {
         const hits = report.filter(r => r[kind]?.length);
         if (!hits.length) continue;
         console.log(`${kind.toUpperCase()}`);
