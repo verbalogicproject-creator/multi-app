@@ -12,11 +12,12 @@ import { useTTS } from '../hooks/useTTS';
 import { useLiveChat } from '../hooks/useLiveChat';
 import { useAppContext } from '../context/AppContext';
 import { ChatMode } from '../types/index';
+import { composeBuilderBrief, hasBuilderBrief } from '../utils/builderBrief';
 
 const ChatPanel: React.FC = () => {
     const {
       projects, selectedProjectIds, filesByProject, activePersona, useWebSearch, customAiStyles, lowLatencyMode, activeAgentId, selectedModel,
-      aiCreateFile, aiUpdateFile, aiDeleteFile, bumpQuotaTick
+      aiCreateFile, aiUpdateFile, aiDeleteFile, bumpQuotaTick, startWebAppBuild, setSurface
     } = useAppContext();
     
     const [mode, setMode] = useState<ChatMode>('chat');
@@ -67,6 +68,7 @@ const ChatPanel: React.FC = () => {
         
         const promptMap: Record<string, {prompt: string, setPrompt: (p: string) => void}> = {
             'chat': { prompt: codingPrompt, setPrompt: setCodingPrompt },
+            'plan': { prompt: codingPrompt, setPrompt: setCodingPrompt },
             'coding': { prompt: codingPrompt, setPrompt: setCodingPrompt },
             'image-edit': { prompt: imagePrompt, setPrompt: setImagePrompt },
             'video-gen': { prompt: videoPrompt, setPrompt: setVideoPrompt },
@@ -170,7 +172,32 @@ const ChatPanel: React.FC = () => {
                 gutter held open for a control that no longer exists is just a hole. */}
             <div className="shrink-0 flex justify-center p-3 md:p-4 bg-ground shadow-[inset_0_1px_0_rgb(255_255_255/0.06)]">
               <div className="w-full max-w-3xl">
-                {(mode === 'coding' || mode === 'chat') && (
+                {/* The hand-off. Present only in `plan` mode, and only once there is
+                    something to hand over — a button that is always there and usually
+                    does nothing teaches you to ignore it.
+
+                    It seeds and navigates; it does not build. The brief lands in the
+                    wizard's textarea where it can be read and edited before any model
+                    call, because a composer that quietly guessed wrong would otherwise
+                    send a plausible-looking brief nobody checked. */}
+                {mode === 'plan' && hasBuilderBrief(messages) && (
+                    <div className="mb-2 flex items-center justify-between gap-3">
+                        <p className="text-xs text-metal-300 min-w-0 truncate">
+                            Ready to build? You can edit it first.
+                        </p>
+                        <button
+                            type="button"
+                            onClick={() => { startWebAppBuild(composeBuilderBrief(messages)); setSurface('build'); }}
+                            className="tap shrink-0 px-4 rounded-xl bg-metal-700 text-metal-100 text-sm font-medium
+                                       shadow-[inset_0_1px_0_rgb(255_255_255/0.08)]
+                                       transition-[background-color,transform] duration-200 ease-fluid
+                                       md:hover:bg-[#33333a] active:scale-[0.98]"
+                        >
+                            Send to Builder
+                        </button>
+                    </div>
+                )}
+                {(mode === 'coding' || mode === 'chat' || mode === 'plan') && (
                     <form onSubmit={handleSubmit} className="flex items-center gap-2">
                         <input
                             type="text"

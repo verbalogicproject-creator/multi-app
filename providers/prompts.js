@@ -153,10 +153,42 @@ ${hasProjects ? projectContexts : 'No project is loaded.'}`;
 const RENDERERS = { google: renderGoogle, anthropic: renderAnthropic, openai: renderOpenAI, nvidia: renderOpen };
 
 /**
- * Builds the chat/coding system prompt for a provider from neutral inputs.
- * @param {{provider: string, persona: object, projects: object[], customStyles: object[]}} input
+ * What `plan` mode adds, appended to whichever renderer the provider uses.
+ *
+ * Chat and the builder were two islands: you could talk an idea through and then had to
+ * retype it into the wizard from memory. `plan` is the bridge, and it is a **server**
+ * mode rather than a client one on purpose — a client-only mode would show a
+ * "Send to Builder" button while the assistant had no idea it was supposed to be
+ * producing anything sendable, and the quality of the hand-off would depend entirely on
+ * how the user happened to phrase things.
+ *
+ * The brief is asked for in one block at the end of each turn, because that is what the
+ * hand-off takes: `composeBuilderBrief` reads the last assistant message. The user sees
+ * it in an editable textarea before a single builder call is made, so this shapes the
+ * starting point rather than deciding anything.
  */
-export const buildSystemPrompt = ({ provider, persona, projects, customStyles }) => {
+const PLAN_MODE = `
+# You are helping shape an app before it is built
+The person is working an idea out loud. Help them make it concrete: ask about the pages
+it needs, who uses it, and what it must do — one or two questions at a time, not a
+questionnaire.
+
+End every reply with a block in exactly this shape, revised to match everything agreed
+so far:
+
+BRIEF
+<a single paragraph describing the app: what it is, who it is for, and what it does>
+Pages: <comma-separated list>
+Must have: <comma-separated list of the things it cannot ship without>
+
+Keep the brief current rather than appending to it. It is a draft the person will edit,
+not a contract — do not pad it, and do not claim anything has been built.`;
+
+/**
+ * Builds the chat/coding system prompt for a provider from neutral inputs.
+ * @param {{provider: string, persona: object, projects: object[], customStyles: object[], mode?: string}} input
+ */
+export const buildSystemPrompt = ({ provider, persona, projects, customStyles, mode }) => {
     const projectContexts = (projects ?? []).map(p => {
         let context = `Project: ${p.name}`;
         if (p.dependencySummary && p.dependencySummary !== 'No files to analyze.' && p.dependencySummary !== 'No major dependencies identified') {
@@ -166,12 +198,18 @@ export const buildSystemPrompt = ({ provider, persona, projects, customStyles })
     }).join('\n\n');
 
     const render = RENDERERS[provider] ?? renderGoogle;
-    return render({
+    const base = render({
         persona: personaBlock(persona ?? {}, customStyles ?? []),
         projectContexts,
         hasProjects: projectContexts.trim() !== '',
     });
+    /* Appended rather than replacing the renderer, so a plan-mode turn keeps the
+       persona and the house style it would otherwise have had. */
+    return mode === 'plan' ? `${base}\n${PLAN_MODE}` : base;
 };
+
+/** The marker `composeBuilderBrief` looks for. Declared once so the two cannot drift. */
+export const BRIEF_MARKER = 'BRIEF';
 
 /**
  * Builder prompts are content-identical across providers (the schema does the

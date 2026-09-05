@@ -258,7 +258,7 @@ interface AppContextType {
     // Web App Builder context
     builderState: WebAppBuilderState;
     setBuilderState: React.Dispatch<React.SetStateAction<WebAppBuilderState>>;
-    startWebAppBuild: () => void;
+    startWebAppBuild: (idea?: string) => void;
     resetWebAppBuild: () => void;
     generateWebAppPlan: () => Promise<void>;
     refineWebAppPlan: (currentPlan: any, feedback: string) => Promise<void>;
@@ -738,11 +738,20 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         memoryService.closeEpisode(buildId, episodeId, 'abandoned', attributionFor(servingModel));
     };
 
-    const startWebAppBuild = () => {
+    /**
+     * Open the wizard, optionally already holding an idea.
+     *
+     * It took no arguments, which is why chat and the builder were two islands: you
+     * could talk an idea through and then had to retype it from memory. `Step_Idea`
+     * reads `builderState.idea` through plain state, so seeding it is enough — and the
+     * seed lands in an editable textarea rather than being sent anywhere, so the person
+     * still confirms before a single model call.
+     */
+    const startWebAppBuild = (idea = '') => {
         abandonOpenEpisode();   // starting over abandons whatever the last build left open
         const memory = { buildId: memoryService.newBuildId(), episodeId: null, lastOutcome: null, servingModel: null };
         memoryRef.current = memory;
-        setBuilderState({ ...initialBuilderState, isActive: true, currentStep: 1, memory });
+        setBuilderState({ ...initialBuilderState, isActive: true, currentStep: 1, idea, memory });
     };
     const resetWebAppBuild = () => {
         abandonOpenEpisode();

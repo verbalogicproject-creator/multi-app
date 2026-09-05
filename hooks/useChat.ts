@@ -188,7 +188,7 @@ export const useChat = (
              const toolMessage = addMessage(MessageAuthor.TOOL, [], undefined, { name: toolCall.name, response: { content: toolResponseResult } });
 
              const historyWithToolResponse = [...existingMessages, responseMessage, toolMessage];
-             const followUpStream = await apiService.generateCodingContentStream(historyWithToolResponse, activeProjectsForTooling, persona, useWebSearch, customStyles, lowLatencyMode, model);
+             const followUpStream = await apiService.generateCodingContentStream(historyWithToolResponse, activeProjectsForTooling, persona, useWebSearch, customStyles, lowLatencyMode, model, currentMode);
              await processStream(followUpStream, historyWithToolResponse, currentMode);
         }
     }, [addMessage, projects, persona, useWebSearch, customStyles, lowLatencyMode, model, handleToolCall]);
@@ -219,7 +219,7 @@ export const useChat = (
 
             const historyWithToolResponse = [...pending.history, toolMessage];
             const activeProjectsForTooling = pending.mode === 'coding' ? projects : [];
-            const followUpStream = await apiService.generateCodingContentStream(historyWithToolResponse, activeProjectsForTooling, persona, useWebSearch, customStyles, lowLatencyMode, model);
+            const followUpStream = await apiService.generateCodingContentStream(historyWithToolResponse, activeProjectsForTooling, persona, useWebSearch, customStyles, lowLatencyMode, model, pending.mode);
             await processStream(followUpStream, historyWithToolResponse, pending.mode);
         } catch (error: any) {
             addMessage(MessageAuthor.SYSTEM, [{ text: `Error: ${error.message}` }]);
@@ -254,7 +254,7 @@ export const useChat = (
             } else { // coding or chat mode
                 const history = [...messages, userMessage];
                 const activeProjects = mode === 'coding' ? projects : [];
-                const stream = await apiService.generateCodingContentStream(history, activeProjects, persona, useWebSearch, customStyles, lowLatencyMode, model);
+                const stream = await apiService.generateCodingContentStream(history, activeProjects, persona, useWebSearch, customStyles, lowLatencyMode, model, mode);
                 await processStream(stream, history, mode);
             }
         } catch (error: any) {

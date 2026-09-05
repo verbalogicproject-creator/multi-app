@@ -1,5 +1,5 @@
 
-import { CustomAiStyle, Message, MessagePart, Persona, Project, ProjectFile } from "../types/index";
+import { ChatMode, CustomAiStyle, Message, MessagePart, Persona, Project, ProjectFile } from "../types/index";
 import { updateProject as updateProjectInStorage } from "./geminiService";
 import type { GenerateResult } from '../types/build';
 
@@ -93,11 +93,11 @@ export const generateVideo = async (augmentedPrompt: string, file: File | null, 
     }
 };
 
-export const generateCodingContentStream = async (history: Message[], projects: Project[], persona: Persona, useWebSearch: boolean, customStyles: CustomAiStyle[], lowLatencyMode: boolean, model?: string): Promise<ReadableStream<Uint8Array>> => {
+export const generateCodingContentStream = async (history: Message[], projects: Project[], persona: Persona, useWebSearch: boolean, customStyles: CustomAiStyle[], lowLatencyMode: boolean, model?: string, mode?: ChatMode): Promise<ReadableStream<Uint8Array>> => {
     const response = await fetch('/api/coding-chat-stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ history, projects, persona, useWebSearch, customStyles, lowLatencyMode, model }),
+        body: JSON.stringify({ history, projects, persona, useWebSearch, customStyles, lowLatencyMode, model, mode }),
     });
     if (!response.ok || !response.body) { const error = await response.json(); throw new Error(error.message || 'Failed to get streaming response from server.'); }
     return response.body;
