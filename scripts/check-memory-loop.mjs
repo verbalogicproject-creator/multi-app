@@ -8,6 +8,15 @@
  * anything -- which looks exactly like memory working and there being nothing to
  * learn.
  *
+ * **Sections are no longer isolated from one another.** Memory is one shared store now,
+ * on purpose — that is what lets a lesson outlive the build that proposed it. The cost is
+ * that a lesson id is a content hash of its trigger, so two sections using the same
+ * validator code get the *same* lesson, and one section's promotion is visible to the
+ * next. This is not hypothetical: the self-qualify section below reported `qualified` the
+ * first time the store was shared, because an earlier section had already promoted the
+ * lesson it re-proposed — the assertion was right, the fixture was stale. **Give each
+ * section a validator code no other section uses.**
+ *
  *   npm run check:memory-loop
  */
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -214,7 +223,8 @@ check('and an app that renders promotes it', behaveLesson?.status === 'qualified
 const selfBuild = 'build-self-qualify';
 const selfEpi = await bridge.openEpisodeSafe({ buildId: selfBuild, objective: 'one episode, fail then pass' });
 const selfEv1 = await bridge.recordEvidenceSafe({ buildId: selfBuild, kind: 'validation', ref: `build://${selfBuild}/e1/v`, summary: 'failed' });
-const selfBad = { ok: false, checked: 3, errors: 1, warnings: 0, codes: { 'unresolved-import': 1 } };
+/* A code no other section uses, so this lesson is this section's alone. */
+const selfBad = { ok: false, checked: 3, errors: 1, warnings: 0, codes: { 'bundle-error': 1 } };
 await bridge.appendEventSafe({ buildId: selfBuild, episodeId: selfEpi, kind: 'verification.completed', domain: 'build', payload: selfBad, evidenceIds: [selfEv1.id] });
 const selfProposed = await bridge.proposeLessonsSafe({
     buildId: selfBuild, episodeId: selfEpi, evidenceIds: [selfEv1.id], proposals: proposals.proposalsFor(selfBad),
@@ -231,6 +241,48 @@ const selfState = await bridge.listBuildState(selfBuild);
 const selfLesson = selfState.lessons.find(l => l.id === selfProposed[0]?.lessonId);
 check('and cannot promote it by passing itself', selfQualified.length === 0, JSON.stringify(selfQualified));
 check('so it is still only proposed', selfLesson?.status === 'proposed', selfLesson?.status);
+
+// ---- the loop crosses builds, or it is not a loop -----------------------------
+// The property everything else rests on, and the one nothing ever asserted.
+//
+// The store used to be a file per build, with the engine's `projectId` set to the
+// build id — and every read in the engine filters on `project_id`. So a lesson
+// learned in one build was invisible to the next, and the ladder was wired to a
+// store that was discarded after every build. Nothing here failed, because every
+// section above uses a single build id: the loop closed perfectly inside one build
+// and could not reach the next one.
+//
+// Presence before absence. First that a lesson from an *earlier* build is visible
+// while a later one runs, then that a build's own episodes and events stay
+// attributable to it — otherwise "memory is shared" and "memory has stopped
+// distinguishing builds" look identical from here.
+const buildA = `build-cross-a-${Date.now().toString(36)}`;
+const buildB = `build-cross-b-${Date.now().toString(36)}`;
+
+const aEpi = await bridge.openEpisodeSafe({ buildId: buildA, objective: 'first build, which fails' });
+const aEv = await bridge.recordEvidenceSafe({ buildId: buildA, kind: 'validation', ref: `build://${buildA}/v`, summary: 'failed' });
+/* Likewise unique: if another section had already proposed this lesson, "build B can see
+   it" would pass without anything having crossed a build at all. */
+const aBad = { ok: false, checked: 4, errors: 1, warnings: 0, codes: { 'unresolved-html-ref': 1 } };
+await bridge.appendEventSafe({ buildId: buildA, episodeId: aEpi, kind: 'verification.completed', domain: 'build', payload: aBad, evidenceIds: [aEv.id] });
+const aProposed = await bridge.proposeLessonsSafe({
+    buildId: buildA, episodeId: aEpi, evidenceIds: [aEv.id], proposals: proposals.proposalsFor(aBad),
+});
+check('an earlier build proposes a lesson', aProposed.length >= 1);
+
+const bState = await bridge.listBuildState(buildB);
+const carried = bState?.lessons?.some(l => l.id === aProposed[0]?.lessonId);
+check('and a later build can see it', carried === true,
+    `build B sees ${bState?.lessons?.length ?? 0} lesson(s)`);
+
+// The other half: sharing lessons must not mean losing track of whose build is whose.
+const bEpi = await bridge.openEpisodeSafe({ buildId: buildB, objective: 'second build' });
+const bAfter = await bridge.listBuildState(buildB);
+const aAfter = await bridge.listBuildState(buildA);
+check('a build sees its own episode', bAfter.episodes.some(e => e.id === bEpi));
+check('and not the other build\'s', !bAfter.episodes.some(e => e.id === aEpi),
+    `build B lists ${bAfter.episodes.length} episode(s)`);
+check('which still belongs to the build that opened it', aAfter.episodes.some(e => e.id === aEpi));
 
 bridge.closeAll();
 rmSync(scratch, { recursive: true, force: true });

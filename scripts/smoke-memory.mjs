@@ -228,9 +228,19 @@ try {
     check('events survive', after?.eventCount === before?.eventCount, `${after?.eventCount}`);
     check('lessons survive', after?.lessons?.length === before?.lessons?.length, `${after?.lessons?.length}`);
 
-    // ---- 8. the CLI reads the very same databases -----------------------------
+    // ---- 8. the CLI reads the very same database ------------------------------
+    /* `--build` is really `--store`: the CLI addresses a database by its filename stem.
+       That used to be the build id, because there was a file per build. There is one
+       shared store now, so the stem is the project the builder writes under — and the CLI
+       uses that name as the project id too, which is why `bridge.js` derives the filename
+       from it rather than letting the two be written separately.
+
+       The seam the CLI upgrade still has to close: its vocabulary says *build* where the
+       store now means *workspace*. The parity that matters holds either way — a person
+       reading the CLI sees exactly what the server just recorded. */
+    const STORE = 'builder';
     console.log('\n=== cli parity ===');
-    const cli = (args) => JSON.parse(execFileSync('node', [join(ENGINE, 'dist/bin/multi-memory.js'), '--build', BUILD, ...args], {
+    const cli = (args) => JSON.parse(execFileSync('node', [join(ENGINE, 'dist/bin/multi-memory.js'), '--build', STORE, ...args], {
         env: { ...process.env, MULTI_MEMORY_BUILDS: scratch },
         encoding: 'utf8',
     }));
