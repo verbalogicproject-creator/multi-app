@@ -13,6 +13,7 @@ const obj = (properties, description) => ({
     additionalProperties: false,
 });
 const str = (description) => ({ type: 'string', description });
+const bool = (description) => ({ type: 'boolean', description });
 const arr = (items, description) => ({ type: 'array', description, items });
 
 export const PLAN_SCHEMA = obj({
@@ -29,6 +30,25 @@ export const PLAN_SCHEMA = obj({
     }), 'A list of shared UI components to be created.'),
     acceptanceCriteria: arr(str('One concrete, checkable statement.'),
         '3-6 concrete, checkable statements describing what the finished app must do for it to be considered complete.'),
+    /**
+     * The shape every page and component must agree on, decided once instead of
+     * guessed separately by each of them.
+     *
+     * Without this, a photo's `location` and `date` are invented independently by
+     * whichever file needs them next, and by the fourth file three different guesses
+     * exist for the same conceptual object — measured on a real build: six files,
+     * six independent shapes for `PhotoItem`, `ServicePackage` and `ClientReview`,
+     * ~50 type errors from disagreement alone. `scaffoldFor` writes this into
+     * `src/types.ts` verbatim, so it is frozen before a single file is requested —
+     * the same move that made the Router structural instead of remembered.
+     */
+    entities: arr(obj({
+        name: str('The TypeScript interface name for this shared data shape, e.g. PhotoItem. PascalCase.'),
+        fields: arr(obj({
+            name: str('Field name, e.g. location'),
+            type: str('The TypeScript type: string, number, boolean, or a union of string literals like "square" | "portrait" | "landscape".'),
+        }), "Every field this shape has — every field any page or component will need from it. Omitting one here is the mistake this section exists to prevent."),
+    }), 'The shared data shapes referenced by more than one page or component — a photo, a review, a booking. Leave empty for an app with no shared data model.'),
 });
 
 const COLOR_ROLES = {
@@ -89,6 +109,23 @@ export const GENERATE_SCHEMA = obj({
         path: str("Full file path relative to the project root, e.g. 'src/App.tsx'."),
         content: str('The complete file contents.'),
     }), 'Every file of the generated project.'),
+});
+
+/**
+ * The acceptance-criteria self-check.
+ *
+ * Not a gate — a model judging its own output is not an independent observer, so this
+ * can never be the thing that decides whether a build passes. What it is: an honest
+ * self-report, structured so the server can tell satisfied from unsatisfied without
+ * parsing prose. See `server.js`'s `/api/builder/check-acceptance` and
+ * `HARNESS.md` for why this is labelled rather than trusted.
+ */
+export const ACCEPTANCE_CHECK_SCHEMA = obj({
+    results: arr(obj({
+        criterion: str('The acceptance criterion being judged, repeated back unchanged.'),
+        satisfied: bool('Whether the generated code actually satisfies this criterion.'),
+        evidence: str('One sentence: what in the code makes this true or false. Name a file if relevant.'),
+    }), 'One entry per acceptance criterion given, in the same order.'),
 });
 
 /** Converts the generated files array back into the { path: content } map the client expects. */

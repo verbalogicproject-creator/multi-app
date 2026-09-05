@@ -28,8 +28,8 @@ import { Buffer } from 'node:buffer';
 import { salvageFiles, isTruncation } from '../providers/salvage.js';
 import { toBuildIssues } from '../typecheck/parse.js';
 import { proposalsFor, unmappedCodes, PROPOSAL_TABLE, NOT_A_LESSON } from '../memory/proposals.js';
-import { normaliseManifest, manifestGaps, missingFrom, manifestInstruction, fileInstruction, generateFromManifest, filesNeedingRepair, importedPaths, repairInstruction, repairRound, planCoverage, coverPlan } from '../providers/generate.js';
-import { scaffoldFor, packageJsonFor, importedPackages, SCAFFOLD_PATHS, KNOWN_VERSIONS as KNOWN_VERSIONS_FOR_TEST } from '../providers/scaffold.js';
+import { normaliseManifest, manifestGaps, missingFrom, manifestInstruction, fileInstruction, generateFromManifest, filesNeedingRepair, importedPaths, repairInstruction, repairRound, planCoverage, coverPlan, acceptanceIssuesFrom, generatePromptFor } from '../providers/generate.js';
+import { scaffoldFor, packageJsonFor, importedPackages, SCAFFOLD_PATHS, KNOWN_VERSIONS as KNOWN_VERSIONS_FOR_TEST, typesFileFor } from '../providers/scaffold.js';
 import { AESTHETIC_DIMENSIONS, buildAestheticDirective } from '../providers/aesthetic.js';
 
 let failures = 0;
@@ -210,12 +210,13 @@ console.log('\n7. the orchestration, without a model');
 const PATH_RE = /Write exactly one file: `([^`]+)`/;
 
 const stub = ({ manifest, content = () => 'export const x = 1;', truncate = [] }) => {
-    const calls = { manifest: 0, files: [] };
+    const calls = { manifest: 0, files: [], manifestEfforts: [], fileEfforts: [] };
     const provider = {
-        async generateJson() { calls.manifest++; return { object: { files: manifest } }; },
-        async *streamJson({ prompt }) {
+        async generateJson({ effort } = {}) { calls.manifest++; calls.manifestEfforts.push(effort); return { object: { files: manifest } }; },
+        async *streamJson({ prompt, effort }) {
             const path = PATH_RE.exec(prompt)?.[1];
             calls.files.push(path);
+            calls.fileEfforts.push(effort);
             if (truncate.includes(path)) {
                 /* Exactly what a budget overrun looks like: valid JSON, cut mid-string. */
                 yield { text: `{"path":"${path}","content":"export const half = ` };
@@ -228,7 +229,7 @@ const stub = ({ manifest, content = () => 'export const x = 1;', truncate = [] }
     return { calls, provider };
 };
 
-const drive = async ({ manifest, truncate = [], content }) => {
+const drive = async ({ manifest, truncate = [], content, prefill = {} }) => {
     const { calls, provider } = stub({ manifest, truncate, content });
     const emitted = [];
     const result = await generateFromManifest({
@@ -240,6 +241,7 @@ const drive = async ({ manifest, truncate = [], content }) => {
         emit: (e) => emitted.push(e),
         schemas: { manifest: {}, file: {} },
         concurrency: 2,
+        prefill,
     });
     return { result, calls, emitted };
 };
@@ -318,10 +320,12 @@ ok('and holds it to its export contract', fix.includes('export exactly: C'));
 
 /* Only the named files cost a request. */
 const repairCalls = [];
+const repairEfforts = [];
 const repairProvider = {
-    async *streamJson({ prompt }) {
+    async *streamJson({ prompt, effort }) {
         const path = /Fix one file: `([^`]+)`/.exec(prompt)?.[1];
         repairCalls.push(path);
+        repairEfforts.push(effort);
         yield { text: JSON.stringify({ path, content: 'export const C = () => null;' }) };
     },
 };
@@ -656,6 +660,116 @@ ok('all three real dimensions can combine in one request',
         const dim = ['typography', 'motion', 'background'][i];
         return combined.includes(AESTHETIC_DIMENSIONS[dim].options[v].directive);
     }));
+
+// ---------------------------------------------------------------------------
+console.log('\n14. entities are frozen, not guessed');
+
+const ENTITIES = [
+    { name: 'PhotoItem', fields: [{ name: 'location', type: 'string' }, { name: 'year', type: 'number' }] },
+    { name: 'ServicePackage', fields: [{ name: 'name', type: 'string' }, { name: 'features', type: 'string[]' }] },
+];
+const types = typesFileFor(ENTITIES);
+ok('entities produce a types file', typeof types === 'string' && types.length > 0);
+ok('every entity becomes an interface',
+    types.includes('export interface PhotoItem {') && types.includes('export interface ServicePackage {'));
+ok('every field is declared with its type',
+    types.includes('location: string;') && types.includes('features: string[];'));
+ok('and it is deterministic — same input, same output', typesFileFor(ENTITIES) === types);
+ok('no entities produces nothing to write', typesFileFor([]) === null && typesFileFor(undefined) === null);
+ok('an entity with no name is skipped rather than crashing',
+    typesFileFor([{ fields: [{ name: 'x', type: 'string' }] }]) === null);
+
+const scaffoldWithEntities = scaffoldFor({ plan: { projectName: 'x', entities: ENTITIES }, theme: {} });
+ok('scaffoldFor writes src/types.ts when the plan has entities',
+    typeof scaffoldWithEntities['src/types.ts'] === 'string');
+const scaffoldWithout = scaffoldFor({ plan: { projectName: 'x' }, theme: {} });
+ok('and writes nothing when it does not', !('src/types.ts' in scaffoldWithout));
+
+ok('the manifest instruction mentions src/types.ts when entities exist',
+    manifestInstruction({ hasEntities: true }).includes('src/types.ts'));
+ok('and says nothing about it when they do not',
+    !manifestInstruction({ hasEntities: false }).includes('src/types.ts'));
+ok('and the default (no argument) behaves like no entities',
+    !manifestInstruction().includes('src/types.ts'));
+
+const sharedTypesContent = 'export interface PhotoItem {\n    location: string;\n}\n';
+const withTypes = fileInstruction({
+    manifest: [{ path: 'src/App.tsx', purpose: 'root', exports: ['default App'] }],
+    path: 'src/App.tsx', purpose: 'root', written: ['src/types.ts'], sharedTypes: sharedTypesContent,
+});
+ok('fileInstruction includes the literal shared-types content when given one',
+    withTypes.includes(sharedTypesContent),
+    'a file must see the exact shape, not just that a file called src/types.ts exists');
+const withoutTypes = fileInstruction({
+    manifest: [{ path: 'src/App.tsx', purpose: 'root', exports: ['default App'] }],
+    path: 'src/App.tsx', purpose: 'root', written: [],
+});
+ok('and includes nothing extra when there is none', !withoutTypes.includes('shared types'));
+
+// ---------------------------------------------------------------------------
+console.log('\n15. effort is raised where a mechanism now covers the risk it was hedging');
+
+ok('the manifest step now asks for medium effort',
+    happy.calls.manifestEfforts.length > 0 && happy.calls.manifestEfforts.every((e) => e === 'medium'),
+    JSON.stringify(happy.calls.manifestEfforts));
+ok('every per-file request asks for high effort',
+    happy.calls.fileEfforts.length > 0 && happy.calls.fileEfforts.every((e) => e === 'high'),
+    JSON.stringify(happy.calls.fileEfforts));
+ok('every repair request asks for high effort too',
+    repairEfforts.length > 0 && repairEfforts.every((e) => e === 'high'), JSON.stringify(repairEfforts));
+
+// ---------------------------------------------------------------------------
+console.log('\n16. the generate prompt puts static content before the per-build plan');
+
+const orderedPrompt = generatePromptFor({
+    plan: { projectName: 'Harbour', acceptanceCriteria: ['Works on a phone in daylight'] },
+    paletteSpec: 'bg #111', typeSpec: 'font-sans',
+});
+const stackRulesAt = orderedPrompt.indexOf('**Stack rules:**');
+const allowlistAt = orderedPrompt.indexOf('you may import');
+const planAt = orderedPrompt.indexOf("**This build's plan:**");
+ok('the stack rules appear before the plan',
+    stackRulesAt !== -1 && planAt !== -1 && stackRulesAt < planAt, `stack rules @${stackRulesAt}, plan @${planAt}`);
+ok('the allowlist instruction appears before the plan too',
+    allowlistAt !== -1 && allowlistAt < planAt, `allowlist @${allowlistAt}, plan @${planAt}`);
+ok('acceptance criteria appear after the plan, not before the stack rules',
+    orderedPrompt.indexOf('MUST satisfy') > stackRulesAt);
+ok('palette and typography — the actual per-build content — trail everything static',
+    orderedPrompt.indexOf('bg #111') > planAt);
+
+// ---------------------------------------------------------------------------
+console.log('\n17. the acceptance-criteria self-check is a labelled gap, not a gate');
+
+const allSatisfied = acceptanceIssuesFrom([
+    { criterion: 'The chart updates without a reload', satisfied: true, evidence: 'useEffect polls every 30s' },
+]);
+ok('a satisfied criterion produces no issue', allSatisfied.length === 0, JSON.stringify(allSatisfied));
+
+const oneUnmet = acceptanceIssuesFrom([
+    { criterion: 'The chart updates without a reload', satisfied: true, evidence: 'fine' },
+    { criterion: 'Works on a phone in daylight', satisfied: false, evidence: 'No contrast check anywhere in the code' },
+]);
+ok('an unsatisfied one produces exactly one warning', oneUnmet.length === 1, JSON.stringify(oneUnmet));
+ok('always a warning, never an error — a self-report cannot gate promotion', oneUnmet[0].severity === 'warning');
+ok('names the criterion', oneUnmet[0].message.includes('Works on a phone in daylight'));
+ok('and says plainly it is self-reported, not verified',
+    /self-reported/i.test(oneUnmet[0].message) && /not independently verified/i.test(oneUnmet[0].message));
+ok("carries the model's own evidence", oneUnmet[0].message.includes('No contrast check'));
+
+ok('malformed results produce nothing rather than throwing',
+    acceptanceIssuesFrom(null).length === 0 && acceptanceIssuesFrom(undefined).length === 0
+        && acceptanceIssuesFrom('not an array').length === 0);
+ok('a result missing its criterion is dropped rather than reported as "undefined"',
+    acceptanceIssuesFrom([{ satisfied: false }]).length === 0);
+
+ok('acceptance-criterion-unmet is a declared exclusion from the ladder, not an oversight',
+    'acceptance-criterion-unmet' in NOT_A_LESSON);
+ok('so unmappedCodes never flags it', unmappedCodes({ 'acceptance-criterion-unmet': 1 }).length === 0);
+
+const withAcceptance = proposalsFor({ ok: false, codes: { 'type-error': 1, 'acceptance-criterion-unmet': 1 } });
+const withoutAcceptance = proposalsFor({ ok: false, codes: { 'type-error': 1 } });
+ok('and it can never add a proposal alongside a real failure — the defendant does not also grade its own homework',
+    withAcceptance.length === withoutAcceptance.length, `${withAcceptance.length} vs ${withoutAcceptance.length}`);
 
 console.log(failures === 0 ? '\ngenerate ok' : `\n${failures} CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

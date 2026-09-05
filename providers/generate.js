@@ -22,8 +22,81 @@
  * `server.js` where the provider fallback and the memory journal already are.
  */
 
+import { allowlistInstruction } from './allowlist.js';
+
 /** Files a Vite + React + TS project cannot run without, whatever the model lists. */
 export const MANIFEST_FLOOR = ['index.html', 'package.json', 'src/main.tsx', 'src/App.tsx'];
+
+/**
+ * The `/api/builder/generate` prompt — static content first, the per-build plan last.
+ *
+ * This is the prefix of every manifest, per-file and repair request in one generation
+ * run (`basePromptFor` in `server.js`), so it is sent whole and unchanged ten to twenty
+ * times over a single build. Gemini's implicit prefix caching (2.5+) matches the
+ * longest shared prefix across requests; the longer the byte-identical block at the
+ * front, the more of that repetition is free instead of paid. The stack rules, the
+ * allowlist instruction and the design contract's fixed sub-rules never vary between
+ * builds at all, so they lead. The plan, acceptance criteria, palette and typography
+ * are the one thing that changes per build, so they trail, immediately before the
+ * manifest/file-specific instruction `server.js` appends after this string.
+ *
+ * Extracted from `server.js` as its own pure function for exactly one reason: the
+ * prompt is server-internal, sent to Gemini and never back to a client, so nothing
+ * short of importing this function directly can check that the ordering actually
+ * holds. `check:generate` asserts the stack rules appear before the plan JSON by
+ * string index — a revert of the reorder fails by name instead of silently costing
+ * whatever the reorder was for.
+ */
+export const generatePromptFor = ({ plan, paletteSpec, typeSpec }) => `You are a senior product engineer and designer. Generate the complete, production-quality code for a web application from the plan and theme given at the end of this prompt. The result must look like a designed product, not a template.
+
+**Design contract (mandatory):**
+- Type scale: one hero-size heading per page (text-4xl/5xl), section headings text-2xl, body text-base, captions text-sm. Never more than three sizes on one screen.
+- Spacing rhythm: sections py-16 to py-24, cards p-6, consistent gap-4/gap-6 grids. Align everything to one max-w-6xl mx-auto px-4 container.
+- Components must have hover and focus-visible states, and disabled states where relevant.
+- Realistic, domain-specific content everywhere: real-sounding names, numbers, dates and copy that fit the project's purpose. NEVER use "Lorem ipsum", "TODO", "placeholder", or empty stub components.
+- No external images. Where an image would go, use a styled div with a gradient or an inline SVG.
+
+**Stack rules:**
+1. Vite + React 19 + TypeScript, standard layout: index.html, src/main.tsx, src/App.tsx, src/index.css, src/pages/*, src/components/*.
+2. Routing with react-router-dom v6 (Routes in src/App.tsx, shared layout with nav + footer).
+3. Styling with Tailwind CSS v4: src/index.css starts with '@import "tailwindcss";' and vite.config.ts uses the @tailwindcss/vite plugin. Do NOT emit tailwind.config.js or postcss.config.js.
+4. package.json with correct dependencies and pinned major versions (react ^19, react-dom ^19, react-router-dom ^6, tailwindcss ^4, @tailwindcss/vite ^4, vite ^5, @vitejs/plugin-react ^4, typescript ^5) and scripts: "dev": "vite", "build": "vite build", "typecheck": "tsc --noEmit", "preview": "vite preview".
+5. tsconfig.json compilerOptions must be exactly: { "target": "ES2020", "lib": ["ES2020", "DOM", "DOM.Iterable"], "module": "ESNext", "moduleResolution": "bundler", "jsx": "react-jsx", "strict": true, "esModuleInterop": true, "skipLibCheck": true, "noEmit": true } with "include": ["src"].
+6. Code must compile under strict TypeScript: every function parameter, callback parameter and prop is explicitly typed — no implicit any. With jsx react-jsx, do not import React just for JSX; import only the hooks you use.
+7. Every file must be complete and syntactically valid. Interactive features (forms, filters, toggles) must actually work.
+8. ${allowlistInstruction()}
+
+**Before you finish**, verify every relative import you wrote resolves to a file you also emitted, and that every package you imported is on the list in rule 8. Escape quotes inside JSX text (setQuote("I can't do this"), never setQuote('I can't do this')) — unescaped quotes are a build failure.
+
+**Response format:** a single JSON object of the form {"files":[{"path":"...","content":"..."}, ...]} listing every file. No markdown, no commentary.
+
+**This build's plan:**
+${JSON.stringify(plan, null, 2)}
+${Array.isArray(plan?.acceptanceCriteria) && plan.acceptanceCriteria.length > 0
+    ? `\n**Acceptance criteria — the generated app MUST satisfy every one of these:**\n${plan.acceptanceCriteria.map((c, i) => `${i + 1}. ${c}`).join('\n')}\n`
+    : ''}
+**This build's palette and typography (the rest of the design contract above still applies):**
+- Palette: ${paletteSpec}
+- Typography: ${typeSpec}`;
+
+/**
+ * Turns the acceptance-criteria self-check's raw results into `BuildIssue`s.
+ *
+ * Only unsatisfied criteria become an issue — a satisfied one is not news, the same
+ * convention every other validator in this pipeline follows (`plan-page-missing`
+ * fires on a missing page, never a confirmation of a present one). Pure, so the rule
+ * that decides what a person sees is checkable without a model, even though the
+ * judgment feeding it never can be. See `server.js`'s `/api/builder/check-acceptance`
+ * and `HARNESS.md` for why the result is always `severity: 'warning'`.
+ */
+export const acceptanceIssuesFrom = (results) =>
+    (Array.isArray(results) ? results : [])
+        .filter((r) => r?.satisfied === false && typeof r.criterion === 'string')
+        .map((r) => ({
+            severity: 'warning',
+            code: 'acceptance-criterion-unmet',
+            message: `"${r.criterion}" — ${typeof r.evidence === 'string' && r.evidence ? r.evidence : 'not satisfied'} (self-reported by the model that wrote the code, not independently verified).`,
+        }));
 
 /**
  * Ask for the shape of the project before any of its content.
@@ -31,7 +104,7 @@ export const MANIFEST_FLOOR = ['index.html', 'package.json', 'src/main.tsx', 'sr
  * Deliberately forbids code: the moment a manifest starts carrying implementations it
  * is the single-shot response again, with the same ceiling.
  */
-export const manifestInstruction = () => `
+export const manifestInstruction = ({ hasEntities = false } = {}) => `
 
 **This request is the file manifest only — no code.**
 
@@ -43,9 +116,10 @@ package.json, tsconfig.json, vite.config.ts, src/main.tsx, src/index.css), every
 component from the plan, and any context, hook, type or data module the app requires.
 
 Still list \`index.html\`, \`package.json\`, \`tsconfig.json\`, \`vite.config.ts\`,
-\`src/index.css\` and \`src/main.tsx\` so the other files can rely on them — but they are
-written for you from the plan and the theme, so give them a one-line purpose and no
-exports and spend no thought on their contents.
+\`src/index.css\` and \`src/main.tsx\`${hasEntities ? ', and `src/types.ts`,' : ''} so the
+other files can rely on them — but they are written for you from the plan${hasEntities ? "'s entities" : ''} and the
+theme, so give them a one-line purpose and no exports and spend no thought on their
+contents.${hasEntities ? '\n\n**`src/types.ts` already declares every shared data shape the plan named.** Do not redeclare `interface`s for them anywhere else — import from `./types` (or the correct relative path) instead.' : ''}
 
 **\`src/main.tsx\` already mounts the app and already wraps it in a \`<BrowserRouter>\`.**
 \`src/App.tsx\` must therefore contain \`<Routes>\` and \`<Route>\` directly and must **not**
@@ -62,7 +136,7 @@ files are requested individually afterwards.`;
  * were written by separate requests which never saw each other's output — the one real
  * risk this shape introduces, and the cheapest possible guard against it.
  */
-export const fileInstruction = ({ manifest, path, purpose, written }) => {
+export const fileInstruction = ({ manifest, path, purpose, written, sharedTypes }) => {
     /* Each entry carries its exports, because the manifest's job is the contract, not
        the file tree. Paths agreeing was never the failure; names were. */
     const listing = manifest.map(f => {
@@ -74,6 +148,14 @@ export const fileInstruction = ({ manifest, path, purpose, written }) => {
     const done = written.length > 0
         ? `\n\nAlready written, and safe to import from: ${written.join(', ')}.`
         : '';
+    /* The manifest names `src/types.ts` and its exports, same as any other file — but
+       exports are names, not shapes, which is exactly the gap that let six files
+       invent six different versions of the same interface. Its literal content is
+       included here, not merely its existence, because "safe to import from" told a
+       file a shape was available without ever telling it what the shape *was*. */
+    const types = sharedTypes
+        ? `\n\n**The shared types this project already declared — use these exact shapes, do not invent your own:**\n\n\`\`\`typescript\n${sharedTypes}\`\`\``
+        : '';
     return `
 
 **Write exactly one file: \`${path}\`.**
@@ -81,7 +163,7 @@ export const fileInstruction = ({ manifest, path, purpose, written }) => {
 Its purpose: ${purpose}
 
 The complete project manifest, so your imports match the files that will exist:
-${listing}${done}
+${listing}${done}${types}
 
 Return only that one file's full contents. It must be complete and syntactically valid on
 its own — every brace, bracket and JSX tag closed, every string terminated.
@@ -216,6 +298,7 @@ export const generateFromManifest = async ({
     models, run, getProvider, systemFor, basePromptFor, recalled = '', trialled = '',
     emit, schemas, concurrency = 3, onServed, prefill = {}, provided = [], plan = null,
 }) => {
+    const sharedTypes = prefill['src/types.ts'];
     let manifest = null;
     try {
         const { object } = await run(models, async (model) => {
@@ -223,9 +306,13 @@ export const generateFromManifest = async ({
             return getProvider(model).generateJson({
                 model,
                 system: systemFor(model),
-                prompt: basePromptFor(model) + manifestInstruction() + recalled + trialled,
+                prompt: basePromptFor(model) + manifestInstruction({ hasEntities: Boolean(sharedTypes) }) + recalled + trialled,
                 schema: schemas.manifest,
-                effort: 'low',
+                /* Raised from 'low': the manifest now also has to cross-reference
+                   entities correctly, and every model here supports 'medium' at no
+                   extra cost against the daily request quota — effort spends latency,
+                   not requests. See HARNESS.md. */
+                effort: 'medium',
                 maxOutputTokens: 8192,
             });
         }, onServed);
@@ -270,9 +357,14 @@ export const generateFromManifest = async ({
             for await (const event of provider.streamJson({
                 model,
                 system: systemFor(model),
-                prompt: basePromptFor(model) + fileInstruction({ manifest, path: entry.path, purpose: entry.purpose, written }) + recalled + trialled,
+                prompt: basePromptFor(model) + fileInstruction({ manifest, path: entry.path, purpose: entry.purpose, written, sharedTypes }) + recalled + trialled,
                 schema: schemas.file,
-                effort: 'medium',
+                /* Raised from 'medium'. Bounded at 16,384 tokens per file — nowhere
+                   near the 65,536-token ceiling the whole-app fallback shares with
+                   thinking, so there is no truncation risk this trades against, and
+                   correctly applying a frozen shape is exactly the kind of task more
+                   thinking helps with. See HARNESS.md. */
+                effort: 'high',
                 maxOutputTokens: 16384,
             })) {
                 if (event.usage) usage = event.usage;
@@ -446,7 +538,11 @@ export const repairRound = async ({
                     sources,
                 }),
                 schema: schemas.file,
-                effort: 'medium',
+                /* Raised from 'medium', same reasoning as per-file generation: bounded
+                   at 16,384 tokens, and a fix argued from the compiler's own
+                   diagnostics is exactly where more careful reasoning pays off. See
+                   HARNESS.md. */
+                effort: 'high',
                 maxOutputTokens: 16384,
             })) {
                 if (event.usage) usage = event.usage;

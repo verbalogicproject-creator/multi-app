@@ -24,3 +24,7 @@ public/memory-preview.html
 multi-app-auth-integration.md
 multi-app-how-to-integrate-auth.md
 .multi-memory.v0/
+
+# Reference material pulled in for the harness-upgrade analysis (Gemini API docs) —
+# research input, not this project's own documentation.
+docs/

@@ -3,11 +3,14 @@ import { useAppContext } from '../../context/AppContext';
 
 interface PlanPage { name: string; path: string; description: string; }
 interface PlanComponent { name: string; description: string; }
+interface PlanEntityField { name: string; type: string; }
+interface PlanEntity { name: string; fields: PlanEntityField[]; }
 interface DraftPlan {
     projectName: string;
     projectDescription: string;
     pages: PlanPage[];
     components: PlanComponent[];
+    entities: PlanEntity[];
     acceptanceCriteria: string[];
 }
 
@@ -20,6 +23,12 @@ const toDraft = (plan: any): DraftPlan => ({
         : [],
     components: Array.isArray(plan?.components)
         ? plan.components.map((c: any) => ({ name: c?.name ?? '', description: c?.description ?? '' }))
+        : [],
+    entities: Array.isArray(plan?.entities)
+        ? plan.entities.map((e: any) => ({
+            name: e?.name ?? '',
+            fields: Array.isArray(e?.fields) ? e.fields.map((f: any) => ({ name: f?.name ?? '', type: f?.type ?? '' })) : [],
+        }))
         : [],
     acceptanceCriteria: Array.isArray(plan?.acceptanceCriteria)
         ? plan.acceptanceCriteria.map((c: any) => String(c ?? ''))
@@ -65,10 +74,18 @@ const Step_Plan: React.FC = () => {
         update({ pages: draft.pages.map((p, i) => i === index ? { ...p, ...patch } : p) });
     const updateComponent = (index: number, patch: Partial<PlanComponent>) =>
         update({ components: draft.components.map((c, i) => i === index ? { ...c, ...patch } : c) });
+    const updateEntity = (index: number, patch: Partial<PlanEntity>) =>
+        update({ entities: draft.entities.map((e, i) => i === index ? { ...e, ...patch } : e) });
+    const updateEntityField = (entityIndex: number, fieldIndex: number, patch: Partial<PlanEntityField>) =>
+        update({
+            entities: draft.entities.map((e, i) => i === entityIndex
+                ? { ...e, fields: e.fields.map((f, fi) => fi === fieldIndex ? { ...f, ...patch } : f) }
+                : e),
+        });
 
     const handleApprove = () => {
         if (isDirty) recordEvidence('Blueprint hand-edited before approval');
-        recordEvidence(`Blueprint approved — ${draft.pages.length} pages, ${draft.components.length} components, ${draft.acceptanceCriteria.length} acceptance criteria`);
+        recordEvidence(`Blueprint approved — ${draft.pages.length} pages, ${draft.components.length} components, ${draft.entities.length} shared shapes, ${draft.acceptanceCriteria.length} acceptance criteria`);
         setBuilderState(prev => ({
             ...prev,
             plan: { ...prev.plan, ...draft },
@@ -154,6 +171,50 @@ const Step_Plan: React.FC = () => {
                         + Add component
                     </button>
                 </div>
+            </div>
+
+            {/* Shared data shapes — decided once instead of guessed separately by
+                every page and component that needs one. See providers/schemas.js's
+                doc comment on PLAN_SCHEMA.entities for why this exists. */}
+            <div className={`mt-4 ${panelClass}`}>
+                <h3 className={panelHeading}>Shared data shapes</h3>
+                <p className="text-xs text-metal-300 mt-2 mb-3">
+                    Anything more than one page or component needs — a photo, a review, a booking. Declared once so every file agrees on the fields. Leave empty if nothing is shared.
+                </p>
+                <ul className="space-y-3">
+                    {draft.entities.map((entity, index) => (
+                        <li key={index} className="p-3 bg-raised rounded-card space-y-2">
+                            <div className="flex items-center gap-2">
+                                <input type="text" value={entity.name} disabled={isBusy} placeholder="PhotoItem"
+                                    onChange={e => updateEntity(index, { name: e.target.value })} className={`${inputClass} font-mono`} />
+                                <button onClick={() => update({ entities: draft.entities.filter((_, i) => i !== index) })}
+                                    disabled={isBusy} className={removeBtnClass} title="Remove shape">&times;</button>
+                            </div>
+                            <ul className="space-y-1.5">
+                                {entity.fields.map((field, fieldIndex) => (
+                                    <li key={fieldIndex} className="flex items-center gap-2 pl-2">
+                                        <input type="text" value={field.name} disabled={isBusy} placeholder="location"
+                                            onChange={e => updateEntityField(index, fieldIndex, { name: e.target.value })}
+                                            className={`${inputClass} text-xs`} />
+                                        <input type="text" value={field.type} disabled={isBusy} placeholder="string"
+                                            onChange={e => updateEntityField(index, fieldIndex, { type: e.target.value })}
+                                            className={`${inputClass} text-xs w-32 shrink-0 font-mono`} />
+                                        <button onClick={() => updateEntity(index, { fields: entity.fields.filter((_, i) => i !== fieldIndex) })}
+                                            disabled={isBusy} className={removeBtnClass} title="Remove field">&times;</button>
+                                    </li>
+                                ))}
+                            </ul>
+                            <button disabled={isBusy} className={`${addBtnClass} ml-2 w-[calc(100%-0.5rem)]`}
+                                onClick={() => updateEntity(index, { fields: [...entity.fields, { name: '', type: 'string' }] })}>
+                                + Add field
+                            </button>
+                        </li>
+                    ))}
+                </ul>
+                <button disabled={isBusy} className={addBtnClass}
+                    onClick={() => update({ entities: [...draft.entities, { name: '', fields: [{ name: '', type: 'string' }] }] })}>
+                    + Add shape
+                </button>
             </div>
 
             {/* Acceptance criteria */}

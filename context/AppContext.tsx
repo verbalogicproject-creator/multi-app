@@ -1138,13 +1138,32 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
              */
             setBuilderState(prev => ({ ...prev, status: { ...prev.status, message: 'Running it…' } }));
             const behaviour = await previewVerdict(buildId ?? 'build', files);
-            const validation: BuildValidation = behaviour
+            const behaviourValidation: BuildValidation = behaviour
                 ? {
                     ok: typed.ok && behaviour.length === 0,
                     issues: [...typed.issues, ...behaviour],
                     checked: typed.checked,
                 }
                 : typed;
+
+            /*
+             * Last, and the only judge that is not independent — a self-report, not a
+             * verdict. Whether the model that wrote the code believes its own output
+             * satisfies what the plan demanded. Always `severity: 'warning'` server
+             * side, so it can never flip `ok`; skipped when the plan declared no
+             * criteria, and `null` (no opinion) leaves `validation` exactly as the
+             * real judges above left it — never mistaken for "all satisfied".
+             */
+            const acceptance = Array.isArray(builderState.plan?.acceptanceCriteria) && builderState.plan.acceptanceCriteria.length > 0
+                ? await apiService.checkAcceptanceCriteria(builderState.plan, files, servedModelId ?? undefined)
+                : null;
+            const validation: BuildValidation = acceptance && acceptance.length > 0
+                ? {
+                    ok: behaviourValidation.ok,
+                    issues: [...behaviourValidation.issues, ...acceptance],
+                    checked: behaviourValidation.checked,
+                }
+                : behaviourValidation;
 
             const fileCount = Object.keys(files).length;
             const errors = validation.issues.filter(i => i.severity === 'error').length;

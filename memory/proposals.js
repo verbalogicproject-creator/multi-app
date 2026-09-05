@@ -137,6 +137,13 @@ export const NOT_A_LESSON = {
        the chance to get wrong. */
     'plan-page-missing': 'The manifest is made to cover the plan, so this now means a file request failed, not that the model forgot the page.',
     'plan-component-missing': 'The same: a delivery gap, not a planning one.',
+    /* Not a missing entry — a deliberate exclusion. The model that wrote the code is
+       the same one reporting whether it satisfies the criteria; teaching a lesson from
+       that self-report would let a lesson qualify itself, which the ladder's
+       independence property already forbids for every other signal. If this ever
+       needs a real lesson, it needs an independent check first (a per-criterion test
+       harness, not a model's opinion of its own work), not a row here. */
+    'acceptance-criterion-unmet': 'Self-reported by the model that wrote the code, not an independent judge — cannot justify a lesson without the defendant grading its own homework.',
 };
 
 /** Any code the table has never been asked about — the thing this file exists to surface. */

@@ -40,11 +40,10 @@ import { fileURLToPath } from 'url';
 import { providerForModel, usableModels, isModelUsable } from './providers/index.js';
 import { getModel, modelChain, pickModel } from './providers/catalog.js';
 import { toolsForRequest } from './providers/tools.js';
-import { PLAN_SCHEMA, DIRECTIONS_SCHEMA, GENERATE_SCHEMA, MANIFEST_SCHEMA, FILE_SCHEMA, filesArrayToRecord } from './providers/schemas.js';
+import { PLAN_SCHEMA, DIRECTIONS_SCHEMA, GENERATE_SCHEMA, MANIFEST_SCHEMA, FILE_SCHEMA, ACCEPTANCE_CHECK_SCHEMA, filesArrayToRecord } from './providers/schemas.js';
 import { salvageFiles, isTruncation } from './providers/salvage.js';
-import { generateFromManifest, repairRound } from './providers/generate.js';
+import { generateFromManifest, repairRound, acceptanceIssuesFrom, generatePromptFor } from './providers/generate.js';
 import { scaffoldFor, packageJsonFor } from './providers/scaffold.js';
-import { allowlistInstruction } from './providers/allowlist.js';
 import { buildAestheticDirective } from './providers/aesthetic.js';
 import { buildSystemPrompt, builderPreamble } from './providers/prompts.js';
 import { memoryRouter } from './memory/routes.js';
@@ -723,35 +722,7 @@ app.post('/api/builder/generate', async (req, res) => {
         const { plan, theme, model: requestedModel, buildId, episodeId } = req.body;
         const paletteSpec = describePalette(theme);
         const typeSpec = BUILDER_TYPE_TOKENS[theme?.typography] || BUILDER_TYPE_TOKENS['Sans-serif & Friendly'];
-        const prompt = `You are a senior product engineer and designer. Generate the complete, production-quality code for a web application from the plan and theme below. The result must look like a designed product, not a template.
-
-**Project Plan:**
-${JSON.stringify(plan, null, 2)}
-${Array.isArray(plan?.acceptanceCriteria) && plan.acceptanceCriteria.length > 0
-    ? `\n**Acceptance criteria — the generated app MUST satisfy every one of these:**\n${plan.acceptanceCriteria.map((c, i) => `${i + 1}. ${c}`).join('\n')}\n`
-    : ''}
-**Design contract (mandatory):**
-- Palette: ${paletteSpec}
-- Typography: ${typeSpec}
-- Type scale: one hero-size heading per page (text-4xl/5xl), section headings text-2xl, body text-base, captions text-sm. Never more than three sizes on one screen.
-- Spacing rhythm: sections py-16 to py-24, cards p-6, consistent gap-4/gap-6 grids. Align everything to one max-w-6xl mx-auto px-4 container.
-- Components must have hover and focus-visible states, and disabled states where relevant.
-- Realistic, domain-specific content everywhere: real-sounding names, numbers, dates and copy that fit the project's purpose. NEVER use "Lorem ipsum", "TODO", "placeholder", or empty stub components.
-- No external images. Where an image would go, use a styled div with a gradient or an inline SVG.
-
-**Stack rules:**
-1. Vite + React 19 + TypeScript, standard layout: index.html, src/main.tsx, src/App.tsx, src/index.css, src/pages/*, src/components/*.
-2. Routing with react-router-dom v6 (Routes in src/App.tsx, shared layout with nav + footer).
-3. Styling with Tailwind CSS v4: src/index.css starts with '@import "tailwindcss";' and vite.config.ts uses the @tailwindcss/vite plugin. Do NOT emit tailwind.config.js or postcss.config.js.
-4. package.json with correct dependencies and pinned major versions (react ^19, react-dom ^19, react-router-dom ^6, tailwindcss ^4, @tailwindcss/vite ^4, vite ^5, @vitejs/plugin-react ^4, typescript ^5) and scripts: "dev": "vite", "build": "vite build", "typecheck": "tsc --noEmit", "preview": "vite preview".
-5. tsconfig.json compilerOptions must be exactly: { "target": "ES2020", "lib": ["ES2020", "DOM", "DOM.Iterable"], "module": "ESNext", "moduleResolution": "bundler", "jsx": "react-jsx", "strict": true, "esModuleInterop": true, "skipLibCheck": true, "noEmit": true } with "include": ["src"].
-6. Code must compile under strict TypeScript: every function parameter, callback parameter and prop is explicitly typed — no implicit any. With jsx react-jsx, do not import React just for JSX; import only the hooks you use.
-7. Every file must be complete and syntactically valid. Interactive features (forms, filters, toggles) must actually work.
-8. ${allowlistInstruction()}
-
-**Before you finish**, verify every relative import you wrote resolves to a file you also emitted, and that every package you imported is on the list in rule 8. Escape quotes inside JSX text (setQuote("I can't do this"), never setQuote('I can't do this')) — unescaped quotes are a build failure.
-
-**Response format:** a single JSON object of the form {"files":[{"path":"...","content":"..."}, ...]} listing every file. No markdown, no commentary.`;
+        const prompt = generatePromptFor({ plan, paletteSpec, typeSpec });
 
         res.setHeader('Content-Type', 'application/x-ndjson');
 
@@ -935,14 +906,20 @@ ${Array.isArray(plan?.acceptanceCriteria) && plan.acceptanceCriteria.length > 0
             emit: (event) => res.write(JSON.stringify(event) + '\n'),
             schemas: { manifest: MANIFEST_SCHEMA, file: FILE_SCHEMA },
             onServed,
-            /* Written, not requested. See providers/scaffold.js — these four are
-               dictated verbatim by the prompt above, so asking a model for them costs
-               four requests and adds four ways to be wrong. */
+            /* Written, not requested. See providers/scaffold.js — these files (five
+               when the plan declares entities, four when it does not) are dictated
+               verbatim by the prompt above, so asking a model for them costs a
+               request each and adds a way to be wrong. */
             prefill: scaffoldFor({ plan, theme }),
             /* So a manifest that dropped an approved page can have it put back. */
             plan,
-            /* Derived from the finished imports below, so it is never a gap. */
-            provided: ['package.json'],
+            /* package.json is derived from the finished imports below, so it is never
+               a gap. src/types.ts is scaffolded above whenever the plan has entities —
+               same reason. */
+            provided: [
+                'package.json',
+                ...(Array.isArray(plan?.entities) && plan.entities.length > 0 ? ['src/types.ts'] : []),
+            ],
         });
 
         if (run.unusable) {
@@ -1169,6 +1146,64 @@ ${Array.isArray(plan?.acceptanceCriteria) && plan.acceptanceCriteria.length > 0
     }
 });
 
+/**
+ * The acceptance-criteria self-check — a labelled gap, not a gate.
+ *
+ * `PLAN_SCHEMA.acceptanceCriteria` is fed to the generate prompt as "MUST satisfy",
+ * and nothing has ever checked it: the exact failure the declarations-correction
+ * document names — a claim that reads as a guarantee and behaves as nothing, because
+ * a human sees "acceptance criteria" as a real requirements list right next to
+ * pages and components, which *do* have real mechanisms behind them.
+ *
+ * A model judging whether its own code satisfies a criterion is not an independent
+ * observer, so this can never decide whether a build passes — that would let a
+ * lesson qualify itself, the exact thing the ladder's independence property forbids.
+ * What this closes is the *silence*: a person now sees an actual answer, honestly
+ * labelled as a self-report, instead of a claim nothing ever followed up on.
+ *
+ * Only *unsatisfied* criteria become an issue, matching every other validator here
+ * (`plan-page-missing` fires on a missing page, never a confirmation of a present
+ * one) — a build with nothing to report reports nothing, not N green checkmarks.
+ *
+ * `null` on any failure, never `{ issues: [] }` — that would read as "checked, all
+ * satisfied" when nothing was checked at all. Same contract as `previewVerdict` and
+ * `runTypecheck`: an instrument that did not run must not be mistaken for a pass.
+ */
+app.post('/api/builder/check-acceptance', async (req, res) => {
+    try {
+        const { plan, files, model: requestedModel } = req.body;
+        const criteria = Array.isArray(plan?.acceptanceCriteria)
+            ? plan.acceptanceCriteria.filter((c) => typeof c === 'string' && c.trim() !== '')
+            : [];
+        if (criteria.length === 0) { res.json({ issues: [] }); return; }
+
+        const prompt = `A web application was generated from the plan below. Judge honestly whether the code actually satisfies each acceptance criterion — do not assume it does merely because it was asked for.
+
+**Acceptance criteria:**
+${criteria.map((c, i) => `${i + 1}. ${c}`).join('\n')}
+
+**The generated files:**
+${Object.entries(files ?? {}).map(([path, content]) => `### ${path}\n${content}`).join('\n\n')}`;
+
+        const { object } = await withModelFallback(
+            builderModelChain(requestedModel),
+            (model) => providerForModel(model).generateJson({
+                model,
+                system: builderPreamble(getModel(model).provider),
+                prompt,
+                schema: ACCEPTANCE_CHECK_SCHEMA,
+                effort: 'low',
+                maxOutputTokens: 4096,
+            }),
+            () => {},
+        );
+
+        res.json({ issues: acceptanceIssuesFrom(object?.results) });
+    } catch (error) {
+        console.error('Builder check-acceptance error:', error);
+        res.status(500).json({ message: friendlyProviderError(error, 'Error checking acceptance criteria.') });
+    }
+});
 
 // Health check
 app.get('/healthz', (req, res) => {

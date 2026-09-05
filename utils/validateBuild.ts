@@ -53,7 +53,18 @@ export type BuildIssueCode =
      * pure. It is one code for every TS error number on purpose — `memory/proposals.js`
      * keys on the code, and a row per TS number would be a table nobody maintains.
      */
-    | 'type-error';
+    | 'type-error'
+    /**
+     * An acceptance criterion the plan declared, which the model that wrote the code
+     * reports its own output does not satisfy.
+     *
+     * Always `severity: 'warning'` — a self-report is not an independent verdict, so
+     * it must never gate promotion the way `type-error` does. Produced server-side by
+     * `/api/builder/check-acceptance`, never here: this module stays model-free.
+     * Excluded from `memory/proposals.js`'s `PROPOSAL_TABLE` on purpose — see its
+     * `NOT_A_LESSON` entry for this code.
+     */
+    | 'acceptance-criterion-unmet';
 
 export interface BuildIssue {
     severity: 'error' | 'warning';

@@ -2,6 +2,7 @@
 import { ChatMode, CustomAiStyle, Message, MessagePart, Persona, Project, ProjectFile } from "../types/index";
 import { updateProject as updateProjectInStorage } from "./geminiService";
 import type { GenerateResult } from '../types/build';
+import type { BuildIssue } from '../utils/validateBuild';
 
 export interface CatalogModel {
     id: string;
@@ -230,4 +231,29 @@ export const generateWebAppCode = async (plan: any, theme: any, model?: string, 
 
     if (!files) throw new Error('Generation stream ended without a result. Please try again.');
     return { files, truncated, salvagedCount, finishReason, manifest, missing, repaired, repairRounds };
+};
+
+/**
+ * The acceptance-criteria self-check: whether the model that wrote the code believes
+ * its own output satisfies each criterion the plan declared. Not a verdict — a
+ * self-report, always labelled as one in the issue text this returns.
+ *
+ * `null` on any failure, never `[]` — an empty array would read as "checked, every
+ * criterion satisfied" when nothing was checked at all. Same contract as
+ * `buildPreview`/`runTypecheck`: an instrument that did not answer has no opinion,
+ * and no opinion must never be mistaken for a pass.
+ */
+export const checkAcceptanceCriteria = async (plan: any, files: Record<string, string>, model?: string): Promise<BuildIssue[] | null> => {
+    try {
+        const response = await fetch('/api/builder/check-acceptance', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ plan, files, model }),
+        });
+        if (!response.ok) return null;
+        const body = await response.json();
+        return Array.isArray(body?.issues) ? body.issues : null;
+    } catch {
+        return null;
+    }
 };
