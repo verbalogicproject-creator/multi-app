@@ -338,6 +338,33 @@ const run = async () => {
             await dockItem(page, 'Preview').isDisabled(),
             'Preview is still offered for a project that no longer exists');
 
+        // ── 6. an idle builder has no identity to record against ────────────────
+        /* `restoreBuilderState` minted a build id on every page load, because
+           `resetWebAppBuild` persists `buildId: null` — so once anyone had finished or
+           cancelled a build, every later load produced a fresh id and `MemoryPanel`'s
+           status poll materialised a store to ask whether that id had recorded anything.
+           The act of checking created what it was checking for.
+
+           Measured as polls carrying a build id rather than as files on disk: the shared
+           store means there is only ever one file either way, so a file count cannot see
+           this and would pass in both directions. */
+        const idle = await openPage(browser, DESKTOP, URL, {
+            gemini_builder_state: { isActive: false, currentStep: 1, idea: '', memory: { buildId: null } },
+        });
+        try {
+            const polls = [];
+            idle.page.on('request', r => {
+                if (r.url().includes('/api/memory/state')) polls.push(r.url());
+            });
+            await idle.page.reload({ waitUntil: 'networkidle' });
+            await idle.page.waitForTimeout(1200);
+            ok('an idle builder mints no build id',
+                polls.filter(u => u.includes('buildId=build-')).length === 0,
+                `${polls.length} poll(s): ${polls.map(u => u.split('?')[1]).join(', ')}`);
+        } finally {
+            await idle.context.close();
+        }
+
     } finally {
         await context.close();
         await browser.close();
