@@ -213,7 +213,7 @@ export const normaliseManifest = (files, max = 60) => {
  * going to run.
  */
 export const generateFromManifest = async ({
-    models, run, getProvider, systemFor, basePrompt, recalled = '', trialled = '',
+    models, run, getProvider, systemFor, basePromptFor, recalled = '', trialled = '',
     emit, schemas, concurrency = 3, onServed, prefill = {}, provided = [], plan = null,
 }) => {
     let manifest = null;
@@ -223,7 +223,7 @@ export const generateFromManifest = async ({
             return getProvider(model).generateJson({
                 model,
                 system: systemFor(model),
-                prompt: basePrompt + manifestInstruction() + recalled + trialled,
+                prompt: basePromptFor(model) + manifestInstruction() + recalled + trialled,
                 schema: schemas.manifest,
                 effort: 'low',
                 maxOutputTokens: 8192,
@@ -270,7 +270,7 @@ export const generateFromManifest = async ({
             for await (const event of provider.streamJson({
                 model,
                 system: systemFor(model),
-                prompt: basePrompt + fileInstruction({ manifest, path: entry.path, purpose: entry.purpose, written }) + recalled + trialled,
+                prompt: basePromptFor(model) + fileInstruction({ manifest, path: entry.path, purpose: entry.purpose, written }) + recalled + trialled,
                 schema: schemas.file,
                 effort: 'medium',
                 maxOutputTokens: 16384,

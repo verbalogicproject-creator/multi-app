@@ -45,6 +45,7 @@ import { salvageFiles, isTruncation } from './providers/salvage.js';
 import { generateFromManifest, repairRound } from './providers/generate.js';
 import { scaffoldFor, packageJsonFor } from './providers/scaffold.js';
 import { allowlistInstruction } from './providers/allowlist.js';
+import { buildAestheticDirective } from './providers/aesthetic.js';
 import { buildSystemPrompt, builderPreamble } from './providers/prompts.js';
 import { memoryRouter } from './memory/routes.js';
 import * as memory from './memory/bridge.js';
@@ -925,7 +926,10 @@ ${Array.isArray(plan?.acceptanceCriteria) && plan.acceptanceCriteria.length > 0
             run: withModelFallback,
             getProvider: providerForModel,
             systemFor: (model) => builderPreamble(getModel(model).provider),
-            basePrompt: prompt,
+            /* Dialect-matched per attempted model, not baked in once — a mid-request
+               fallback to a different provider must not keep reading another
+               provider's XML tags or headers as if they were content. */
+            basePromptFor: (model) => prompt + buildAestheticDirective(theme?.aesthetic, getModel(model).provider),
             recalled,
             trialled,
             emit: (event) => res.write(JSON.stringify(event) + '\n'),
@@ -1028,7 +1032,7 @@ ${Array.isArray(plan?.acceptanceCriteria) && plan.acceptanceCriteria.length > 0
             for await (const event of provider.streamJson({
                 model,
                 system: builderPreamble(getModel(model).provider),
-                prompt: prompt + recalled + trialled,
+                prompt: prompt + recalled + trialled + buildAestheticDirective(theme?.aesthetic, getModel(model).provider),
                 schema: GENERATE_SCHEMA,
                 effort: 'medium',
                 maxOutputTokens: 65536,

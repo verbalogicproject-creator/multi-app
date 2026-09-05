@@ -161,6 +161,32 @@ const FILES = {
         + "    );\n"
         + "}\n",
 };
+/**
+ * The same project, with one real type error — `Counter` is typed to take a
+ * `number` and is handed a string. `tsc` rejects this; nothing about the runtime
+ * does, since JavaScript never sees the annotation once it is stripped. That gap
+ * is exactly what `check-preview.mjs`'s Sandpack section exists to exercise: a
+ * bundler that only transpiles, as Sandpack's does, renders this project without
+ * complaint, and `validation.ok` must stay `false` regardless.
+ */
+const FILES_TYPE_ERROR = {
+    ...FILES,
+    'src/App.tsx': "interface CounterProps { count: number }\n"
+        + "function Counter({ count }: CounterProps) {\n"
+        + "    return <p className=\"mt-4 text-slate-600\">{count} berths free</p>;\n"
+        + "}\n\n"
+        + "export default function App() {\n"
+        + "    return (\n"
+        + "        <main className=\"max-w-6xl mx-auto px-4 py-16\">\n"
+        + "            <h1 className=\"text-4xl font-bold\">Harbour Dashboard</h1>\n"
+        // @ts-expect-error is a suppression the model would have to write on purpose;
+        // a real generated mistake looks exactly like this instead — no annotation,
+        // just a value of the wrong type reaching a typed prop.
+        + "            <Counter count=\"not-a-number\" />\n"
+        + "        </main>\n"
+        + "    );\n"
+        + "}\n",
+};
 const EVIDENCE = [
     { ts: 1756700000000, event: 'Blueprint approved — 1 pages, 1 components, 2 acceptance criteria' },
     { ts: 1756700060000, event: 'Direction selected — Charcoal' },
@@ -212,6 +238,14 @@ export const SURFACES = [
           { severity: 'warning', code: 'placeholder-content', message: 'Lorem ipsum remains in the hero copy.', file: 'src/App.tsx' },
       ] } }) },
     { name: 'wizard-5-export',   phone: true, desktop: true, seed: wizard({ currentStep: 5, generatedFiles: FILES, validation: { ok: true, checked: 2, issues: [] } }), reach: async () => {} },
+    // "Keep it anyway" from the held-candidate screen lands here: a real, reachable
+    // state where a failing verdict and a promoted build coexist. Sandpack does not
+    // type-check, so it renders this project as happily as a clean one — which is
+    // the point. `check-preview.mjs` asserts `validation.ok` stays false regardless.
+    { name: 'wizard-5-export-kept-despite', phone: true, desktop: true, reach: async () => {},
+      seed: wizard({ currentStep: 5, generatedFiles: FILES_TYPE_ERROR, validation: { ok: false, checked: 2, issues: [
+          { severity: 'error', code: 'type-error', message: "Counter's count prop expects a number; received a string.", file: 'src/App.tsx' },
+      ] } }) },
     // Every route below goes through the dock, because the dock is the only thing that
     // moves you between destinations now. The rail's tab strip is gone: Projects is a
     // destination, Agents and AI Settings are the Harness, and `AI Tools` was dead —

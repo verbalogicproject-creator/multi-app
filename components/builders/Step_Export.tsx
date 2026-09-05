@@ -1,6 +1,10 @@
-import React, { useState } from 'react';
+import React, { Suspense, lazy, useState } from 'react';
 import { useAppContext } from '../../context/AppContext';
 import PreviewHost from '../PreviewHost';
+
+/* Lazy: Sandpack's bundler chrome and its CDN fetch have no reason to load until
+   someone actually reaches this step, and most builds never will in one session. */
+const SandpackAppPreview = lazy(() => import('./SandpackAppPreview'));
 
 const button =
     "tap px-6 md:px-8 rounded-xl font-medium " +
@@ -116,6 +120,30 @@ const Step_Export: React.FC = () => {
                     files={generatedFiles}
                     title={`${plan.projectName} preview`}
                 />
+            </div>
+
+            <div className="mt-8 text-left">
+                <p className="text-xs font-medium uppercase tracking-[0.12em] text-metal-300 mb-3">
+                    Interactive preview <span className="normal-case tracking-normal text-metal-400">— every package on the list, rendered live</span>
+                </p>
+                {/* A second, independent look at the same files — not a second verdict.
+                    `validation` above is already decided; this component cannot change it.
+                    See SandpackAppPreview's doc comment for why the two may disagree. */}
+                <div className="bezel-shell" data-sandpack-preview>
+                    <div className="bezel-core overflow-hidden">
+                        <Suspense fallback={
+                            <div className="w-full h-[22rem] md:h-[28rem] flex items-center justify-center bg-raised rounded-core">
+                                <span className="meta text-xs text-metal-400">Loading interactive preview…</span>
+                            </div>
+                        }>
+                            <SandpackAppPreview
+                                files={generatedFiles}
+                                title={plan.projectName}
+                                className="w-full h-[22rem] md:h-[28rem] rounded-core"
+                            />
+                        </Suspense>
+                    </div>
+                </div>
             </div>
 
             <div className="mt-8 flex flex-col md:flex-row justify-center gap-3 md:gap-4">

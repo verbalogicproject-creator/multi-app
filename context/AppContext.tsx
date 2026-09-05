@@ -35,6 +35,19 @@ export interface WebAppBuilderState {
         palette: string;
         typography: string;
         colors?: ThemeColors;      // concrete tokens; absent on builds saved before the token picker
+        /**
+         * The variety lever `providers/aesthetic.js` turns into prompt directives.
+         * Every field optional and independently toggleable — absent on every build
+         * saved before A0, and `buildAestheticDirective` treats an unset or unknown
+         * value as "say nothing about this dimension" rather than an error.
+         */
+        aesthetic?: {
+            typography?: string;
+            motion?: string;
+            background?: string;
+            antiSlop?: boolean;
+            selfReflection?: boolean;
+        };
     };
     generatedFiles: Record<string, string> | null;
     // A fresh generation lands here first and is only promoted once it passes

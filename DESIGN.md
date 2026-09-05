@@ -27,6 +27,7 @@ used.
 | Chat identity | **Shape** — one raised bubble for you, flat text for the assistant | Indigo vs teal; two greys; the accent for your turn |
 | Counterpoint | **Mono is the machine's voice** | The hairline as a grid; concentric radii alone |
 | Preview runtime | **iframe over a server-bundled blob**, behind one seam | WebContainer now; deciding later |
+| Interactive preview | **Sandpack, one named cross-origin exception** *(added 2026-09-05, A0)* | Self-host Sandpack's bundler; WebContainer instead |
 
 ### The glance test
 
@@ -298,6 +299,26 @@ cheap to take later:
   expensive part of COEP compliance, it is good practice regardless, and doing it
   during the wizard migration means the headers become a config line if
   WebContainer is ever wanted.
+
+#### The one exception, taken with its eyes open (A0)
+
+`SandpackAppPreview.tsx` embeds `<iframe src="https://*.codesandbox.io">` — a
+second, interactive preview next to the esbuild one, for the reason WebContainer
+was attractive in the first place: unlimited npm packages, CDN-resolved, no local
+install. `scripts/audit-ui.mjs`'s origins check has one named exception for it.
+
+This is not free, and it is not the same deferral as above. Everything else in
+the app stays cross-origin-fetch-free specifically so `COEP: require-corp` stays
+a config line; this one surface cannot make that promise, because the entire
+point of it is a bundler we do not run. If WebContainer is ever pursued, this
+component is what has to change first — self-host Sandpack's bundler (it is
+open-source) or remove the exception — not a header.
+
+Taken anyway because Sandpack, today, delivers most of what WebContainer was
+being kept open *for* — packages the local `node_modules` does not have — at a
+fraction of the cost, and WebContainer itself was never scheduled, only kept
+cheap. `tsc` and esbuild remain the verdict regardless of which preview a person
+is looking at; see `SandpackAppPreview.tsx`'s doc comment.
 
 #### What the sandbox costs, measured
 
