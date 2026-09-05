@@ -441,6 +441,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setSelectedProjectIds((prev: Set<string>) => { const newSet = new Set(prev); newSet.delete(id); return newSet; });
         setFilesByProject((prev: Map<string, ProjectFile[]>) => { const newMap = new Map(prev); newMap.delete(id); return newMap; });
         if (activeProjectView === id) setActiveProjectView(null);
+        /* An active agent bound to the project that just went away is still active, and
+           still names it — so chat would go on sending a dead id as its context. Stand
+           the agent down rather than rewriting its record: the binding is data the spine
+           migration owns, but an agent working on nothing should not stay selected.
+           `App` separately refuses to open the IDE on a project that is not loaded, so
+           the two together mean a deletion cannot leave a live surface pointing at it. */
+        if (agents.find(a => a.id === activeAgentId)?.projectId === id) handleSelectAgent(null);
     };
     const handleToggleProjectSelection = (id: string) => {
         setSelectedProjectIds((prev: Set<string>) => { 

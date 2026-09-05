@@ -1,5 +1,5 @@
 import React from 'react';
-import InfinityDock from './InfinityDock';
+import InfinityDock, { DockCopyIsLive } from './InfinityDock';
 import { SURFACE_ORDER, SURFACE_LABEL } from '../types/ui';
 import type { Surface } from '../types/ui';
 
@@ -78,6 +78,13 @@ const MemoryIcon = () => (
  *
  * `disabled` rather than absent, so the dock's contents do not shuffle under a thumb
  * between visits — the idiom the old bar used for Code, kept because it was right.
+ *
+ * **A clone of this item is still a working control.** When the dock is revolving it
+ * renders three copies, and a drag brings the outer two on screen; anything the user can
+ * see and press has to do what it looks like it does. So a clone keeps its `onClick` and
+ * gives up only the two things that should not be tripled: a tab stop and a name for a
+ * screen reader to announce. The earlier attempt used `inert` for that, which also
+ * removes pointer interaction — fourteen visible dead buttons on a desktop.
  */
 const Item: React.FC<{
     label: string;
@@ -87,7 +94,9 @@ const Item: React.FC<{
     dot?: boolean;
     onClick: () => void;
     children: React.ReactNode;
-}> = ({ label, selected, disabled = false, hint, dot = false, onClick, children }) => (
+}> = ({ label, selected, disabled = false, hint, dot = false, onClick, children }) => {
+    const live = React.useContext(DockCopyIsLive);
+    return (
     <button
         type="button"
         onClick={onClick}
@@ -95,6 +104,13 @@ const Item: React.FC<{
         title={disabled ? hint : undefined}
         aria-label={dot ? `${label} — something needs you` : undefined}
         aria-current={selected && !disabled ? 'page' : undefined}
+        /* Out of the tab order in a clone, but not out of reach. */
+        tabIndex={live ? undefined : -1}
+        /* And never focused by the press itself: a clone sits inside `aria-hidden`, and
+           focus landing there is the exact "hidden but focused" state this is all trying
+           to avoid. Preventing the default on mousedown suppresses focus while leaving
+           the click intact. */
+        onMouseDown={live ? undefined : (e) => e.preventDefault()}
         className={[
             'tap relative shrink-0 flex flex-col items-center justify-center gap-1 px-3 pt-2 pb-1',
             'text-[11px] font-medium select-none',
@@ -118,7 +134,8 @@ const Item: React.FC<{
         </span>
         <span className="truncate max-w-[5rem]">{label}</span>
     </button>
-);
+    );
+};
 
 const AppDock: React.FC<AppDockProps> = ({
     surface, onSurfaceChange, unavailable, memoryOpen, onMemoryToggle, memoryNeedsYou,

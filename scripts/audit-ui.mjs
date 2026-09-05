@@ -338,9 +338,48 @@ const AUDIT = (expected) => {
             }
         }
         const copies = dockRoot.children.length;
-        const inertCopies = [...dockRoot.children].filter(c => c.hasAttribute('inert')).length;
-        if (copies > 1 && inertCopies !== copies - 1) {
-            findings.duplicates.push(`dock: ${copies} copies but ${inertCopies} inert — every copy but one must be inert`);
+        const hiddenCopies = [...dockRoot.children].filter(c => c.getAttribute('aria-hidden') === 'true').length;
+        if (copies > 1 && hiddenCopies !== copies - 1) {
+            findings.duplicates.push(`dock: ${copies} copies but ${hiddenCopies} aria-hidden — every copy but one must be hidden`);
+        }
+
+        /* **A control you can see must do something.**
+           This is the check that was missing, and its absence is why the dock shipped
+           with fourteen visible dead buttons on a 1440px desktop: one copy is ~510px, so
+           the scrollport showed most of both outer copies flanking the live one, and the
+           duplicates check above passed *because* it deliberately filters clones out.
+           A clean report and a two-thirds-dead dock looked identical from here.
+
+           `inert` and `pointer-events: none` are the two ways a rendered control silently
+           refuses input. Measured against the viewport, not the document: a clone parked
+           off screen is the mechanism working, not a fault. */
+        const vw = document.documentElement.clientWidth;
+        const vh = document.documentElement.clientHeight;
+        for (const el of dockRoot.querySelectorAll('button, a[href], [role="button"]')) {
+            const box = el.getBoundingClientRect();
+            const onScreen = box.width > 0 && box.height > 0
+                && box.right > 0 && box.left < vw && box.bottom > 0 && box.top < vh;
+            if (!onScreen) continue;
+            const name = el.lastElementChild?.textContent?.trim() || el.getAttribute('aria-label') || '(unnamed)';
+            if (el.closest('[inert]')) {
+                findings.duplicates.push(`dock: "${name}" is on screen but inert — a control you can see that ignores you`);
+            } else if (getComputedStyle(el).pointerEvents === 'none') {
+                findings.duplicates.push(`dock: "${name}" is on screen but has pointer-events:none`);
+            }
+        }
+
+        /* And the other half of what `inert` used to buy: one tab stop per destination,
+           not one per copy. A clone stays clickable, so this is what keeps a keyboard
+           from walking the same six destinations three times. */
+        const tabbable = [...dockRoot.querySelectorAll('button, a[href], [role="button"]')]
+            .filter(el => el.tabIndex >= 0 && !el.closest('[inert]'));
+        const tabNames = new Map();
+        for (const el of tabbable) {
+            const name = el.lastElementChild?.textContent?.trim() || el.getAttribute('aria-label') || '(unnamed)';
+            tabNames.set(name, (tabNames.get(name) ?? 0) + 1);
+        }
+        for (const [name, count] of tabNames) {
+            if (count > 1) findings.duplicates.push(`dock: "${name}" is a tab stop ${count} times — a clone left in the focus order`);
         }
 
         /* The dock is the only navigation, so its contents are the whole answer to
