@@ -137,10 +137,19 @@ export const restoreBuilderState = (): WebAppBuilderState => {
         validation: persisted.validation ?? null,
         savedBuildId: persisted.savedBuildId ?? null,
         memory: {
-            // A build in progress from before memory existed gets its cluster now
-            // rather than never: with no id, every tap for the rest of this build
-            // would silently no-op.
-            buildId: persisted.memory?.buildId ?? memoryService.newBuildId(),
+            /**
+             * A build in progress from before memory existed gets its cluster now rather
+             * than never: with no id, every tap for the rest of that build would silently
+             * no-op.
+             *
+             * **Only for a build in progress.** This minted an id unconditionally, and
+             * `resetWebAppBuild` persists `buildId: null` — so once anyone had finished or
+             * cancelled a build, every subsequent page load minted a fresh id, and
+             * `MemoryPanel`'s status poll materialised a database to ask whether that id
+             * had recorded anything. That is where 447 stores came from, 3 of them with a
+             * row in them. An idle builder has nothing to record and needs no identity.
+             */
+            buildId: persisted.memory?.buildId ?? (persisted.isActive ? memoryService.newBuildId() : null),
             episodeId: persisted.memory?.episodeId ?? null,
             lastOutcome: OUTCOMES.includes(persisted.memory?.lastOutcome as EpisodeOutcome)
                 ? (persisted.memory!.lastOutcome as EpisodeOutcome)
@@ -760,6 +769,29 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
     const generateWebAppPlan = async () => {
         setBuilderState(prev => ({ ...prev, status: { ...prev.status, isLoading: true, message: 'AI is analyzing your idea and creating a blueprint...' }}));
+        /**
+         * The episode starts here, where the build starts.
+         *
+         * It used to open at the generate step, four screens later — so the planning
+         * answer, the art directions and the chosen direction were all recorded with a
+         * **null episode id**. They were in the store and attached to nothing, which
+         * makes them invisible to anything reading a build as a sequence: the objective,
+         * what was proposed, what was chosen, then what was produced. A build log that
+         * begins at "generate" cannot say what was asked for.
+         *
+         * Keyed on the idea rather than the plan, because the plan does not exist yet.
+         * The server reuses an episode still open for the same objective, so a retry of
+         * the plan step joins the attempt in flight rather than forking a second one, and
+         * `generateWebAppCode` finds this one already open.
+         */
+        if (memoryRef.current.buildId && !memoryRef.current.episodeId) {
+            const episodeId = await memoryService.openEpisode(
+                memoryRef.current.buildId,
+                `build ${builderState.idea.slice(0, 120) || 'a web application'}`,
+                builderState.savedBuildId,
+            );
+            setMemory({ episodeId });
+        }
         try {
             const plan = await apiService.generateWebAppPlan(
                 builderState.idea,
@@ -986,7 +1018,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
          * The server reuses an episode still open for the same objective, so a
          * double-tap or a remount joins the attempt in flight rather than forking it.
          */
-        const episodeId = await memoryService.openEpisode(
+        /* Usually already open — the episode now starts at the plan step so the whole
+           build is one sequence. This still opens one for a build resumed straight into
+           generation, where nothing earlier ran. */
+        const episodeId = memoryRef.current.episodeId ?? await memoryService.openEpisode(
             buildId,
             `generate ${builderState.plan?.projectName ?? 'a web application'} — style "${theme.palette}" / ${theme.typography}`,
             builderState.savedBuildId,
@@ -1174,12 +1209,41 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             }));
         }
     };
+    /**
+     * What a person did with a finished build, recorded before the build id is let go.
+     *
+     * The export step recorded nothing at all, and `resetWebAppBuild` then discarded the
+     * build id — so the one moment that says whether the whole thing was worth anything
+     * left no trace. A build log that ends at "validation passed" cannot distinguish a
+     * result someone kept from one they threw away, and that distinction is the closest
+     * thing to a quality signal this app has without asking anyone to rate something.
+     *
+     * Recorded before the reset, because after it there is no build to attribute to.
+     */
+    const recordBuildKept = (how: 'opened-in-ide' | 'downloaded') => {
+        const { generatedFiles, plan } = builderState;
+        recordMemory([{
+            kind: 'human.decision',
+            domain: 'build',
+            surface: 'builder.export',
+            payload: {
+                decision: 'kept',
+                how,
+                projectName: plan?.projectName ?? null,
+                fileCount: Object.keys(generatedFiles ?? {}).length,
+                pages: plan?.pages?.length ?? 0,
+                components: plan?.components?.length ?? 0,
+            },
+        }]);
+    };
+
     const loadGeneratedProjectIntoIDE = async () => {
         if (!builderState.generatedFiles || !builderState.plan.projectName) return;
         const newProject = await handleCreateProject(builderState.plan.projectName);
         for (const [path, content] of Object.entries(builderState.generatedFiles)) {
             await aiCreateFile(newProject.id, path, content);
         }
+        recordBuildKept('opened-in-ide');
         resetWebAppBuild();
         /* Order matters: deselecting an agent clears the project selection, so the
            new project has to be selected *after*, not before. */
@@ -1195,6 +1259,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const exportGeneratedProject = async () => {
         if (!builderState.generatedFiles || !builderState.plan.projectName) return;
         await createProjectZip(builderState.generatedFiles, builderState.plan.projectName);
+        /* No reset here — the wizard stays put after a download — but the decision is
+           still worth recording, and for the same reason. */
+        recordBuildKept('downloaded');
     };
 
     // Saved build library
