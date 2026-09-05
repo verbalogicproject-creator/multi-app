@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import LoadingIndicator from './LoadingIndicator';
+import { useAuth } from '../hooks/useAuth';
 import { useAppContext } from '../context/AppContext';
 import { Project, ProjectFile } from '../types/index';
 
@@ -35,6 +36,12 @@ const ProjectManager: React.FC = () => {
     } = useAppContext();
 
     const [newProjectName, setNewProjectName] = useState('');
+    /* Who you are, on the screen that is home. It renders nothing at all when the
+       backend is not enforcing authentication — which is the loopback development
+       posture — so a signed-out app does not grow an empty account row. Signing out
+       needs somewhere to be pressed, and a session with no way to end it is the same
+       kind of orphan as a panel with no way to open it. */
+    const { user, isAuthenticated, logout } = useAuth();
 
     const handleCreate = () => {
         if (newProjectName.trim()) {
@@ -65,8 +72,25 @@ const ProjectManager: React.FC = () => {
     return (
         <section className="flex-1 flex flex-col min-w-0 min-h-0 bg-ground">
             <div className="shrink-0 w-full max-w-5xl mx-auto px-4 md:px-6 pt-5 safe-t">
-                <h1 className="font-display text-2xl md:text-3xl tracking-[-0.03em] text-metal-100">Projects</h1>
-                <p className="mt-1 text-sm text-metal-300">Tick one to open it in the editor and the preview.</p>
+                <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                        <h1 className="font-display text-2xl md:text-3xl tracking-[-0.03em] text-metal-100">Projects</h1>
+                        <p className="mt-1 text-sm text-metal-300">Tick one to open it in the editor and the preview.</p>
+                    </div>
+                    {isAuthenticated && user && (
+                        <div className="shrink-0 flex items-center gap-2 text-xs text-metal-300">
+                            <span className="truncate max-w-[10rem]" title={user.email}>{user.email}</span>
+                            <button
+                                onClick={logout}
+                                className="tap px-2 rounded-lg text-metal-200 underline underline-offset-2
+                                           transition-colors duration-200 ease-fluid
+                                           md:hover:text-metal-100 md:hover:bg-metal-700"
+                            >
+                                Sign out
+                            </button>
+                        </div>
+                    )}
+                </div>
             </div>
 
                 {/* The tab strip is gone, and that is the point of the dock.
