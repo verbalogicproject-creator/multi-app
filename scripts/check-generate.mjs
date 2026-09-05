@@ -31,6 +31,9 @@ import { proposalsFor, unmappedCodes, PROPOSAL_TABLE, NOT_A_LESSON } from '../me
 import { normaliseManifest, manifestGaps, missingFrom, manifestInstruction, fileInstruction, generateFromManifest, filesNeedingRepair, importedPaths, repairInstruction, repairRound, planCoverage, coverPlan, acceptanceIssuesFrom, generatePromptFor } from '../providers/generate.js';
 import { scaffoldFor, packageJsonFor, importedPackages, SCAFFOLD_PATHS, KNOWN_VERSIONS as KNOWN_VERSIONS_FOR_TEST, typesFileFor } from '../providers/scaffold.js';
 import { AESTHETIC_DIMENSIONS, buildAestheticDirective } from '../providers/aesthetic.js';
+import { buildSystemPrompt } from '../providers/prompts.js';
+import { applyPatch } from '../utils/patchFile.ts';
+import { splitAtApprovalGate } from '../utils/toolSequence.ts';
 
 let failures = 0;
 const ok = (label, cond, detail = '') => {
@@ -770,6 +773,102 @@ const withAcceptance = proposalsFor({ ok: false, codes: { 'type-error': 1, 'acce
 const withoutAcceptance = proposalsFor({ ok: false, codes: { 'type-error': 1 } });
 ok('and it can never add a proposal alongside a real failure — the defendant does not also grade its own homework',
     withAcceptance.length === withoutAcceptance.length, `${withAcceptance.length} vs ${withoutAcceptance.length}`);
+
+// ---------------------------------------------------------------------------
+console.log('\n18. patchFile refuses an ambiguous or absent match, by name');
+
+const uniqueMatch = applyPatch('const x = 1;\nconst y = 2;', 'const x = 1;', 'const x = 100;');
+ok('a unique match patches cleanly', uniqueMatch.ok === true && uniqueMatch.content === 'const x = 100;\nconst y = 2;',
+    JSON.stringify(uniqueMatch));
+
+const absentMatch = applyPatch('const x = 1;', 'const z = 9;', 'const z = 10;');
+ok('an absent match fails by name, not silently', absentMatch.ok === false && /does not appear/i.test(absentMatch.error),
+    JSON.stringify(absentMatch));
+
+const ambiguousMatch = applyPatch('foo();\nfoo();', 'foo();', 'bar();');
+ok('a match appearing twice is refused rather than guessed at',
+    ambiguousMatch.ok === false && /more than once/i.test(ambiguousMatch.error), JSON.stringify(ambiguousMatch));
+
+const emptyFind = applyPatch('anything', '', 'x');
+ok('an empty find is refused rather than matching everywhere',
+    emptyFind.ok === false && /must not be empty/i.test(emptyFind.error), JSON.stringify(emptyFind));
+
+// ---------------------------------------------------------------------------
+console.log('\n19. a runPython call pauses the queue wherever it sits, not only when first');
+
+const first = { name: 'runPython', args: { code: 'print(1)' } };
+const middle = { name: 'updateFile', args: { path: 'a.ts' } };
+const last = { name: 'createFile', args: { path: 'b.ts' } };
+
+const pausedInMiddle = splitAtApprovalGate([middle, first, last], 'runPython');
+ok('calls before the gate are queued to run immediately, in order',
+    pausedInMiddle.before.length === 1 && pausedInMiddle.before[0] === middle, JSON.stringify(pausedInMiddle.before));
+ok('the runPython call itself is the pause point, wherever it sits',
+    pausedInMiddle.paused === first);
+ok('everything queued behind it survives as remaining — nothing is dropped',
+    pausedInMiddle.remaining.length === 1 && pausedInMiddle.remaining[0] === last, JSON.stringify(pausedInMiddle.remaining));
+
+const pausedFirst = splitAtApprovalGate([first, middle, last], 'runPython');
+ok('a runPython call as the very first call still pauses before anything runs',
+    pausedFirst.before.length === 0 && pausedFirst.paused === first && pausedFirst.remaining.length === 2,
+    JSON.stringify(pausedFirst));
+
+const noGate = splitAtApprovalGate([middle, last], 'runPython');
+ok('a sequence with no runPython call behaves exactly as a single-call sequence always did — nothing pauses',
+    noGate.paused === undefined && noGate.before.length === 2 && noGate.remaining.length === 0, JSON.stringify(noGate));
+
+const singleCall = splitAtApprovalGate([middle], 'runPython');
+ok('a queue of exactly one non-runPython call is unaffected — the revert-proof case',
+    singleCall.paused === undefined && singleCall.before.length === 1, JSON.stringify(singleCall));
+
+// ---------------------------------------------------------------------------
+console.log('\n20. project context renders live signals and origin only when present, independently');
+
+const bareProject = { name: 'Harbour' };
+const bareContext = buildSystemPrompt({ provider: 'anthropic', persona: {}, projects: [bareProject], customStyles: [] });
+ok('a project with none of the new fields renders no file tree, diagnostics, preview or origin section',
+    !bareContext.includes('Files in this project') && !bareContext.includes('type-check diagnostics')
+        && !bareContext.includes('preview verdict') && !bareContext.includes('built from a plan'),
+    'bare project leaked a section it should not have');
+
+const fileTreeOnly = buildSystemPrompt({
+    provider: 'anthropic', persona: {}, customStyles: [],
+    projects: [{ name: 'Harbour', fileTree: ['src/App.tsx', 'src/main.tsx'] }],
+});
+ok('a file tree renders on its own, with no diagnostics/preview/origin alongside it',
+    fileTreeOnly.includes('src/App.tsx') && !fileTreeOnly.includes('type-check diagnostics')
+        && !fileTreeOnly.includes('preview verdict') && !fileTreeOnly.includes('built from a plan'));
+
+const diagnosticsOnly = buildSystemPrompt({
+    provider: 'anthropic', persona: {}, customStyles: [],
+    projects: [{ name: 'Harbour', diagnosticsSummary: 'src/App.tsx:3:1 — TS2307: Cannot find module' }],
+});
+ok('a diagnostics summary renders on its own',
+    diagnosticsOnly.includes('Cannot find module') && !diagnosticsOnly.includes('Files in this project')
+        && !diagnosticsOnly.includes('preview verdict'));
+
+const previewOnly = buildSystemPrompt({
+    provider: 'anthropic', persona: {}, customStyles: [],
+    projects: [{ name: 'Harbour', previewSummary: 'Builds and runs without error.' }],
+});
+ok('a preview verdict renders on its own',
+    previewOnly.includes('Builds and runs without error.') && !previewOnly.includes('Files in this project')
+        && !previewOnly.includes('type-check diagnostics'));
+
+const originOnly = buildSystemPrompt({
+    provider: 'anthropic', persona: {}, customStyles: [],
+    projects: [{ name: 'Harbour', origin: { plan: { projectName: 'Harbour', projectDescription: 'A tide tracker' }, acceptanceCriteria: ['Shows the next high tide'] } }],
+});
+ok('an origin.plan renders what the project was built to be, including its acceptance criteria',
+    originOnly.includes('built from a plan') && originOnly.includes('A tide tracker') && originOnly.includes('Shows the next high tide')
+        && !originOnly.includes('Files in this project'));
+
+const noOriginPlan = buildSystemPrompt({
+    provider: 'anthropic', persona: {}, customStyles: [],
+    projects: [{ name: 'Harbour', origin: { plan: null, acceptanceCriteria: [] } }],
+});
+ok('an origin with no plan renders nothing — half an origin is not rendered as if whole',
+    !noOriginPlan.includes('built from a plan'));
 
 console.log(failures === 0 ? '\ngenerate ok' : `\n${failures} CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

@@ -257,3 +257,33 @@ export const checkAcceptanceCriteria = async (plan: any, files: Record<string, s
         return null;
     }
 };
+
+export interface BuilderEditResult {
+    files: Record<string, string>;
+    changedPaths: string[];
+    summary: string;
+    typecheck: { completed: boolean; ok: boolean; issues: BuildIssue[] };
+}
+
+/**
+ * "Generate again, but with feedback" — see A3's `/api/builder/edit`. Throws
+ * on failure rather than answering `null`: unlike the checks above, there is
+ * no "no opinion" reading of a request whose whole point is to change files —
+ * a caller needs to know the attempt did not happen at all.
+ */
+export const editProject = async (
+    files: Record<string, string>,
+    plan: any,
+    diagnostics: BuildIssue[],
+    instruction: string,
+    model?: string,
+    memory?: MemoryRef,
+): Promise<BuilderEditResult> => {
+    const response = await fetch('/api/builder/edit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ files, plan, diagnostics, instruction, model, ...memoryFields(memory) }),
+    });
+    if (!response.ok) { const error = await response.json().catch(() => ({})); throw new Error(error.message || 'Failed to apply the requested change.'); }
+    return response.json();
+};

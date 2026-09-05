@@ -44,6 +44,7 @@ const toolLines = (hasProjects) => {
         '`readFile(path)`: read a file\'s content.',
         '`createFile(path, content)`: create a new file.',
         '`updateFile(path, newContent)`: overwrite a file\'s content.',
+        '`patchFile(path, find, replace)`: replace one exact occurrence of `find` with `replace` in a file. Prefer this over `updateFile` for a small change — it fails by name if `find` is missing or not unique, rather than silently rewriting more than intended.',
         '`deleteFile(path)`: delete a file from the project.',
         ...shared,
     ];
@@ -185,6 +186,42 @@ Keep the brief current rather than appending to it. It is a draft the person wil
 not a contract — do not pad it, and do not claim anything has been built.`;
 
 /**
+ * What a project was built to be, rendered only when the project actually carries
+ * it (`types/project.ts`'s `ProjectOrigin` — set once, by `loadGeneratedProjectIntoIDE`).
+ * A project opened by any other path (created by hand, or predating A3) has no
+ * origin, and this renders nothing rather than a section full of "unknown".
+ */
+const originContext = (origin) => {
+    if (!origin?.plan) return '';
+    const lines = [`\nThis project was built from a plan: ${origin.plan.projectDescription ?? origin.plan.projectName ?? ''}`.trim()];
+    if (Array.isArray(origin.acceptanceCriteria) && origin.acceptanceCriteria.length > 0) {
+        lines.push(`Acceptance criteria it was meant to satisfy:\n${origin.acceptanceCriteria.map((c, i) => `${i + 1}. ${c}`).join('\n')}`);
+    }
+    return lines.join('\n');
+};
+
+/**
+ * File tree, diagnostics and the preview's verdict — computed fresh by
+ * `useChat`'s `sendMessage` for a coding-mode turn (see A3 item 2) and attached
+ * to the `Project` object the request carries. Never persisted, so most turns
+ * that are not actively editing this project will not have them; each renders
+ * independently of the others.
+ */
+const liveContext = (p) => {
+    const lines = [];
+    if (Array.isArray(p.fileTree) && p.fileTree.length > 0) {
+        lines.push(`Files in this project:\n${p.fileTree.join('\n')}`);
+    }
+    if (typeof p.diagnosticsSummary === 'string' && p.diagnosticsSummary.trim() !== '') {
+        lines.push(`Current type-check diagnostics:\n${p.diagnosticsSummary}`);
+    }
+    if (typeof p.previewSummary === 'string' && p.previewSummary.trim() !== '') {
+        lines.push(`Current preview verdict:\n${p.previewSummary}`);
+    }
+    return lines.length > 0 ? `\n${lines.join('\n\n')}` : '';
+};
+
+/**
  * Builds the chat/coding system prompt for a provider from neutral inputs.
  * @param {{provider: string, persona: object, projects: object[], customStyles: object[], mode?: string}} input
  */
@@ -194,6 +231,8 @@ export const buildSystemPrompt = ({ provider, persona, projects, customStyles, m
         if (p.dependencySummary && p.dependencySummary !== 'No files to analyze.' && p.dependencySummary !== 'No major dependencies identified') {
             context += `\nDependencies: ${p.dependencySummary}`;
         }
+        context += originContext(p.origin);
+        context += liveContext(p);
         return context;
     }).join('\n\n');
 

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback, Suspense, lazy } from
 import FileExplorer from './FileExplorer';
 import Terminal from './Terminal';
 import ProblemsPanel from './ProblemsPanel';
+import EditPanel from './EditPanel';
 import { useDiagnostics, useErrorCounts } from '../hooks/useDiagnostics';
 import type { TscDiagnostic } from '../types/diagnostics';
 
@@ -19,9 +20,9 @@ interface IdeViewProps {
 /* Preview was the third tab here until it became a destination of its own. Two doors
    to one room is the duplication the dock was built to remove, and the drawer is for
    what the *editor* has to say — what the compiler found, what the terminal printed. */
-const DRAWER_TABS = ['terminal', 'problems'] as const;
+const DRAWER_TABS = ['terminal', 'problems', 'edit'] as const;
 type DrawerTab = (typeof DRAWER_TABS)[number];
-const TAB_LABEL: Record<DrawerTab, string> = { terminal: 'Terminal', problems: 'Problems' };
+const TAB_LABEL: Record<DrawerTab, string> = { terminal: 'Terminal', problems: 'Problems', edit: 'Ask' };
 
 /**
  * One component, two layouts.
@@ -214,6 +215,7 @@ const IdeView: React.FC<IdeViewProps> = ({ projectId }) => {
                     <div className={`flex-1 min-h-0 ${drawerOpen ? 'flex' : 'hidden'} md:flex`}>
                         {drawerTab === 'terminal' && <Terminal projectId={projectId} />}
                         {drawerTab === 'problems' && <ProblemsPanel state={diagnostics} onSelect={handleProblemSelect} />}
+                        {drawerTab === 'edit' && <EditPanel projectId={projectId} />}
                     </div>
                 </div>
             </div>

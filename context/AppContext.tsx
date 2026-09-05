@@ -11,7 +11,7 @@ import { runTypecheck } from '../services/typecheckService';
 import { previewVerdict } from '../services/previewVerdict';
 import type { EpisodeOutcome, MemoryEvent, MemoryEvidence } from '../services/memoryService';
 import { DEFAULT_PALETTE, sanitizeColors, type ArtDirection, type ThemeColors } from '../utils/palettes';
-import { validateBuild, type BuildValidation } from '../utils/validateBuild';
+import { validateBuild, type BuildValidation, type BuildIssue } from '../utils/validateBuild';
 import { generateUniqueId } from '../utils/common';
 import { createProjectZip } from '../utils/export';
 
@@ -293,6 +293,7 @@ interface AppContextType {
     bumpQuotaTick: () => void;
     generateWebAppCode: () => Promise<void>;
     loadGeneratedProjectIntoIDE: () => Promise<void>;
+    editOpenProject: (projectId: string, instruction: string) => Promise<{ validation: BuildValidation; changedPaths: string[]; summary: string }>;
     exportGeneratedProject: () => Promise<void>;
     savedBuilds: SavedBuild[];
     saveCurrentBuild: (name: string, asCopy?: boolean) => void;
@@ -1275,6 +1276,23 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         for (const [path, content] of Object.entries(builderState.generatedFiles)) {
             await aiCreateFile(newProject.id, path, content);
         }
+        /* The project remembers what it was for — set before `resetWebAppBuild`,
+           which clears the *wizard's* transient state and has nothing to do with
+           whether the project it just produced knows its own plan. Persisted
+           the same way `dependencySummary` already is: write through storage,
+           then update the in-memory copy so every consumer of `projects` sees
+           it without a reload. */
+        const withOrigin: Project = {
+            ...newProject,
+            origin: {
+                plan: builderState.plan,
+                theme: builderState.theme,
+                acceptanceCriteria: Array.isArray(builderState.plan?.acceptanceCriteria) ? builderState.plan.acceptanceCriteria : [],
+                buildId: builderState.memory.buildId,
+            },
+        };
+        await storageService.updateProject(withOrigin);
+        setProjects(prev => prev.map(p => p.id === newProject.id ? withOrigin : p));
         recordBuildKept('opened-in-ide');
         resetWebAppBuild();
         /* Order matters: deselecting an agent clears the project selection, so the
@@ -1286,6 +1304,57 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
            On a phone that is the difference between the feature existing and the
            feature being reachable — from `md:` up the IDE is already on screen. */
         setSurface('code');
+    };
+
+    /**
+     * "Generate again, but with feedback" — the peer-programmer edit
+     * `Step_Generate.tsx` cannot express. See A3's `/api/builder/edit`.
+     *
+     * Diagnostics are computed fresh here, the same deliberate choice
+     * `hooks/useChat.ts`'s `sendMessage` makes for the same reason (A3 item 2)
+     * — this function does not read `IdeView.tsx`'s own live diagnostics
+     * state, which it has no access to and should not be given access to just
+     * for this.
+     *
+     * The verdict is completed client-side rather than trusted from the
+     * server: `/api/builder/edit` can only run `tsc` (server-side, no
+     * browser), so `validateBuild` (lexical, pure) and `previewVerdict`
+     * (needs a real sandboxed frame) both run here — the same three-stage
+     * pattern `generateWebAppCode` already uses, not a second implementation
+     * of it.
+     */
+    const editOpenProject = async (projectId: string, instruction: string): Promise<{ validation: BuildValidation; changedPaths: string[]; summary: string }> => {
+        const project = projects.find(p => p.id === projectId);
+        const files = filesByProject.get(projectId) ?? [];
+        const record: Record<string, string> = {};
+        for (const file of files) record[file.path] = file.content;
+
+        const preEdit = await runTypecheck(projectId, record, 0);
+        const diagnostics: BuildIssue[] = preEdit?.completed ? preEdit.issues : [];
+
+        const result = await apiService.editProject(
+            record,
+            project?.origin?.plan,
+            diagnostics,
+            instruction,
+            selectedModel === 'auto' ? undefined : selectedModel,
+            project?.origin?.buildId ? { buildId: project.origin.buildId, episodeId: null } : undefined,
+        );
+
+        for (const path of result.changedPaths) {
+            const content = result.files[path];
+            if (files.some(f => f.path === path)) await aiUpdateFile(projectId, path, content);
+            else await aiCreateFile(projectId, path, content);
+        }
+
+        const lexical = validateBuild(result.files, project?.origin?.plan);
+        const behaviour = await previewVerdict(projectId, result.files);
+        const validation: BuildValidation = {
+            ok: lexical.ok && result.typecheck.ok && (behaviour === null || behaviour.length === 0),
+            issues: [...lexical.issues, ...(result.typecheck.issues ?? []), ...(behaviour ?? [])],
+            checked: lexical.checked,
+        };
+        return { validation, changedPaths: result.changedPaths, summary: result.summary };
     };
 
     const exportGeneratedProject = async () => {
@@ -1380,7 +1449,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         activePersona, setActivePersona,
         agents, activeAgentId, handleAddAgent, handleUpdateAgent, handleDeleteAgent, handleSelectAgent,
         globalError, setGlobalError,
-        builderState, setBuilderState, startWebAppBuild, resetWebAppBuild, generateWebAppPlan, refineWebAppPlan, suggestArtDirections, generateWebAppCode, loadGeneratedProjectIntoIDE, exportGeneratedProject,
+        builderState, setBuilderState, startWebAppBuild, resetWebAppBuild, generateWebAppPlan, refineWebAppPlan, suggestArtDirections, generateWebAppCode, loadGeneratedProjectIntoIDE, editOpenProject, exportGeneratedProject,
         savedBuilds, saveCurrentBuild, loadSavedBuild, removeSavedBuild, exportSavedBuild,
         promoteCandidate, discardCandidate, recordEvidence, noteDirectionSelected, quotaTick, bumpQuotaTick,
     };

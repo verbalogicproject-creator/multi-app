@@ -40,7 +40,7 @@ import { fileURLToPath } from 'url';
 import { providerForModel, usableModels, isModelUsable } from './providers/index.js';
 import { getModel, modelChain, pickModel } from './providers/catalog.js';
 import { toolsForRequest } from './providers/tools.js';
-import { PLAN_SCHEMA, DIRECTIONS_SCHEMA, GENERATE_SCHEMA, MANIFEST_SCHEMA, FILE_SCHEMA, ACCEPTANCE_CHECK_SCHEMA, filesArrayToRecord } from './providers/schemas.js';
+import { PLAN_SCHEMA, DIRECTIONS_SCHEMA, GENERATE_SCHEMA, MANIFEST_SCHEMA, FILE_SCHEMA, ACCEPTANCE_CHECK_SCHEMA, EDIT_SCHEMA, filesArrayToRecord } from './providers/schemas.js';
 import { salvageFiles, isTruncation } from './providers/salvage.js';
 import { generateFromManifest, repairRound, acceptanceIssuesFrom, generatePromptFor } from './providers/generate.js';
 import { scaffoldFor, packageJsonFor } from './providers/scaffold.js';
@@ -1202,6 +1202,93 @@ ${Object.entries(files ?? {}).map(([path, content]) => `### ${path}\n${content}`
     } catch (error) {
         console.error('Builder check-acceptance error:', error);
         res.status(500).json({ message: friendlyProviderError(error, 'Error checking acceptance criteria.') });
+    }
+});
+
+/**
+ * "Generate again, but with feedback" — the peer-programmer edit
+ * `Step_Generate.tsx` cannot express, per A3 in the plan.
+ *
+ * Not a call into `/api/builder/generate`'s `repairIfNeeded` — that closure is
+ * shaped for compiler-diagnostic-driven repair of a *fresh* manifest and has
+ * no manifest to work from here. This is diagnosed by a person's instruction
+ * instead: one structured-output request sees every current file and returns
+ * only the ones that need to change, merged over the current set.
+ *
+ * Only runs `typecheck` here — the second half of a real verdict,
+ * `previewVerdict`, executes a bundle inside a browser iframe and has no
+ * server-side equivalent; the client completes the verdict the same way
+ * `AppContext.tsx`'s own generation pipeline already does (lexical, then
+ * `tsc`, then the preview), not a second implementation of that staging here.
+ */
+app.post('/api/builder/edit', async (req, res) => {
+    try {
+        const { files, plan, diagnostics, instruction, model: requestedModel, buildId, episodeId } = req.body;
+        const currentFiles = files && typeof files === 'object' ? files : {};
+        if (typeof instruction !== 'string' || instruction.trim() === '') {
+            return res.status(400).json({ message: 'An instruction is required.' });
+        }
+
+        const prompt = `You are a senior product engineer working on an existing project. Apply the requested change; do not regenerate anything that was not asked for.
+
+**The change requested:**
+${instruction.trim()}
+${plan?.projectName ? `\n**The project:** ${plan.projectName}${plan.projectDescription ? ` — ${plan.projectDescription}` : ''}\n` : ''}
+${Array.isArray(diagnostics) && diagnostics.length > 0
+    ? `\n**Current diagnostics — fix these too if the change touches the same file:**\n${diagnostics.map((d) => `${d.file ?? ''} ${d.message ?? ''}`.trim()).join('\n')}\n`
+    : ''}
+**Every current file:**
+${Object.entries(currentFiles).map(([path, content]) => `### ${path}\n${content}`).join('\n\n')}
+
+Return only the files whose content actually changes. Do not include a file you did not touch.`;
+
+        const recalled = await memory.recallBlock({
+            buildId, episodeId,
+            task: `edit an existing application: ${instruction.trim().slice(0, 200)}`,
+            domain: 'build',
+            surface: 'builder.edit',
+        });
+
+        let servingModel = null;
+        const { object } = await withModelFallback(
+            builderModelChain(requestedModel),
+            (model) => providerForModel(model).generateJson({
+                model,
+                system: builderPreamble(getModel(model).provider),
+                prompt: prompt + recalled,
+                schema: EDIT_SCHEMA,
+                effort: 'high',
+                maxOutputTokens: 32768,
+            }),
+            (model) => { servingModel = model; },
+        );
+
+        const changed = filesArrayToRecord(object?.files);
+        const mergedFiles = { ...currentFiles, ...changed };
+        const result = await typecheck({ projectId: `${buildId ?? 'edit'}-edit`, files: mergedFiles });
+
+        res.json({
+            files: mergedFiles,
+            changedPaths: Object.keys(changed),
+            summary: typeof object?.summary === 'string' ? object.summary : '',
+            typecheck: { completed: result.completed, ok: result.ok, issues: result.issues },
+        });
+
+        memory.appendEventSafe({
+            buildId, episodeId,
+            kind: 'candidate.created',
+            surface: 'builder.edit',
+            ...attributionFor(servingModel),
+            payload: {
+                ...servedPayload(requestedModel, servingModel),
+                instruction: instruction.trim().slice(0, 500),
+                changedFiles: Object.keys(changed).length,
+                memoryInjected: recalled !== '',
+            },
+        });
+    } catch (error) {
+        console.error('Builder edit error:', error);
+        res.status(500).json({ message: friendlyProviderError(error, 'Error applying the requested change.') });
     }
 });
 

@@ -1,14 +1,65 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { Message, MessageAuthor, MessagePart, Project, Persona, CustomAiStyle, ToolCall, ChatMode } from '../types/index';
+import { Message, MessageAuthor, MessagePart, Project, ProjectFile, Persona, CustomAiStyle, ToolCall, ChatMode } from '../types/index';
 import { generateUniqueId } from '../utils/common';
 import * as apiService from '../services/apiService';
 import * as pyodideService from '../services/pyodideService';
+import { applyPatch } from '../utils/patchFile';
+import { splitAtApprovalGate } from '../utils/toolSequence';
+import { fileTreeFrom, diagnosticsSummaryFrom, previewSummaryFrom } from '../utils/codingContext';
+import { runTypecheck } from '../services/typecheckService';
+import { previewVerdict } from '../services/previewVerdict';
 
+/**
+ * A `runPython` call pauses the sequence it arrived in, wherever it sits — not
+ * only when it is the first call. `remainingCalls` is what lets
+ * `resolvePendingTool` continue the same sequence afterward instead of ending
+ * the turn early or losing the calls that were queued behind it. See A3
+ * item 3: this is a strict generalisation of the single-call case, not a new
+ * path — a sequence of exactly one call behaves exactly as it always has.
+ */
 interface PendingToolApproval {
     toolCall: ToolCall;
+    remainingCalls: ToolCall[];
     history: Message[];
     mode: ChatMode;
 }
+
+/**
+ * Attaches a fresh file tree, `tsc` diagnostics summary and preview verdict to
+ * the target project (the first of `projects`, matching `handleToolCall`'s own
+ * convention) for a coding-mode turn. Computed fresh rather than reused from
+ * the IDE's own live state (`hooks/useDiagnostics.ts`, `PreviewHost.tsx`) — see
+ * A3 item 2 in the plan for why. A project with no files yet, or no target
+ * project at all, passes through unchanged; every project after the first is
+ * untouched, since file tools only ever act on `projects[0]` either way.
+ */
+const withLiveContext = async (
+    projects: Project[],
+    filesByProject: Map<string, ProjectFile[]>,
+    setStatusText: (text: string) => void,
+): Promise<Project[]> => {
+    const target = projects[0];
+    if (!target) return projects;
+    const files = filesByProject.get(target.id) ?? [];
+    if (files.length === 0) return projects;
+
+    setStatusText('Checking the project…');
+    const record: Record<string, string> = {};
+    for (const file of files) record[file.path] = file.content;
+
+    const [typecheck, behaviour] = await Promise.all([
+        runTypecheck(target.id, record, 0),
+        previewVerdict(target.id, record),
+    ]);
+
+    const withContext: Project = {
+        ...target,
+        fileTree: fileTreeFrom(files),
+        diagnosticsSummary: diagnosticsSummaryFrom(typecheck),
+        previewSummary: previewSummaryFrom(behaviour),
+    };
+    return [withContext, ...projects.slice(1)];
+};
 
 const loadPersistedMessages = (storageKey: string): Message[] => {
     try {
@@ -38,6 +89,11 @@ export const useChat = (
         updateFile: (projectId: string, path: string, newContent: string) => Promise<any>;
         deleteFile: (projectId: string, path: string) => Promise<boolean>;
     },
+    /* For the coding-mode context in `sendMessage` (A3 item 2) — a full file
+       map, not just names, so a fresh `tsc`/preview run has real content to
+       check without N round trips through `aiFileOperations.readFile`.
+       Optional: general chat never passes this and never needs it. */
+    filesByProject: Map<string, ProjectFile[]> = new Map(),
     historyStorageKey: string = 'gemini_messages_general',
     model?: string
 ) => {
@@ -89,6 +145,16 @@ export const useChat = (
                      const content = await aiFileOperations.readFile(targetProjectId, args.path);
                      result = { content: content ?? `File not found: ${args.path}` };
                      break;
+                case 'patchFile': {
+                    if (!targetProjectId) throw new Error("No project selected for patchFile.");
+                    const current = await aiFileOperations.readFile(targetProjectId, args.path);
+                    if (current === null) { result = { error: `File not found: ${args.path}` }; break; }
+                    const patched = applyPatch(current, args.find, args.replace);
+                    if (!patched.ok) { result = { error: patched.error }; break; }
+                    await aiFileOperations.updateFile(targetProjectId, args.path, patched.content);
+                    result = { success: true, message: `File ${args.path} patched.` };
+                    break;
+                }
                 case 'updateFile':
                     if (!targetProjectId) throw new Error("No project selected for updateFile.");
                     await aiFileOperations.updateFile(targetProjectId, args.path, args.newContent);
@@ -108,6 +174,50 @@ export const useChat = (
         
         return result;
     }, [aiFileOperations]);
+
+    /**
+     * Executes queued tool calls in order, stopping to ask approval for a
+     * `runPython` call wherever it occurs — not only when it is first — and
+     * resuming the remainder afterward. See A3 item 3 in the plan.
+     *
+     * References `processStream`, declared just below: both are only ever
+     * *called* well after this render has finished (in response to a stream
+     * event or an approval click), by which point both `const`s already hold
+     * their functions — the same closure relationship `processStream`'s own
+     * self-recursion below already relies on.
+     */
+    const runToolSequence = useCallback(async (calls: ToolCall[], history: Message[], mode: ChatMode) => {
+        let workingHistory = history;
+        const activeProjectsForTooling = mode === 'coding' ? projects : [];
+
+        const { before, paused, remaining } = splitAtApprovalGate(calls, 'runPython');
+
+        for (const toolCall of before) {
+            const toolResponseResult = await handleToolCall(toolCall, activeProjectsForTooling);
+            const toolMessage = addMessage(MessageAuthor.TOOL, [], undefined, { name: toolCall.name, response: { content: toolResponseResult } });
+            workingHistory = [...workingHistory, toolMessage];
+        }
+
+        if (paused) {
+            // Model-generated code never auto-executes: park it as a pending
+            // approval card and wait for the user to click Run or Skip.
+            // Whatever has not run yet travels with it, so declining or
+            // approving resumes the same sequence rather than ending the
+            // turn with calls the model made but nothing ever answered.
+            const pendingMessage = addMessage(MessageAuthor.TOOL, [], undefined,
+                { name: 'runPython', response: { content: { pending: true }, originalCode: paused.args.code } });
+            pendingApprovals.current.set(pendingMessage.id, {
+                toolCall: paused,
+                remainingCalls: remaining,
+                history: workingHistory,
+                mode,
+            });
+            return;
+        }
+
+        const followUpStream = await apiService.generateCodingContentStream(workingHistory, activeProjectsForTooling, persona, useWebSearch, customStyles, lowLatencyMode, model, mode);
+        await processStream(followUpStream, workingHistory, mode);
+    }, [addMessage, projects, persona, useWebSearch, customStyles, lowLatencyMode, model, handleToolCall]);
 
     const processStream = useCallback(async (stream: ReadableStream<Uint8Array>, existingMessages: Message[], currentMode: ChatMode) => {
         const reader = stream.getReader();
@@ -166,32 +276,15 @@ export const useChat = (
 
         const responseMessage = currentResponse as Message | null;
         if (accumulatedFunctionCalls.length > 0 && responseMessage) {
-             const toolCall = accumulatedFunctionCalls[0];
-             responseMessage.toolCall = toolCall;
+             /* The bubble shows the first call it made; every call still runs —
+                see `runToolSequence`. A model that made one call renders and
+                behaves exactly as it always has. */
+             responseMessage.toolCall = accumulatedFunctionCalls[0];
              setMessages(prev => prev.map(m => m.id === responseMessage.id ? { ...responseMessage } : m));
 
-             if (toolCall.name === 'runPython') {
-                 // Model-generated code never auto-executes: park it as a pending
-                 // approval card and wait for the user to click Run or Skip.
-                 const pendingMessage = addMessage(MessageAuthor.TOOL, [], undefined,
-                     { name: 'runPython', response: { content: { pending: true }, originalCode: toolCall.args.code } });
-                 pendingApprovals.current.set(pendingMessage.id, {
-                     toolCall,
-                     history: [...existingMessages, responseMessage],
-                     mode: currentMode,
-                 });
-                 return;
-             }
-
-             const activeProjectsForTooling = currentMode === 'coding' ? projects : [];
-             const toolResponseResult = await handleToolCall(toolCall, activeProjectsForTooling);
-             const toolMessage = addMessage(MessageAuthor.TOOL, [], undefined, { name: toolCall.name, response: { content: toolResponseResult } });
-
-             const historyWithToolResponse = [...existingMessages, responseMessage, toolMessage];
-             const followUpStream = await apiService.generateCodingContentStream(historyWithToolResponse, activeProjectsForTooling, persona, useWebSearch, customStyles, lowLatencyMode, model, currentMode);
-             await processStream(followUpStream, historyWithToolResponse, currentMode);
+             await runToolSequence(accumulatedFunctionCalls, [...existingMessages, responseMessage], currentMode);
         }
-    }, [addMessage, projects, persona, useWebSearch, customStyles, lowLatencyMode, model, handleToolCall]);
+    }, [runToolSequence]);
 
     const resolvePendingTool = useCallback(async (messageId: string, approved: boolean) => {
         const pending = pendingApprovals.current.get(messageId);
@@ -217,17 +310,20 @@ export const useChat = (
             };
             setMessages(prev => prev.map(m => m.id === messageId ? toolMessage : m));
 
+            /* Resume the same sequence rather than jump straight to the next
+               model turn — anything queued behind this `runPython` call still
+               has not run. A sequence of exactly one call has an empty
+               `remainingCalls`, so `runToolSequence` falls straight through to
+               the model turn, matching what this line always did before A3. */
             const historyWithToolResponse = [...pending.history, toolMessage];
-            const activeProjectsForTooling = pending.mode === 'coding' ? projects : [];
-            const followUpStream = await apiService.generateCodingContentStream(historyWithToolResponse, activeProjectsForTooling, persona, useWebSearch, customStyles, lowLatencyMode, model, pending.mode);
-            await processStream(followUpStream, historyWithToolResponse, pending.mode);
+            await runToolSequence(pending.remainingCalls, historyWithToolResponse, pending.mode);
         } catch (error: any) {
             addMessage(MessageAuthor.SYSTEM, [{ text: `Error: ${error.message}` }]);
         } finally {
             setIsLoading(false);
             setStatusText('');
         }
-    }, [addMessage, projects, persona, useWebSearch, customStyles, lowLatencyMode, model, processStream]);
+    }, [addMessage, runToolSequence]);
 
 
     const sendMessage = async (prompt: string, mode: ChatMode, file?: File | null) => {
@@ -253,7 +349,7 @@ export const useChat = (
                 newMessage.regenerationData = { prompt, file };
             } else { // coding or chat mode
                 const history = [...messages, userMessage];
-                const activeProjects = mode === 'coding' ? projects : [];
+                const activeProjects = mode === 'coding' ? await withLiveContext(projects, filesByProject, setStatusText) : [];
                 const stream = await apiService.generateCodingContentStream(history, activeProjects, persona, useWebSearch, customStyles, lowLatencyMode, model, mode);
                 await processStream(stream, history, mode);
             }

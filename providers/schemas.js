@@ -128,6 +128,21 @@ export const ACCEPTANCE_CHECK_SCHEMA = obj({
     }), 'One entry per acceptance criterion given, in the same order.'),
 });
 
+/**
+ * `/api/builder/edit` — a natural-language change against an already-generated
+ * project. Only the files that actually need to change, not the whole project:
+ * the model is given every current file as context and asked to return the
+ * ones it touched, the same "return only what changed" contract
+ * `REFINE_SYSTEM_PROMPT` already uses for the coding chat's own refine path.
+ */
+export const EDIT_SCHEMA = obj({
+    files: arr(obj({
+        path: str("The path of a file that needs to change, matching an existing path exactly."),
+        content: str('The complete new content of that file.'),
+    }), 'Only the files that need to change. A file not listed here is left exactly as it was.'),
+    summary: str('One or two sentences: what changed and why.'),
+});
+
 /** Converts the generated files array back into the { path: content } map the client expects. */
 export const filesArrayToRecord = (files) => {
     const record = {};
