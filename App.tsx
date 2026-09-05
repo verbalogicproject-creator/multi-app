@@ -41,7 +41,7 @@ import Harness from './components/Harness';
  */
 const AppContent: React.FC = () => {
     const {
-        globalError, setGlobalError, activeAgentId, agents, selectedProjectIds,
+        globalError, setGlobalError, activeAgentId, agents, projects, selectedProjectIds,
         surface, setSurface,
         editingProject, filesByProject, handleCloseProjectSettings, handleRenameProject, handleAddFile, handleDeleteFile,
     } = useAppContext();
@@ -60,11 +60,27 @@ const AppContent: React.FC = () => {
      * is the project you last ticked in Projects — a `Set` keeps insertion order, so
      * "last" is the one you most recently ticked.
      *
+     * **And it has to still exist.** Naming a project is not the same as having one:
+     * deleting a project does not repair the agents bound to it, so an active agent goes
+     * on reporting a `projectId` that nothing answers to. That id is truthy, so Code and
+     * Preview stayed enabled, the guard below never fired, and both destinations rendered
+     * against a project that was gone — an editor with no files and no explanation. The
+     * same hole swallows an agent restored from storage whose project was deleted in
+     * another session.
+     *
+     * So the candidate is checked against the projects that are actually loaded. An id
+     * nobody can resolve is the same as no id at all, and saying so here means every
+     * consumer — the availability hints, the redirect, the preview's file map — agrees
+     * without each having to remember.
+     *
      * Worth knowing before the layout pass: that checkbox is doing two jobs at once,
      * choosing chat's context *and* the IDE's target. Making it work is not the same
      * as making it right.
      */
-    const ideProjectId = activeAgent?.projectId ?? [...selectedProjectIds].at(-1) ?? null;
+    const candidateProjectId = activeAgent?.projectId ?? [...selectedProjectIds].at(-1) ?? null;
+    const ideProjectId = candidateProjectId && projects.some(p => p.id === candidateProjectId)
+        ? candidateProjectId
+        : null;
 
     const [memoryOpen, setMemoryOpen] = useState(false);
     const [memoryNeedsYou, setMemoryNeedsYou] = useState(false);

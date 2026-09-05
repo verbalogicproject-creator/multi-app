@@ -251,6 +251,65 @@ const run = async () => {
         ok('history resets when you come back', (await docText(page)).includes('/*MARK*/'),
            'undo walked back past the file switch — history was not reset');
 
+        // ── 5. A destination is only open if the project behind it still exists ──
+        /* Found by an adversarial review, and confirmed by measurement before it was
+           believed. `ideProjectId` was `activeAgent?.projectId ?? lastTicked`, and
+           nothing ever asked whether that id still named a loaded project. A truthy id
+           for a project that is gone left Code and Preview enabled, kept the redirect
+           guard from firing, and rendered both against nothing.
+
+           Two cases, and the split matters. The second is the one a person hits; the
+           first is the one that can only be passed by the fix. Deleting a project also
+           stands down the agent bound to it, so case (b) alone would go green with the
+           existence check reverted — the stand-down would disable Code by itself. Case
+           (a) has no deletion and no stand-down in it, so nothing but the existence
+           check can make Code unavailable there. */
+        const dockItem = (p, name) => p.locator('[data-dock-live] button', { hasText: name }).first();
+
+        // (a) An agent restored from storage naming a project that is not there.
+        const ghost = await openPage(browser, DESKTOP, URL, {
+            gemini_agents: [{ id: 'agent-ghost', name: 'Ghost Builder', personaId: 'p1', projectId: 'proj-deleted-elsewhere' }],
+        });
+        try {
+            await dockTo(ghost.page, 'Harness');
+            await ghost.page.getByText('Ghost Builder').click();
+            await ghost.page.waitForTimeout(800);
+            ok('an agent naming a project that does not exist cannot open Code',
+                await dockItem(ghost.page, 'Code').isDisabled(),
+                'Code was offered for a project id that resolves to nothing');
+            ok('nor Preview',
+                await dockItem(ghost.page, 'Preview').isDisabled(),
+                'Preview was offered for a project id that resolves to nothing');
+            ok('and it says why rather than just greying out',
+                /Open a project/.test(await dockItem(ghost.page, 'Code').getAttribute('title') ?? ''),
+                `title was ${JSON.stringify(await dockItem(ghost.page, 'Code').getAttribute('title'))}`);
+        } finally {
+            await ghost.context.close();
+        }
+
+        // (b) The project is deleted while its agent is active and its code is open.
+        /* The agent from section 0 is still active here; clicking it again would
+           deselect it, which is how the first version of this section managed to
+           disable Code before the deletion it was supposed to be testing. */
+        await dockTo(page, 'Code');
+        ok('the open project still has an editor before the deletion',
+            await page.locator('.cm-editor').count() > 0,
+            'this case needs the editor open before it can prove it closes');
+
+        await dockTo(page, 'Projects');
+        /* No confirmation step: deletion is immediate. That is its own finding for
+           another day — this asserts what the shell does afterwards, not whether it
+           should have asked first. */
+        await page.getByRole('button', { name: 'Delete Harbour Dashboard' }).click();
+        await page.waitForTimeout(900);
+
+        ok('deleting the open project disables Code',
+            await dockItem(page, 'Code').isDisabled(),
+            'Code is still offered for a project that no longer exists');
+        ok('and disables Preview',
+            await dockItem(page, 'Preview').isDisabled(),
+            'Preview is still offered for a project that no longer exists');
+
     } finally {
         await context.close();
         await browser.close();
