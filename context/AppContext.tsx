@@ -214,6 +214,7 @@ interface AppContextType {
     setSurface: React.Dispatch<React.SetStateAction<Surface>>;
     handleCreateProject: (name: string) => Promise<Project>;
     handleDeleteProject: (id: string) => Promise<void>;
+    projectDeletionCost: (id: string) => { files: number; agents: string[] };
     handleToggleProjectSelection: (id: string) => void;
     handleViewProjectFiles: (id: string) => Promise<void>;
     handleAddFile: (projectId: string, file: File) => Promise<void>;
@@ -402,11 +403,21 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         loadInitialData();
     }, []);
 
+    /**
+     * Keep the persona being edited in step with the one that is selected.
+     *
+     * This read `if (foundPersona) setActivePersona(foundPersona)` — which updates on a
+     * hit and **silently keeps the previous value on a miss**. Delete the selected
+     * persona and `activePersona` went on holding the deleted one, so its instructions
+     * kept reaching the model with nothing on screen to say so. The same shape as the
+     * dock and the dangling project: a check for the weaker property standing in for the
+     * stronger one. A selection that no longer resolves is no selection.
+     */
     useEffect(() => {
-        if (selectedPersonaId) {
-            const foundPersona = personas.find(p => p.id === selectedPersonaId);
-            if (foundPersona) setActivePersona(foundPersona);
-        }
+        if (!selectedPersonaId) return;
+        const found = personas.find(p => p.id === selectedPersonaId);
+        if (found) setActivePersona(found);
+        else setSelectedPersonaId(null);
     }, [selectedPersonaId, personas]);
 
     const analyzeDependencies = useCallback(async (projectId: string) => {
@@ -441,14 +452,28 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setSelectedProjectIds((prev: Set<string>) => { const newSet = new Set(prev); newSet.delete(id); return newSet; });
         setFilesByProject((prev: Map<string, ProjectFile[]>) => { const newMap = new Map(prev); newMap.delete(id); return newMap; });
         if (activeProjectView === id) setActiveProjectView(null);
-        /* An active agent bound to the project that just went away is still active, and
-           still names it — so chat would go on sending a dead id as its context. Stand
-           the agent down rather than rewriting its record: the binding is data the spine
-           migration owns, but an agent working on nothing should not stay selected.
-           `App` separately refuses to open the IDE on a project that is not loaded, so
-           the two together mean a deletion cannot leave a live surface pointing at it. */
-        if (agents.find(a => a.id === activeAgentId)?.projectId === id) handleSelectAgent(null);
+
+        /* An agent's `projectId` is required and is used as a lookup key, so an agent
+           bound to a deleted project is invalid data that renders as a working control.
+           Leaving them was the "dangling record" half of the review finding: the shell
+           stopped trusting them, and the store went on lying.
+           
+           They go with the project. That is only acceptable because the confirmation
+           step names them first — a deletion that quietly takes things it did not
+           mention is worse than one that takes more. */
+        const orphaned = agents.filter(a => a.projectId === id);
+        if (orphaned.length) {
+            if (orphaned.some(a => a.id === activeAgentId)) handleSelectAgent(null);
+            for (const agent of orphaned) await storageService.deleteAgent(agent.id);
+            setAgents((prev: Agent[]) => prev.filter(a => a.projectId !== id));
+        }
     };
+
+    /** What a deletion would take with it, so the confirmation can say so. */
+    const projectDeletionCost = (id: string) => ({
+        files: filesByProjectRef.current.get(id)?.length ?? 0,
+        agents: agents.filter(a => a.projectId === id).map(a => a.name),
+    });
     const handleToggleProjectSelection = (id: string) => {
         setSelectedProjectIds((prev: Set<string>) => { 
             const newSet = new Set(prev); 
@@ -600,6 +625,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             await storageService.deletePersona(personaId);
             setPersonas((prev: Persona[]) => prev.filter(p => p.id !== personaId));
             if (selectedPersonaId === personaId) setSelectedPersonaId(null);
+            /* Same class as the project case: an agent's `personaId` is a lookup key,
+               and an agent whose persona is gone resolves to nothing while still looking
+               like an expert you can activate. */
+            const orphaned = agents.filter(a => a.personaId === personaId);
+            if (orphaned.length) {
+                if (orphaned.some(a => a.id === activeAgentId)) handleSelectAgent(null);
+                for (const agent of orphaned) await storageService.deleteAgent(agent.id);
+                setAgents((prev: Agent[]) => prev.filter(a => a.personaId !== personaId));
+            }
         } catch (error) {
             // FIX: Safely handle the 'unknown' type of the caught error by checking if it's an instance of Error to access its message, or converting to a string as a fallback.
             if (error instanceof Error) {
@@ -1227,7 +1261,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         projects, selectedProjectIds, filesByProject, activeProjectView, editingProject, analyzingProjects,
         ensureProjectFiles,
         surface, setSurface,
-        handleCreateProject, handleDeleteProject, handleToggleProjectSelection, handleViewProjectFiles, handleAddFile, handleDeleteFile,
+        handleCreateProject, handleDeleteProject, projectDeletionCost, handleToggleProjectSelection, handleViewProjectFiles, handleAddFile, handleDeleteFile,
         aiCreateFile, aiUpdateFile, aiDeleteFile,
         handleSaveFileContent, handleOpenProjectSettings, handleCloseProjectSettings, handleRenameProject,
         setSelectedProjectIds,

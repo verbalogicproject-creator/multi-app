@@ -400,6 +400,27 @@ const AUDIT = (expected) => {
         }
     }
 
+    /* --- operable: a control you can see must respond to you -----------------
+       Generalised out of the dock, where it was found. Scoping it to the dock would
+       repeat the mistake that let the dock bug through: a check narrow enough to miss
+       the next instance of its own class.
+
+       `disabled` is not a fault — it is a visible, explained state with a title, and
+       this app uses it deliberately for destinations with nothing behind them. `inert`
+       and `pointer-events: none` are different: the control looks live and silently
+       is not. That gap between what a control promises and what it does is the whole
+       finding. */
+    for (const el of document.querySelectorAll(INTERACTIVE)) {
+        if (!visible(el)) continue;
+        if (el.disabled || el.getAttribute('aria-disabled') === 'true') continue;
+        const name = (el.getAttribute('aria-label') || el.textContent || '').trim().slice(0, 40) || '(unnamed)';
+        if (el.closest('[inert]')) {
+            findings.targets.push(`${label(el)} "${name}" is on screen but inert — it looks live and ignores you`);
+        } else if (getComputedStyle(el).pointerEvents === 'none' && !el.closest('[aria-hidden="true"]')) {
+            findings.targets.push(`${label(el)} "${name}" is on screen but has pointer-events:none`);
+        }
+    }
+
     // --- overflow: the page itself must never scroll sideways ----------------
     const de = document.documentElement;
     if (de.scrollWidth > de.clientWidth + 1) {

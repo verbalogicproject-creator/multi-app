@@ -66,6 +66,40 @@ The memory lifecycle needs **no model and no key** to verify: `/api/memory/*` ca
 
 Two traps the smoke encodes, because both produce a green result for the wrong reason. Give the server a **deliberately invalid** provider key rather than a real one: a builder call is supposed to fail at the model, since recall runs before it and leaves its receipt either way, and that failure is what proves memory sits upstream of the provider. And never assert that something was *absent* from a recall without first proving it would otherwise have been *present* — a packet with no items leaves no receipt at all, so "the taste lesson was barred" and "nothing was recalled" look identical. The direction-bar check runs the same task twice, differing only in the flag, for exactly that reason.
 
+### Two habits that let a whole class of bug through, and what replaced them
+
+Both came out of one adversarial review, and both are the same mistake: **asserting the
+weaker property and naming it the stronger one.**
+
+**A filter is a blind spot. Say what it hides.** `audit:ui`'s duplicate check excluded
+the dock's `inert` clones as correct, so it could not fail on them — and the dock shipped
+with fourteen visible buttons that ignored every click against seven that worked, while
+the gate reported *34 surfaces, 0 findings*. The exclusion was added for a good reason
+(98 false positives) and nobody asked what it had just made invisible. When a check
+narrows its scope, either state in a comment what the narrowed version can no longer see,
+or pair it with one that covers the excluded set. The pairing here is
+"visible ⇒ operable", asserted page-side against the viewport.
+
+**Presence is not validity: resolve an id, do not trust it.** `ideProjectId` was checked
+for non-null and used as a lookup key without ever being looked up, so a deleted project
+kept Code and Preview enabled and rendering against nothing. Sweeping the class found two
+more instances the same afternoon — agents left bound to a deleted persona, and an
+`if (found) setActivePersona(found)` that updated on a hit and silently kept the deleted
+persona on a miss, so its instructions went on reaching the model. **Every id that
+crosses a collection boundary is resolved at the point of use, and a miss is handled
+explicitly.**
+
+**And the general rule the two share:** when a bug is found, fix the class, not the
+instance. Grep for every other place the same shape occurs *before* writing the fix. Two
+of the four faults above were found that way rather than by being reported.
+
+**Measurement has a blind spot too.** This repo's habit is to measure rather than assume,
+and it is a good one — but you only measure what you thought to point an instrument at.
+The dock fault was found by reasoning about CSS widths, not by a probe. Run
+`/codex:adversarial-review` on a clean tree before calling a phase done; it is not a
+formality, and it is worth more than another gate written by the same hands that wrote
+the code.
+
 Read the two boot lines before trusting a run. A second server on an occupied port dies with `EADDRINUSE` while the one already there keeps answering — writing to whatever database *it* was started with — so the server prints `Memory databases: <dir>` alongside its port, and `/api/memory/state` reports the same `databaseDir`. A refused event comes back with the engine's own reason in `rejected[].reason`, naming the field it rejected and the vocabulary it wanted; the bridge's last failure is also on `/api/memory/state`.
 
 ## Commit & Pull Request Guidelines

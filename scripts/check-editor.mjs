@@ -297,11 +297,39 @@ const run = async () => {
             'this case needs the editor open before it can prove it closes');
 
         await dockTo(page, 'Projects');
-        /* No confirmation step: deletion is immediate. That is its own finding for
-           another day — this asserts what the shell does afterwards, not whether it
-           should have asked first. */
+        /* Deletion asks first, and the question names what goes with it. There is no
+           undo in this app, so this step is the only thing between a mis-tap and a lost
+           project — and it has to mention the experts bound to it, which are deleted
+           too. A confirmation that hides half of what it does is worse than none. */
         await page.getByRole('button', { name: 'Delete Harbour Dashboard' }).click();
+        await page.waitForTimeout(400);
+        ok('deleting asks before it deletes',
+            await page.getByRole('button', { name: 'Confirm deleting Harbour Dashboard' }).isVisible()
+                && await page.getByRole('checkbox', { name: 'Harbour Dashboard' }).count() === 1,
+            'the project went without a question');
+        ok('and names the expert that goes with it',
+            /Harbour Builder/.test(await page.getByText(/will go with it/).innerText()),
+            await page.getByText(/will go with it/).innerText().catch(() => '(no cost line rendered)'));
+
+        await page.getByRole('button', { name: 'Keep' }).click();
+        await page.waitForTimeout(400);
+        ok('and Keep actually keeps it',
+            await page.getByRole('checkbox', { name: 'Harbour Dashboard' }).count() === 1,
+            'the project vanished after choosing Keep');
+
+        await page.getByRole('button', { name: 'Delete Harbour Dashboard' }).click();
+        await page.waitForTimeout(300);
+        await page.getByRole('button', { name: 'Confirm deleting Harbour Dashboard' }).click();
         await page.waitForTimeout(900);
+        ok('confirming removes the project',
+            await page.getByRole('checkbox', { name: 'Harbour Dashboard' }).count() === 0);
+        /* The dangling half of the review finding: the shell stopped trusting these
+           records, and the store went on holding them. */
+        await dockTo(page, 'Harness');
+        ok('and the expert bound to it is gone rather than left dangling',
+            await page.getByText('Harbour Builder').count() === 0,
+            'an agent still names a project that no longer exists');
+        await dockTo(page, 'Projects');
 
         ok('deleting the open project disables Code',
             await dockItem(page, 'Code').isDisabled(),
