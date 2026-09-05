@@ -269,11 +269,15 @@ export const SURFACES = [
 export const openPage = async (browser, profile, url, extraSeed = {}) => {
     const context = await browser.newContext(profile);
     await context.addInitScript(([seed, convo, agentId, extra]) => {
+        /* Defaults first, the caller's seed last. These two lines used to run *after*
+           the merge, which meant `extraSeed` could not override a conversation — it was
+           written and then silently overwritten, so a seed that did not take produced no
+           error and no clue. Found by a gate whose fixture appeared to be ignored. */
+        localStorage.setItem(`gemini_messages_${agentId}`, JSON.stringify(convo));
+        localStorage.setItem('gemini_messages_general', JSON.stringify(convo));
         for (const [k, v] of Object.entries({ ...seed, ...extra })) {
             localStorage.setItem(k, typeof v === 'string' ? v : JSON.stringify(v));
         }
-        localStorage.setItem(`gemini_messages_${agentId}`, JSON.stringify(convo));
-        localStorage.setItem('gemini_messages_general', JSON.stringify(convo));
     }, [SEED, CONVERSATION, AGENT_ID, extraSeed]);
     const page = await context.newPage();
     await page.goto(url, { waitUntil: 'networkidle' });

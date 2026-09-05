@@ -23,7 +23,8 @@
     "check:editor": "npm run build && node scripts/check-editor.mjs",
     "check:preview": "npm run build && node scripts/check-preview.mjs",
     "check:generate": "node scripts/check-generate.mjs",
-    "check:auth": "node scripts/check-auth.mjs"
+    "check:auth": "node scripts/check-auth.mjs",
+    "check:pipeline": "npm run build && node scripts/check-pipeline.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.122.0",

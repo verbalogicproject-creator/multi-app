@@ -34,7 +34,10 @@ const BuildShelf: React.FC = () => {
             </h2>
             <p className="mt-2 text-sm text-metal-300">Go from an idea to a complete, downloadable React project.</p>
             <button
-                onClick={startWebAppBuild}
+                /* Wrapped, not passed. `startWebAppBuild` takes an optional idea now, so
+                   handing it straight to `onClick` would seed the wizard with a React
+                   synthetic mouse event. `tsc` caught it; it would have been a quiet one. */
+                onClick={() => startWebAppBuild()}
                 className="tap mt-6 w-full sm:w-auto px-8 rounded-xl bg-metal-700 text-metal-100 font-medium
                            shadow-[inset_0_1px_0_rgb(255_255_255/0.08)]
                            transition-[background-color,transform] duration-200 ease-fluid

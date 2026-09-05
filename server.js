@@ -248,7 +248,7 @@ const geminiService = {
      * Streams a coding turn from whichever provider serves the chosen model.
      * Returns { model, stream } where stream yields normalized events.
      */
-    generateCodingContentStream: function(history, projects, persona, useWebSearch, customStyles, lowLatencyMode, model) {
+    generateCodingContentStream: function(history, projects, persona, useWebSearch, customStyles, lowLatencyMode, model, mode) {
         const codingModel = pickModel(model, MODELS.coding);
         const entry = getModel(codingModel);
         const provider = providerForModel(codingModel);
@@ -258,6 +258,10 @@ const geminiService = {
             persona,
             projects,
             customStyles,
+            /* The chat mode reaches the prompt. It used to stop at the client, where it
+               decided one thing — whether projects were forwarded — so a mode could
+               change what the assistant was *given* but never what it was *for*. */
+            mode,
         });
 
         // Google's built-in web search replaces function tools; other providers
@@ -411,9 +415,9 @@ app.get('/api/video-status', async (req, res) => {
 // Coding Assistant Streaming
 app.post('/api/coding-chat-stream', async (req, res) => {
      try {
-        const { history, projects, persona, useWebSearch, customStyles, lowLatencyMode, model } = req.body;
+        const { history, projects, persona, useWebSearch, customStyles, lowLatencyMode, model, mode } = req.body;
 
-        const { model: servingModel, stream } = geminiService.generateCodingContentStream(history, projects, persona, useWebSearch, customStyles, lowLatencyMode, model);
+        const { model: servingModel, stream } = geminiService.generateCodingContentStream(history, projects, persona, useWebSearch, customStyles, lowLatencyMode, model, mode);
 
         res.setHeader('Content-Type', 'application/x-ndjson');
 

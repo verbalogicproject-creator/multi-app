@@ -10,6 +10,9 @@ interface ModeSelectorProps {
 
 const allModes: { id: ChatMode; label: string; description: string; enabled: boolean }[] = [
   { id: 'chat', label: 'Chat', description: 'Have a general conversation.', enabled: true },
+  /* The bridge to the builder. It reaches the server, so the assistant knows it is
+     shaping something buildable rather than just talking about one. */
+  { id: 'plan', label: 'Plan', description: 'Shape an idea, then send it to the builder.', enabled: true },
   { id: 'image-edit', label: 'Image Editor', description: 'Edit images with text prompts.', enabled: FEATURES.imageEdit },
   { id: 'video-gen', label: 'Video Generator', description: 'Create video clips from text or images.', enabled: FEATURES.videoGen },
   { id: 'live', label: 'Live Conversation', description: 'Talk with Gemini in real-time.', enabled: FEATURES.liveAudio },
