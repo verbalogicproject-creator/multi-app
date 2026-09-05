@@ -30,6 +30,7 @@ import { toBuildIssues } from '../typecheck/parse.js';
 import { proposalsFor, unmappedCodes, PROPOSAL_TABLE, NOT_A_LESSON } from '../memory/proposals.js';
 import { normaliseManifest, manifestGaps, missingFrom, manifestInstruction, fileInstruction, generateFromManifest, filesNeedingRepair, importedPaths, repairInstruction, repairRound, planCoverage, coverPlan } from '../providers/generate.js';
 import { scaffoldFor, packageJsonFor, importedPackages, SCAFFOLD_PATHS, KNOWN_VERSIONS as KNOWN_VERSIONS_FOR_TEST } from '../providers/scaffold.js';
+import { AESTHETIC_DIMENSIONS, buildAestheticDirective } from '../providers/aesthetic.js';
 
 let failures = 0;
 const ok = (label, cond, detail = '') => {
@@ -235,7 +236,7 @@ const drive = async ({ manifest, truncate = [], content }) => {
         run: async (models, attempt, onServed) => { const r = await attempt(models[0]); onServed?.(models[0]); return r; },
         getProvider: () => provider,
         systemFor: () => 'system',
-        basePrompt: 'PLAN',
+        basePromptFor: () => 'PLAN',
         emit: (e) => emitted.push(e),
         schemas: { manifest: {}, file: {} },
         concurrency: 2,
@@ -413,7 +414,7 @@ const scaffoldRun = await (async () => {
     const result = await generateFromManifest({
         models: ['stub'],
         run: async (m, a, s2) => { const r = await a(m[0]); s2?.(m[0]); return r; },
-        getProvider: () => provider, systemFor: () => 'sys', basePrompt: 'PLAN',
+        getProvider: () => provider, systemFor: () => 'sys', basePromptFor: () => 'PLAN',
         emit: () => {}, schemas: { manifest: {}, file: {} },
         prefill: scaffoldFor({ plan: { projectName: 'X' }, theme: {} }),
         provided: ['package.json'],
@@ -579,7 +580,7 @@ const restoreProvider = {
 const restoredRun = await generateFromManifest({
     models: ['stub'],
     run: async (m, a, s2) => { const r = await a(m[0]); s2?.(m[0]); return r; },
-    getProvider: () => restoreProvider, systemFor: () => 'sys', basePrompt: 'PLAN',
+    getProvider: () => restoreProvider, systemFor: () => 'sys', basePromptFor: () => 'PLAN',
     emit: () => {}, schemas: { manifest: {}, file: {} },
     prefill: scaffoldFor({ plan: { projectName: 'X' }, theme: {} }),
     provided: ['package.json'],
@@ -616,6 +617,45 @@ const syntaxLesson = proposalsFor({ ok: false, codes: { 'syntax-error': 1 } })[0
 ok('and the lesson it would teach covers the same cause',
     /template literal/i.test(syntaxLesson) && /backtick/i.test(syntaxLesson),
     syntaxLesson.slice(-90));
+
+// ---------------------------------------------------------------------------
+console.log('\n13. the aesthetic directive reaches the prompt, in the right dialect');
+
+ok('no config changes nothing', buildAestheticDirective(undefined, 'google') === '');
+ok('an empty object changes nothing either', buildAestheticDirective({}, 'google') === '');
+
+const editorial = buildAestheticDirective({ typography: 'editorial' }, 'google');
+ok('a chosen option puts its directive in the prompt',
+    editorial.includes(AESTHETIC_DIMENSIONS.typography.options.editorial.directive));
+ok('and an option not chosen is absent',
+    !editorial.includes(AESTHETIC_DIMENSIONS.typography.options.bold.directive));
+
+const claude = buildAestheticDirective({ typography: 'editorial' }, 'anthropic');
+ok('Claude gets it wrapped in XML tags', claude.includes('<aesthetic_directive>') && claude.includes('</aesthetic_directive>'));
+ok('and Gemini does not', !editorial.includes('<aesthetic_directive>'));
+
+const openai = buildAestheticDirective({ motion: 'rich' }, 'openai');
+ok('OpenAI gets a markdown header instead', openai.includes('### Design directive'));
+ok('and Gemini does not get markdown headers',
+    !buildAestheticDirective({ motion: 'rich' }, 'google').includes('###'));
+
+const nvidia = buildAestheticDirective({ background: 'glass', motion: 'subtle' }, 'nvidia');
+ok('the open-model dialect is a numbered plain list', /^\d+\.\s/m.test(nvidia) && !nvidia.includes('<') && !nvidia.includes('#'));
+
+ok('an unrecognised option value is silently ignored, not thrown',
+    buildAestheticDirective({ typography: 'baroque' }, 'google') === '');
+
+const both = buildAestheticDirective({ antiSlop: true, selfReflection: true }, 'google');
+ok('anti-slop is included when asked for', /Bootstrap/i.test(both));
+ok('and the self-reflection rubric is included alongside it', /score your own output/i.test(both));
+ok('neither appears unasked', buildAestheticDirective({}, 'google') === '');
+
+const combined = buildAestheticDirective({ typography: 'bold', motion: 'rich', background: 'gradient' }, 'anthropic');
+ok('all three real dimensions can combine in one request',
+    ['bold', 'rich', 'gradient'].every((v, i) => {
+        const dim = ['typography', 'motion', 'background'][i];
+        return combined.includes(AESTHETIC_DIMENSIONS[dim].options[v].directive);
+    }));
 
 console.log(failures === 0 ? '\ngenerate ok' : `\n${failures} CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

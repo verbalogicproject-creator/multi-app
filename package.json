@@ -33,6 +33,7 @@
     "@codemirror/lang-javascript": "^6.2.5",
     "@codemirror/lang-json": "^6.0.2",
     "@codemirror/lint": "^6.9.7",
+    "@codesandbox/sandpack-react": "^2.20.0",
     "@google/genai": "^2.20.0",
     "@lezer/highlight": "^1.2.3",
     "clsx": "^2.1.1",

@@ -302,12 +302,26 @@ const AUDIT = (expected) => {
     // self-hosted. That invariant is easy to break with one convenient CDN URL,
     // so it is checked rather than remembered.
     const ORIGIN_OK = /^(data:|blob:|about:|$)/;
+    /**
+     * The one named exception, and it is a real cost rather than a formality.
+     *
+     * `SandpackAppPreview.tsx` embeds `*.codesandbox.io` on purpose — there is no
+     * same-origin way to get Sandpack's CDN-resolved bundling (A0's plan). Taking
+     * that iframe means WebContainer (DESIGN.md §5) is no longer "cheap to take
+     * later": `COEP: require-corp` would silently kill this surface too, and
+     * unlike the rest of the app this one cannot be routed through our own server
+     * first, because the whole point is Sandpack's own bundler. If WebContainer is
+     * ever pursued, this surface is what has to change — self-host Sandpack's
+     * bundler or drop it — not a config line.
+     */
+    const CROSS_ORIGIN_EXCEPTIONS = [/(^|\.)codesandbox\.io$/];
     for (const el of document.querySelectorAll('img[src], video[src], source[src], iframe[src], audio[src], link[rel="stylesheet"], script[src]')) {
         const raw = el.getAttribute('src') || el.getAttribute('href') || '';
         if (ORIGIN_OK.test(raw)) continue;
         let url;
         try { url = new URL(raw, location.href); } catch { continue; }
         if (url.origin === location.origin) continue;
+        if (CROSS_ORIGIN_EXCEPTIONS.some(re => re.test(url.hostname))) continue;
         findings.overflow.push(`cross-origin resource: <${el.tagName.toLowerCase()}> ${url.origin}${url.pathname} — breaks under COEP`);
     }
 

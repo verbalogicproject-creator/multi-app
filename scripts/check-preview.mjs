@@ -239,6 +239,25 @@ const textOf = async (locator, timeout = 6000) => {
     try { return await locator.innerText({ timeout }); } catch { return null; }
 };
 
+/**
+ * Text, polled — `innerText()` alone waits only for the element to attach, not for
+ * its content to settle. Sandpack's frame attaches its `<body>` immediately and
+ * fills it in after the bundler round-trips to its CDN, so the first read is
+ * reliably empty; this is the difference between "not there yet" and "empty".
+ */
+const waitForFrameText = async (locator, timeoutMs = 30_000) => {
+    const deadline = Date.now() + timeoutMs;
+    let last = null;
+    while (Date.now() < deadline) {
+        try {
+            last = await locator.innerText({ timeout: 1000 });
+            if (last && last.trim() !== '') return last;
+        } catch { /* frame or element not ready yet */ }
+        await new Promise((r) => setTimeout(r, 500));
+    }
+    return last;
+};
+
 const mount = async (page, html) => {
     await page.evaluate((doc) => window.__mount(doc), html);
     /* One message of type `rendered` always arrives — empty or not — so waiting for
@@ -460,6 +479,48 @@ const run = async () => {
         ok('and it runs the generated app rather than a picture of it',
             wizardText?.includes('Harbour Dashboard') === true,
             wizardText === null ? 'nothing rendered in #root' : `#root reads "${wizardText}"`);
+
+        // -- mount three: Sandpack, which must be a second pair of eyes, not a
+        // second verdict --
+        /* Reuses the page already open on the good fixture: this only asks whether
+           Sandpack, given a clean project, renders it — not whether the esbuild
+           preview above did, which the assertions just above already answered. */
+        console.log('\n9. Sandpack renders the same project, independently');
+        const sandpackFrame = wizard.page.locator('[data-sandpack-preview] iframe');
+        const sandpackBuilt = await sandpackFrame.waitFor({ timeout: 45_000 }).then(() => true).catch(() => false);
+        ok('the interactive preview mounts an iframe', sandpackBuilt,
+            'no iframe appeared under [data-sandpack-preview]');
+        const sandpackText = sandpackBuilt
+            ? await waitForFrameText(wizard.page.frameLocator('[data-sandpack-preview] iframe').locator('body'))
+            : null;
+        ok('and it runs the same generated app', sandpackText?.includes('Harbour Dashboard') === true,
+            sandpackText === null ? 'nothing rendered inside the Sandpack frame' : `frame reads "${sandpackText}"`);
+
+        /* The assertion that matters: a project Sandpack renders without complaint
+           can still be a project the real verdict rejected. If this ever goes red,
+           something started deriving `validation` from Sandpack (or stopped running
+           `tsc`/esbuild independently) — see SandpackAppPreview.tsx's doc comment. */
+        console.log('\n10. Sandpack rendering happily does not launder a real failure');
+        const keptSeed = SURFACES.find((s) => s.name === 'wizard-5-export-kept-despite')?.seed;
+        ok('the kept-despite fixture is still where the audit keeps it', Boolean(keptSeed));
+        const kept = await openPage(clientBrowser, DESKTOP, URL, keptSeed ?? {});
+        try {
+            const verdictText = await textOf(kept.page.locator('text=/Kept despite|Passed all/').first(), 10_000);
+            ok('the export screen still reports the failure, not a pass',
+                verdictText?.includes('Kept despite') === true,
+                verdictText === null ? 'neither verdict string appeared' : `screen reads "${verdictText}"`);
+
+            const keptFrame = kept.page.locator('[data-sandpack-preview] iframe');
+            const keptBuilt = await keptFrame.waitFor({ timeout: 45_000 }).then(() => true).catch(() => false);
+            const keptText = keptBuilt
+                ? await waitForFrameText(kept.page.frameLocator('[data-sandpack-preview] iframe').locator('body'))
+                : null;
+            ok('while Sandpack renders the type-broken project without complaint',
+                keptText?.includes('Harbour Dashboard') === true,
+                keptText === null ? 'nothing rendered inside the Sandpack frame' : `frame reads "${keptText}"`);
+        } finally {
+            await kept.context.close();
+        }
     } finally {
         await clientBrowser.close();
         stopPreview(vite);

@@ -9,6 +9,9 @@ import {
     findTypography, resolveThemeColors, sanitizeColors,
     type ThemeColors, type ArtDirection,
 } from '../../utils/palettes';
+import { AESTHETIC_DIMENSIONS } from '../../providers/aesthetic.js';
+
+type AestheticDimensionKey = keyof typeof AESTHETIC_DIMENSIONS;
 
 const SwatchStrip: React.FC<{ colors: ThemeColors }> = ({ colors }) => (
     <div className="flex h-11 rounded-md overflow-hidden">
@@ -39,6 +42,18 @@ const tile = (selected: boolean) =>
 const SectionLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
     <h3 className="text-xs font-medium uppercase tracking-[0.12em] text-metal-300 mb-3">{children}</h3>
 );
+
+/** Smaller than `tile()`: these are abstract directive choices, not visual swatches,
+ *  so the row reads as chips rather than a grid of cards. */
+const pill = (selected: boolean) =>
+    [
+        'tap px-3 py-1.5 rounded-full text-xs font-medium',
+        'transition-[background-color,box-shadow] duration-200 ease-fluid',
+        'active:scale-[0.98] disabled:opacity-40 disabled:active:scale-100',
+        selected
+            ? 'bg-raised text-metal-100 shadow-[inset_0_0_0_1px_rgb(255_255_255/0.14)]'
+            : 'bg-white/[0.04] text-metal-300 shadow-[inset_0_0_0_1px_rgb(255_255_255/0.06)] md:hover:bg-white/[0.07]',
+    ].join(' ');
 
 const Step_Theme: React.FC = () => {
     const { builderState, setBuilderState, generateWebAppCode, suggestArtDirections, noteDirectionSelected, selectedModel, catalog, modelDefaults } = useAppContext();
@@ -88,6 +103,21 @@ const Step_Theme: React.FC = () => {
 
     const selectTypography = (name: string) =>
         setBuilderState(prev => ({ ...prev, theme: { ...prev.theme, typography: name } }));
+
+    /* `undefined` means "say nothing about this dimension" — `buildAestheticDirective`
+       (providers/aesthetic.js) treats an absent value exactly like one it does not
+       recognise, so there is no separate "auto" value to keep in sync with it. */
+    const setAesthetic = (dimension: AestheticDimensionKey, value: string | undefined) =>
+        setBuilderState(prev => ({
+            ...prev,
+            theme: { ...prev.theme, aesthetic: { ...prev.theme.aesthetic, [dimension]: value } },
+        }));
+
+    const toggleAestheticFlag = (flag: 'antiSlop' | 'selfReflection') =>
+        setBuilderState(prev => ({
+            ...prev,
+            theme: { ...prev.theme, aesthetic: { ...prev.theme.aesthetic, [flag]: !prev.theme.aesthetic?.[flag] } },
+        }));
 
     const applyDirection = (direction: ArtDirection, index: number) => {
         // Which of the three proposals actually won — the only place that is knowable.
@@ -180,6 +210,53 @@ const Step_Theme: React.FC = () => {
                             <span className="block mt-1 text-[11px] text-metal-300 leading-tight">{option.name}</span>
                         </button>
                     ))}
+                </div>
+            </div>
+
+            {/* Aesthetic directives — orthogonal to the palette/typography above:
+                these shape hierarchy, motion and background treatment, not colour or
+                font family. Every dimension defaults to "Auto", meaning the generate
+                prompt says nothing extra about it. */}
+            <div className="mt-6 p-5 md:p-6 rounded-card bg-surface hairline">
+                <h3 className="text-xs font-medium uppercase tracking-[0.12em] text-metal-300">
+                    Design variety
+                </h3>
+                <p className="text-xs text-metal-400 mt-2 mb-4">
+                    Optional. Shapes the generator's prompt beyond colour and font — leave any of these on Auto to say nothing extra about it.
+                </p>
+                {(Object.entries(AESTHETIC_DIMENSIONS) as [AestheticDimensionKey, typeof AESTHETIC_DIMENSIONS[AestheticDimensionKey]][]).map(([dimension, spec]) => (
+                    <div key={dimension} className="mt-4 first:mt-0">
+                        <p className="text-xs text-metal-300 mb-2">{spec.label}</p>
+                        <div className="flex flex-wrap gap-2">
+                            <button disabled={isBusy} onClick={() => setAesthetic(dimension, undefined)}
+                                aria-pressed={!theme.aesthetic?.[dimension]}
+                                className={pill(!theme.aesthetic?.[dimension])}>
+                                Auto
+                            </button>
+                            {Object.entries(spec.options).map(([value, option]) => (
+                                <button key={value} disabled={isBusy} onClick={() => setAesthetic(dimension, value)}
+                                    aria-pressed={theme.aesthetic?.[dimension] === value}
+                                    className={pill(theme.aesthetic?.[dimension] === value)}>
+                                    {option.label}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                ))}
+
+                <div className="mt-5 pt-4 border-t border-white/[0.06] space-y-3">
+                    <label className="tap flex items-center gap-3 cursor-pointer">
+                        <input type="checkbox" checked={!!theme.aesthetic?.antiSlop} disabled={isBusy}
+                            onChange={() => toggleAestheticFlag('antiSlop')}
+                            className="w-4 h-4 shrink-0 rounded accent-accent disabled:opacity-40" />
+                        <span className="text-xs text-metal-200">Extra push against generic-looking output</span>
+                    </label>
+                    <label className="tap flex items-center gap-3 cursor-pointer">
+                        <input type="checkbox" checked={!!theme.aesthetic?.selfReflection} disabled={isBusy}
+                            onChange={() => toggleAestheticFlag('selfReflection')}
+                            className="w-4 h-4 shrink-0 rounded accent-accent disabled:opacity-40" />
+                        <span className="text-xs text-metal-200">Ask the model to self-score and revise before finishing</span>
+                    </label>
                 </div>
             </div>
 
