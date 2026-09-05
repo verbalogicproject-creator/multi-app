@@ -44,6 +44,7 @@ import { PLAN_SCHEMA, DIRECTIONS_SCHEMA, GENERATE_SCHEMA, MANIFEST_SCHEMA, FILE_
 import { salvageFiles, isTruncation } from './providers/salvage.js';
 import { generateFromManifest, repairRound } from './providers/generate.js';
 import { scaffoldFor, packageJsonFor } from './providers/scaffold.js';
+import { allowlistInstruction } from './providers/allowlist.js';
 import { buildSystemPrompt, builderPreamble } from './providers/prompts.js';
 import { memoryRouter } from './memory/routes.js';
 import * as memory from './memory/bridge.js';
@@ -744,9 +745,10 @@ ${Array.isArray(plan?.acceptanceCriteria) && plan.acceptanceCriteria.length > 0
 4. package.json with correct dependencies and pinned major versions (react ^19, react-dom ^19, react-router-dom ^6, tailwindcss ^4, @tailwindcss/vite ^4, vite ^5, @vitejs/plugin-react ^4, typescript ^5) and scripts: "dev": "vite", "build": "vite build", "typecheck": "tsc --noEmit", "preview": "vite preview".
 5. tsconfig.json compilerOptions must be exactly: { "target": "ES2020", "lib": ["ES2020", "DOM", "DOM.Iterable"], "module": "ESNext", "moduleResolution": "bundler", "jsx": "react-jsx", "strict": true, "esModuleInterop": true, "skipLibCheck": true, "noEmit": true } with "include": ["src"].
 6. Code must compile under strict TypeScript: every function parameter, callback parameter and prop is explicitly typed — no implicit any. With jsx react-jsx, do not import React just for JSX; import only the hooks you use.
-7. Every file must be complete and syntactically valid. State lives in React hooks; interactive features (forms, filters, toggles) must actually work with local state.
+7. Every file must be complete and syntactically valid. Interactive features (forms, filters, toggles) must actually work.
+8. ${allowlistInstruction()}
 
-**Before you finish**, verify every relative import you wrote resolves to a file you also emitted, and that every package you imported appears in package.json. Escape quotes inside JSX text (setQuote("I can't do this"), never setQuote('I can't do this')) — unescaped quotes are a build failure.
+**Before you finish**, verify every relative import you wrote resolves to a file you also emitted, and that every package you imported is on the list in rule 8. Escape quotes inside JSX text (setQuote("I can't do this"), never setQuote('I can't do this')) — unescaped quotes are a build failure.
 
 **Response format:** a single JSON object of the form {"files":[{"path":"...","content":"..."}, ...]} listing every file. No markdown, no commentary.`;
 

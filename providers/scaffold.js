@@ -17,6 +17,8 @@
  * declared. A list derived from the code cannot disagree with the code.
  */
 
+import { PREVIEW_PACKAGES, isNotADependency } from './allowlist.js';
+
 /** Exactly what the generate prompt pins, so the two cannot drift apart. */
 const COMPILER_OPTIONS = {
     target: 'ES2020',
@@ -47,14 +49,23 @@ const BASE_DEV_DEPENDENCIES = {
     vite: '^5.4.0',
 };
 
-/** Packages we can name a version for. Anything else is pinned to `latest`. */
-const KNOWN_VERSIONS = {
+/**
+ * Versions for the packages the preview can resolve.
+ *
+ * Keys must match `providers/allowlist.js` exactly — `check:generate` asserts it, because
+ * a name in one and not the other is how a generated app comes to declare something that
+ * cannot load.
+ */
+export const KNOWN_VERSIONS = {
     'lucide-react': '^0.460.0',
     clsx: '^2.1.1',
     'tailwind-merge': '^2.5.0',
     'date-fns': '^4.1.0',
     zustand: '^5.0.0',
     recharts: '^2.13.0',
+    'react-hook-form': '^7.53.0',
+    zod: '^3.24.1',
+    'framer-motion': '^11.11.0',
 };
 
 /** A name safe for `package.json`. */
@@ -178,8 +189,21 @@ export const packageJsonFor = ({ plan, record }) => {
     const dependencies = { ...BASE_DEPENDENCIES };
     for (const pkg of importedPackages(record)) {
         if (pkg in BASE_DEV_DEPENDENCIES || pkg in dependencies) continue;
-        /* Node built-ins and type-only imports are not dependencies. */
-        if (pkg.startsWith('node:') || pkg === 'react/jsx-runtime') continue;
+        /* Node built-ins and compiler-injected specifiers are not dependencies. */
+        if (isNotADependency(pkg)) continue;
+        /**
+         * **Not declared unless it can run.** This read
+         * `dependencies[pkg] = KNOWN_VERSIONS[pkg] ?? 'latest'`, so any import at all
+         * became a declared dependency — and every judge then treated *declared* as
+         * "the environment's problem" and looked away. Writing the name into
+         * package.json was the act that laundered a build the preview could not load
+         * into one that passed all its checks.
+         *
+         * An import outside the list is left undeclared on purpose, so the bundler's
+         * failure reaches `attributeBundleErrors` as the model's `unresolved-import`
+         * rather than being forgiven.
+         */
+        if (!PREVIEW_PACKAGES.has(pkg)) continue;
         dependencies[pkg] = KNOWN_VERSIONS[pkg] ?? 'latest';
     }
 

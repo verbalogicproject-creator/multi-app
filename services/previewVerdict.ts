@@ -2,6 +2,7 @@ import { buildPreview } from './buildPreview';
 import { PREVIEW_MARK } from '../types/preview';
 import type { PreviewMessage } from '../types/preview';
 import type { BuildIssue } from '../utils/validateBuild';
+import { PREVIEW_PACKAGES } from '../providers/allowlist.js';
 
 /**
  * Does the generated app actually run?
@@ -17,27 +18,24 @@ import type { BuildIssue } from '../utils/validateBuild';
  * bundle, and the document's own harness already reports both things worth knowing —
  * whether it threw, and whether it drew anything.
  *
- * **Attribution is the point, not detection.** A bundle failure naming a package the
- * project *declared* is this preview's environment being narrower than the project's,
- * not a mistake the model made — proposing a lesson from it would teach the model to
- * stop using dependencies it correctly declared. That one is dropped on purpose.
+ * **Attribution is the point, not detection**, and the rule for it was inverted once,
+ * expensively. It used to be *"a package the project **declared** is the environment's
+ * problem"* — reasoning that a declared dependency simply awaits an `npm install`. But
+ * there is no later `npm install`: this preview is the only place a generated app ever
+ * runs. So a build importing `lucide-react` declared it, was forgiven by this function,
+ * was forgiven by `tsc` for the same reason, was never examined by `validateBuild` at
+ * all, and shipped as "Passed all N file checks" above a preview showing the failure.
+ *
+ * The rule now gates on **availability**: a package is the environment's problem only if
+ * the preview is *supposed* to have it — meaning it is on `providers/allowlist.js`, which
+ * the generate prompt names — and something has gone wrong locally. A package outside
+ * that list is the model's problem, because it was told the list.
  */
 
 /** The harness reports within ~2.5s; this is the outer bound before we give up. */
 const RUN_TIMEOUT_MS = 15_000;
 
-/** Kept out of the verdict: our preview bundles against multi-app's own node_modules. */
-const declaredPackages = (files: Record<string, string>): Set<string> => {
-    try {
-        const pkg = JSON.parse(files['package.json'] ?? '{}');
-        return new Set([
-            ...Object.keys(pkg.dependencies ?? {}),
-            ...Object.keys(pkg.devDependencies ?? {}),
-        ]);
-    } catch {
-        return new Set();
-    }
-};
+
 
 const packageIn = (text: string): string | null => {
     const match = /Could not resolve "([^"]+)"/.exec(text);
@@ -59,13 +57,14 @@ const packageIn = (text: string): string | null => {
  */
 export const attributeBundleErrors = (
     errors: { text: string; file: string | null }[],
-    files: Record<string, string>,
+    _files: Record<string, string> = {},
 ): BuildIssue[] => {
-    const declared = declaredPackages(files);
     const issues: BuildIssue[] = [];
     for (const error of errors) {
         const pkg = packageIn(error.text);
-        if (pkg && declared.has(pkg)) continue;   // environment, not the model
+        /* On the list means the preview should have had it, so a failure here is ours.
+           Off the list means the model reached outside what it was given. */
+        if (pkg && PREVIEW_PACKAGES.has(pkg)) continue;
         issues.push({
             severity: 'error',
             code: pkg ? 'unresolved-import' : 'bundle-error',
