@@ -50,17 +50,89 @@ import * as memory from './memory/bridge.js';
 import typecheckRouter from './typecheck/routes.js';
 import previewRouter from './preview/routes.js';
 import { typecheck, clean as cleanTypecheckScratch, killAll as killTypecheckRuns } from './typecheck/runner.js';
+import { createAuthRouter, authConfigProblems, bootPosture } from './auth/index.js';
 
 const app = express();
 const port = process.env.PORT || 8050;
+/**
+ * Loopback by default. This was `app.listen(port)`, which binds every interface — on a
+ * phone that means every device on the Wi-Fi could reach four live provider keys, a
+ * filesystem-writing model, and a Python runner. Opening it up is now a deliberate act
+ * (`HOST=0.0.0.0`) and, per `bootPosture`, one the process refuses unless authentication
+ * is actually configured.
+ */
+const host = process.env.HOST || '127.0.0.1';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Middleware
-app.use(cors());
+/**
+ * Whether every `/api` route demands a signed-in, allowlisted user.
+ *
+ * Not a switch anyone can flip: it is true exactly when the configuration is complete
+ * enough for authentication to mean something — real client credentials, a real signing
+ * secret, and a non-empty allowlist. `authConfigProblems` names each missing piece, and
+ * `bootPosture` below turns "reachable but unauthenticated" into a refusal to start
+ * rather than a warning nobody reads.
+ */
+const authProblems = authConfigProblems();
+const enforceAuth = authProblems.length === 0;
+
+const posture = bootPosture({ host });
+if (!posture.ok) {
+    console.error(posture.reason);
+    process.exit(1);
+}
+
+/**
+ * CORS, with an allowlist rather than `cors()`.
+ *
+ * Bare `cors()` answers every origin with `Access-Control-Allow-Origin: *`, which meant
+ * any page on the internet could call these routes from a visitor's browser. It stayed
+ * invisible because the app calls itself same-origin and never needed CORS at all —
+ * only the Vite dev server on another port does.
+ *
+ * `credentials: true` is why the allowlist has to be exact: a wildcard origin and
+ * cookies cannot be combined, so the reflected origin must be one we chose.
+ */
+const allowedOrigins = new Set(
+    (process.env.ALLOWED_ORIGINS || `http://localhost:5173,http://127.0.0.1:5173,http://localhost:${port},http://127.0.0.1:${port}`)
+        .split(',').map(o => o.trim()).filter(Boolean),
+);
+app.use(cors({
+    origin(origin, callback) {
+        /* No `Origin` header at all is a same-origin or non-browser request — curl, the
+           gates, the app's own fetches. Those are not what CORS governs. */
+        if (!origin || allowedOrigins.has(origin)) return callback(null, true);
+        callback(null, false);
+    },
+    credentials: true,
+}));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.static(path.join(__dirname, 'dist')));
+
+/**
+ * The door, and then the lock.
+ *
+ * Mounted ahead of every `/api` router below, because a gate placed after the thing it
+ * guards is decoration. `/api/auth/*` is exempt for the obvious reason, and `/healthz`
+ * sits outside `/api` so a liveness probe never needs a session.
+ */
+const auth = createAuthRouter();
+app.use(auth.router);
+
+if (enforceAuth) {
+    app.use('/api', (req, res, next) => {
+        if (req.path.startsWith('/auth/')) return next();
+        return auth.requireAuth(req, res, next);
+    });
+} else {
+    /* Loopback-only by the check above, so this is a development posture rather than an
+       exposure — but it is still said out loud at boot, because the difference between
+       "authenticated" and "unreachable from anywhere else" is one the operator has to
+       be holding in mind. */
+    console.warn(`[auth] Not enforced. Reachable from ${host} only. Missing: ${authProblems.join('; ')}`);
+}
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -1090,7 +1162,11 @@ ${Array.isArray(plan?.acceptanceCriteria) && plan.acceptanceCriteria.length > 0
 
 // Health check
 app.get('/healthz', (req, res) => {
-    res.json({ ok: true, models: MODELS });
+    /* `auth` is here for the gates. They drive this server unauthenticated, so a
+       backend that has started enforcing — the moment ALLOWED_EMAILS is filled in —
+       answers every /api call with 401 and the browser gates fail as blank panels and
+       timeouts. Reporting the posture lets `assertBackend` say which it is. */
+    res.json({ ok: true, models: MODELS, auth: enforceAuth ? 'enforced' : 'open' });
 });
 
 // Fallback to serving index.html for any unhandled routes (for SPA routing)
@@ -1119,8 +1195,8 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
 // after itself. Start from empty rather than inheriting it.
 await cleanTypecheckScratch();
 
-app.listen(port, () => {
-    console.log(`Server listening at http://localhost:${port}`);
+app.listen(port, host, () => {
+    console.log(`Server listening at http://${host}:${port} (auth ${enforceAuth ? 'enforced' : 'not enforced'})`);
     // Which databases this process will write to, said out loud at boot.
     // A second server on an occupied port dies with EADDRINUSE, so requests keep
     // being answered -- by the one already there, writing wherever IT was told to.

@@ -315,6 +315,18 @@ export const assertBackend = async () => {
         console.error('(Or point elsewhere: API_TARGET=http://localhost:8090 <this command>)');
         process.exit(1);
     }
+    /* A backend that enforces authentication refuses every /api call these gates make,
+       and the symptom is a screen that renders nothing rather than an error — the exact
+       shape of failure this repo keeps having to convert into a named one. Say it. */
+    if (body?.auth === 'enforced') {
+        console.error(`The backend on ${target} is enforcing authentication.`);
+        console.error('These gates drive it as an anonymous browser, so every /api call');
+        console.error('would return 401 and every surface would audit as blank.');
+        console.error('Run a gate server with auth off, on its own port:');
+        console.error('  ALLOWED_EMAILS= PORT=8090 node server.js');
+        console.error('  API_TARGET=http://localhost:8090 <this command>');
+        process.exit(1);
+    }
     if (!body || body.ok !== true || !body.models) {
         console.error(`Something is listening on ${target}, but it is not multi-app.`);
         console.error(`  /healthz returned: ${JSON.stringify(body)}`);
