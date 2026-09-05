@@ -23,12 +23,13 @@
  *   npm run check:generate
  */
 import * as esbuild from 'esbuild';
+import { PREVIEW_PACKAGES, packageOf, OPTIONAL_PACKAGES } from '../providers/allowlist.js';
 import { Buffer } from 'node:buffer';
 import { salvageFiles, isTruncation } from '../providers/salvage.js';
 import { toBuildIssues } from '../typecheck/parse.js';
 import { proposalsFor, unmappedCodes, PROPOSAL_TABLE, NOT_A_LESSON } from '../memory/proposals.js';
 import { normaliseManifest, manifestGaps, missingFrom, manifestInstruction, fileInstruction, generateFromManifest, filesNeedingRepair, importedPaths, repairInstruction, repairRound, planCoverage, coverPlan } from '../providers/generate.js';
-import { scaffoldFor, packageJsonFor, importedPackages, SCAFFOLD_PATHS } from '../providers/scaffold.js';
+import { scaffoldFor, packageJsonFor, importedPackages, SCAFFOLD_PATHS, KNOWN_VERSIONS as KNOWN_VERSIONS_FOR_TEST } from '../providers/scaffold.js';
 
 let failures = 0;
 const ok = (label, cond, detail = '') => {
@@ -444,35 +445,87 @@ const bundled = await esbuild.build({
 const { attributeBundleErrors } = await import(
     `data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0].text).toString('base64')}`);
 
+/* The rule these assertions encode was inverted, and the old version is worth stating
+   because it looked right: "a package the project **declared** is the environment's
+   problem, because a declared dependency awaits an `npm install` that is not ours."
+   There is no later install — this preview is the only place a generated app runs — so
+   that reasoning forgave the one signal saying the app could not start, `tsc` forgave it
+   for the same reason, `validateBuild` never looked at bare imports at all, and the build
+   shipped as "Passed all N file checks" above a preview rendering the failure.
+   Attribution now gates on **availability**: is this package one the preview is supposed
+   to have? */
 const withDep = { 'package.json': JSON.stringify({ dependencies: { 'lucide-react': '^0.4.0' } }) };
-const declaredMissing = attributeBundleErrors(
+const onTheList = attributeBundleErrors(
     [{ text: 'Could not resolve "lucide-react" — the package is not installed in this preview.', file: 'src/Footer.tsx' }],
     withDep);
-/* Observed on a real build: the model declared lucide-react correctly and our preview
-   simply does not have it. Teaching from that would tell the model to stop using
-   dependencies it declared properly. */
-ok('a package the project declared is the environment, not the model', declaredMissing.length === 0,
-    JSON.stringify(declaredMissing));
+/* Still the environment, but for a sound reason now: lucide-react is on the allowlist,
+   so the preview is meant to resolve it and a failure is a local fault, not a lesson. */
+ok('a package the preview is supposed to have is the environment', onTheList.length === 0,
+    JSON.stringify(onTheList));
 
-const undeclared = attributeBundleErrors(
+/* The assertion that did not exist, and whose absence let a broken build be certified. */
+const offTheList = attributeBundleErrors(
     [{ text: 'Could not resolve "chart.js" — the package is not installed in this preview.', file: 'src/Chart.tsx' }],
     withDep);
-ok('a package it never declared is the model', undeclared[0]?.code === 'unresolved-import',
-    JSON.stringify(undeclared));
-ok('and the file is named', undeclared[0]?.file === 'src/Chart.tsx');
+ok('a package outside the allowlist is the model, even when declared',
+    offTheList[0]?.code === 'unresolved-import', JSON.stringify(offTheList));
+ok('and the file is named', offTheList[0]?.file === 'src/Chart.tsx');
 
+/* Declaring it changes nothing — that was the whole bug. */
+const declaredButUnavailable = attributeBundleErrors(
+    [{ text: 'Could not resolve "chart.js" — nope', file: 'a.tsx' }],
+    { 'package.json': JSON.stringify({ dependencies: { 'chart.js': '^4' } }) });
+ok('declaring an unavailable package does not launder it',
+    declaredButUnavailable[0]?.code === 'unresolved-import', JSON.stringify(declaredButUnavailable));
+
+/* Scope parsing still has to work, or `@scope/pkg/sub` would be read as `@scope` and the
+   list check would miss. Proven by the code being `unresolved-import` rather than the
+   `bundle-error` an unparsed message produces. */
 const scoped = attributeBundleErrors(
-    [{ text: 'Could not resolve "@tanstack/react-query/build" — nope', file: 'a.tsx' }],
-    { 'package.json': JSON.stringify({ dependencies: { '@tanstack/react-query': '^5' } }) });
-ok('a scoped subpath belongs to its scoped package', scoped.length === 0, JSON.stringify(scoped));
+    [{ text: 'Could not resolve "@tanstack/react-query/build" — nope', file: 'a.tsx' }], {});
+ok('a scoped subpath is parsed as its scoped package', scoped[0]?.code === 'unresolved-import',
+    JSON.stringify(scoped));
+ok('and packageOf agrees', packageOf('@tanstack/react-query/build') === '@tanstack/react-query');
+ok('as does a plain subpath', packageOf('date-fns/format') === 'date-fns');
 
 const other = attributeBundleErrors([{ text: 'Unexpected "}" in src/App.tsx', file: 'src/App.tsx' }], withDep);
 ok('a failure that names no package is a bundle-error', other[0]?.code === 'bundle-error', JSON.stringify(other));
 
 const noPkgJson = attributeBundleErrors(
-    [{ text: 'Could not resolve "react" — nope', file: 'a.tsx' }], {});
-ok('an unparseable package.json blames the model rather than crashing',
+    [{ text: 'Could not resolve "chart.js" — nope', file: 'a.tsx' }], {});
+ok('a missing package.json does not crash the attribution',
     noPkgJson[0]?.code === 'unresolved-import', JSON.stringify(noPkgJson));
+
+/* The two-step rule: a name on the list without an install recreates the original fault
+   exactly, so the list and what is installed are asserted to agree. */
+const { createRequire } = await import('node:module');
+const requireHere = createRequire(new URL('../package.json', import.meta.url));
+const notInstalled = [...PREVIEW_PACKAGES].filter((pkg) => {
+    try { requireHere.resolve(pkg); return false; } catch { return true; }
+});
+ok('every allowlisted package is actually installed', notInstalled.length === 0,
+    `not resolvable: ${notInstalled.join(', ')}`);
+
+/* The other half of the two-step rule: a version table that has drifted from the list
+   silently pins the wrong thing, or pins nothing and falls back to `latest`. */
+const optionalNames = Object.keys(OPTIONAL_PACKAGES).sort();
+const versioned = Object.keys(KNOWN_VERSIONS_FOR_TEST).sort();
+ok('the version table covers exactly the optional allowlist',
+    JSON.stringify(optionalNames) === JSON.stringify(versioned),
+    `list: ${optionalNames.join(',')}  versions: ${versioned.join(',')}`);
+
+/* And the behaviour the whole section exists for: an import outside the list is left
+   undeclared, so the bundler's failure reaches attribution as the model's fault rather
+   than being laundered into "the environment's problem" by a package.json entry. */
+const offListPkgJson = JSON.parse(packageJsonFor({
+    plan: { projectName: 'Off List' },
+    record: { 'src/App.tsx': "import Chart from 'chart.js';\nimport { Home } from 'lucide-react';\n" },
+}));
+ok('an off-list import is not declared', !('chart.js' in offListPkgJson.dependencies),
+    JSON.stringify(offListPkgJson.dependencies));
+ok('and an allowlisted one is, at a pinned version',
+    offListPkgJson.dependencies['lucide-react']?.startsWith('^'),
+    JSON.stringify(offListPkgJson.dependencies));
 
 // ── 11. The plan is a contract, not a suggestion ─────────────────────────────
 // Two checks sat either side of a gap and both reported success: `missingFrom`

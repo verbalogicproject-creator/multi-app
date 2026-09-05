@@ -6,6 +6,8 @@
  * The runner is next door in `runner.js`.
  */
 
+import { PREVIEW_PACKAGES } from '../providers/allowlist.js';
+
 /** `src/App.tsx(3,94): error TS2322: Type 'x' is not assignable to type 'y'.` */
 const LINE_RE = /^(.+?)\((\d+),(\d+)\):\s+(error|warning)\s+TS(\d+):\s+(.*)$/;
 
@@ -89,7 +91,14 @@ export const dropDeclaredMissingModules = (diagnostics, declared) =>
         const m = MODULE_RE.exec(d.message);
         if (!m) return true;
         const pkg = packageOf(m[1]);
-        return pkg === null || !declared.has(pkg);
+        if (pkg === null) return true;
+        /* Declared **and** available. Declaration alone used to be enough, on the
+           reasoning that a declared dependency is waiting for an `npm install` that is
+           not our business — but no such install ever happens, so this dropped the one
+           diagnostic that said the app could not run. A package the preview is supposed
+           to have and does not is genuinely ours; anything else is the model importing
+           outside the list it was given. */
+        return !(declared.has(pkg) && PREVIEW_PACKAGES.has(pkg));
     });
 
 /**
