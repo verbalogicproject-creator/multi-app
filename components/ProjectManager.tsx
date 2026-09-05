@@ -27,6 +27,7 @@ const ProjectManager: React.FC = () => {
         filesByProject,
         handleCreateProject,
         handleDeleteProject,
+        projectDeletionCost,
         handleToggleProjectSelection,
         handleViewProjectFiles,
         activeProjectView,
@@ -36,6 +37,11 @@ const ProjectManager: React.FC = () => {
     } = useAppContext();
 
     const [newProjectName, setNewProjectName] = useState('');
+    /* Which project is one press away from being gone. Deletion used to be a single
+       click on a small × — immediate, irreversible, and next to two harmless icons.
+       There is no undo anywhere in this app, so the confirmation is the only thing
+       between a mis-tap and losing a project's files. */
+    const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
     /* Who you are, on the screen that is home. It renders nothing at all when the
        backend is not enforcing authentication — which is the loopback development
        posture — so a signed-out app does not grow an empty account row. Signing out
@@ -131,7 +137,22 @@ const ProjectManager: React.FC = () => {
                             <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 items-start">
                                 {projects.map(p => (
                                     <li key={p.id} className={`rounded-card bg-raised hairline ${activeAgentId ? 'opacity-50' : ''}`}>
-                                        <div className="flex items-center justify-between gap-2 p-3">
+                                        {/* Name on its own line, actions under it.
+                                            They shared a row while this was a full-width
+                                            rail, where there was room for both. As cards
+                                            in a grid there is not: four 44px controls
+                                            take ~176px of a ~317px card, leaving the name
+                                            about eighty pixels, so "Harbour Dashboard"
+                                            rendered as "Harbour D…" with nine hundred
+                                            pixels of empty screen beside it.
+
+                                            Nothing could catch that. `truncate` is valid,
+                                            nothing overflowed, every target still met
+                                            44px — `audit:ui` reported zero findings on
+                                            this exact screen. It was found by opening the
+                                            screenshot the audit had been producing all
+                                            along and never being read. */}
+                                        <div className="flex flex-col gap-1 p-3">
                                             <label className="tap flex items-center gap-3 cursor-pointer min-w-0">
                                                 <input
                                                     type="checkbox"
@@ -140,9 +161,9 @@ const ProjectManager: React.FC = () => {
                                                     className="h-5 w-5 shrink-0 rounded bg-ground accent-metal-300"
                                                     disabled={!!activeAgentId}
                                                 />
-                                                <span className="font-medium text-metal-100 truncate">{p.name}</span>
+                                                <span className="font-medium text-metal-100 truncate" title={p.name}>{p.name}</span>
                                             </label>
-                                            <div className="flex items-center shrink-0">
+                                            <div className="flex items-center -ml-1">
                                                 {/* The file list below had no control that
                                                     opened it: `handleViewProjectFiles` was
                                                     read out of the context and never called,
@@ -160,9 +181,53 @@ const ProjectManager: React.FC = () => {
                                                 <button onClick={() => handleOpenProjectSettings(p)} className={iconButton} aria-label={`Settings for ${p.name}`}><svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg></button>
                                                 {/* Destructive: metal body, accent glyph. The colour marks the one
                                                     control here that can lose you something. */}
-                                                <button onClick={() => handleDeleteProject(p.id)} className={`${iconButton} md:hover:text-accent`} aria-label={`Delete ${p.name}`}><span aria-hidden className="text-xl leading-none">&times;</span></button>
+                                                <button onClick={() => setConfirmingDelete(p.id)} className={`${iconButton} md:hover:text-accent`} aria-label={`Delete ${p.name}`}><span aria-hidden className="text-xl leading-none">&times;</span></button>
                                             </div>
                                         </div>
+                                        {/* The confirmation names everything the deletion
+                                            takes, including the experts bound to this
+                                            project — they are deleted too, because an
+                                            agent whose project is gone is a control that
+                                            resolves to nothing. A step that hides part of
+                                            what it does is worse than no step at all. */}
+                                        {confirmingDelete === p.id && (() => {
+                                            const cost = projectDeletionCost(p.id);
+                                            return (
+                                                <div className="p-3 shadow-[inset_0_1px_0_rgb(255_255_255/0.06)]">
+                                                    <p className="flex items-start gap-2 text-sm text-metal-100">
+                                                        <span aria-hidden className="w-1.5 h-1.5 mt-1.5 rounded-full bg-accent shrink-0" />
+                                                        <span>
+                                                            Delete <strong className="font-medium">{p.name}</strong>?
+                                                            {' '}This cannot be undone.
+                                                        </span>
+                                                    </p>
+                                                    <p className="mt-1 pl-3.5 text-xs text-metal-300">
+                                                        {cost.files === 0 ? 'No files' : `${cost.files} file${cost.files === 1 ? '' : 's'}`}
+                                                        {cost.agents.length > 0 && ` · ${cost.agents.length} expert${cost.agents.length === 1 ? '' : 's'} bound to it (${cost.agents.join(', ')})`}
+                                                        {' will go with it.'}
+                                                    </p>
+                                                    <div className="mt-3 pl-3.5 flex items-center gap-2">
+                                                        <button
+                                                            onClick={() => { setConfirmingDelete(null); handleDeleteProject(p.id); }}
+                                                            aria-label={`Confirm deleting ${p.name}`}
+                                                            className="tap px-3 rounded-lg bg-metal-700 text-accent text-sm font-medium
+                                                                       shadow-[inset_0_1px_0_rgb(255_255_255/0.06)]
+                                                                       transition-[background-color,transform] duration-200 ease-fluid
+                                                                       md:hover:bg-[#33333a] active:scale-[0.98]"
+                                                        >
+                                                            Delete
+                                                        </button>
+                                                        <button
+                                                            onClick={() => setConfirmingDelete(null)}
+                                                            className="tap px-3 rounded-lg text-metal-300 text-sm
+                                                                       transition-colors duration-200 ease-fluid md:hover:text-metal-100"
+                                                        >
+                                                            Keep
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })()}
                                         {p.dependencySummary && (
                                             <div className="px-3 pb-3 pt-2 shadow-[inset_0_1px_0_rgb(255_255_255/0.06)]">
                                               <details>
