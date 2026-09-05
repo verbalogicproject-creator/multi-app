@@ -34,10 +34,12 @@ const ENTRIES = [
     // Verified 2026-09-04 with `smoke:providers`: streaming, tool calls and the tool
     // result round-trip all pass. Its **schema-JSON** path returned 503 on two separate
     // runs while the same model's other paths answered — consistently, not randomly.
-    // That is a load signal rather than a proven capability gap, so the declaration
-    // stays honest and the model stays out of the builder default: the builder is
-    // entirely schema-JSON, and its fallback chain resolves a 503 to 3.6 anyway.
-    { id: 'gemini-3.8-flash', provider: 'google', label: '3.8 Flash', hint: 'Newest flash — structured output was unreachable when last checked', tools: true, jsonMode: 'native', thinking: true, efforts: ['low', 'medium', 'high'], priceIn: 0, priceOut: 0, dailyLimit: 20, fallback: ['gemini-3.6-flash', 'gemini-3.5-flash'] },
+    // That was recorded as a load signal rather than a proven capability gap, and
+    // re-checked 2026-09-05: first call 503 ("high demand"), second call clean
+    // schema JSON (`{"name":"Willow Creek","population":1420}`) — confirms the
+    // original read. Still kept out of the builder default: the fallback chain
+    // resolves a 503 to 3.6 either way, so there is nothing to gain from switching.
+    { id: 'gemini-3.8-flash', provider: 'google', label: '3.8 Flash', hint: 'Newest flash — structured output confirmed working; occasional 503s under load, same as any model', tools: true, jsonMode: 'native', thinking: true, efforts: ['low', 'medium', 'high'], priceIn: 0, priceOut: 0, dailyLimit: 20, fallback: ['gemini-3.6-flash', 'gemini-3.5-flash'] },
     // Verified 2026-09-04: all four contract checks pass, schema JSON included.
     { id: 'gemini-3.6-flash', provider: 'google', label: '3.6 Flash', hint: 'Verified across streaming, tools and structured output', tools: true, jsonMode: 'native', thinking: true, efforts: ['low', 'medium', 'high'], priceIn: 0, priceOut: 0, dailyLimit: 20, fallback: ['gemini-3.5-flash'] },
     { id: 'gemini-3.7-flash', provider: 'google', label: '3.7 Flash', hint: 'Strong coding and agentic work — low daily quota', tools: true, jsonMode: 'native', thinking: true, efforts: ['low', 'medium', 'high'], priceIn: 0, priceOut: 0, dailyLimit: 20, fallback: ['gemini-3.6-flash', 'gemini-3.5-flash'] },

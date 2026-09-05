@@ -258,6 +258,14 @@ const Step_Theme: React.FC = () => {
                         <span className="text-xs text-metal-200">Ask the model to self-score and revise before finishing</span>
                     </label>
                 </div>
+
+                {/* The honest label, not a mechanism: "does this look editorial" is not
+                    something anything here checks, and a picker with no verification
+                    behind it must say so rather than imply otherwise. See
+                    providers/aesthetic.js and HARNESS.md. */}
+                <p className="mt-4 text-[11px] text-metal-400">
+                    These shape the generator's prompt. Nothing checks whether the result actually follows them.
+                </p>
             </div>
 
             {/* Live design contract — a hero surface, so it earns the bezel */}

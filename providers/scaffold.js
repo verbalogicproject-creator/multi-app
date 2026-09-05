@@ -84,9 +84,32 @@ const escapeHtml = (value) =>
  * @param {{plan: object, theme: object, entry?: string}} input
  * @returns {Record<string, string>}
  */
+/**
+ * `src/types.ts`, written deterministically from the plan's own `entities[]` — never
+ * requested, so it cannot become the next guess at a shape other files already
+ * disagreed about.
+ *
+ * `null` rather than an empty file when there is nothing to declare: an app with no
+ * shared data model has nothing to freeze, and a file with no interfaces in it is not
+ * evidence of anything either way — `scaffoldFor` omits the path entirely rather than
+ * write it.
+ */
+export const typesFileFor = (entities) => {
+    const named = (Array.isArray(entities) ? entities : []).filter((e) => e?.name);
+    if (named.length === 0) return null;
+    return named.map((entity) => {
+        const fields = (Array.isArray(entity.fields) ? entity.fields : [])
+            .filter((f) => f?.name)
+            .map((f) => `    ${f.name}: ${f.type || 'unknown'};`)
+            .join('\n');
+        return `export interface ${entity.name} {\n${fields}\n}`;
+    }).join('\n\n') + '\n';
+};
+
 export const scaffoldFor = ({ plan, theme, entry = 'src/main.tsx' }) => {
     const colors = theme?.colors ?? {};
     const token = (role, fallback) => colors[role] || fallback;
+    const types = typesFileFor(plan?.entities);
 
     /* The six roles the prompt tells the model to declare, declared here instead so
        they cannot be mistyped or quietly omitted. */
@@ -160,6 +183,7 @@ createRoot(rootElement).render(
     </StrictMode>,
 );
 `,
+        ...(types ? { 'src/types.ts': types } : {}),
     };
 };
 
