@@ -1,0 +1,1232 @@
+{
+  "$schema": "declaration-v1",
+  "generatedBy": "architecture/generate/modules.mjs",
+  "generatedFrom": "fs walk of known source directories (file list) + AGENTS.md/CLAUDE.md/README.md citations (directory purposes) + a targeted read pass for components/** (file purposes)",
+  "note": "A file with verified:false is a gap, not a guess — its purpose is genuinely unknown to this document, not inferred from its name.",
+  "directories": [
+    {
+      "path": "providers/",
+      "declaration": {
+        "statement": "The provider layer: one interface (streamChat/streamJson/generateJson/generateText) over four LLM vendors. catalog.js is the single source of truth for models; generate.js/scaffold.js/salvage.js/aesthetic.js/allowlist.js are the app-builder’s generation strategy specifically.",
+        "mechanism": {
+          "file": "CLAUDE.md",
+          "line": null,
+          "note": "Provider layer section"
+        },
+        "level": "lint",
+        "verified": true
+      },
+      "fileCount": 19,
+      "files": [
+        {
+          "file": "aesthetic.d.ts",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "aesthetic.js",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "allowlist.d.ts",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "allowlist.js",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "anthropic.js",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "catalog.js",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "effort.js",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "generate.js",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "google.js",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "index.js",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "nvidia.js",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "openai.js",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "prompts.js",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "repairGate.js",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "repairGate.test.js",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "salvage.js",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "scaffold.js",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "schemas.js",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "tools.js",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        }
+      ]
+    },
+    {
+      "path": "memory/",
+      "declaration": {
+        "statement": "The server side of the memory system: one GraphMemory per build, and the /api/memory/* surface. proposals.js is the declared table mapping validator issue codes to lessons — a code in neither PROPOSAL_TABLE nor NOT_A_LESSON is logged as an open question.",
+        "mechanism": {
+          "file": "AGENTS.md",
+          "line": 14,
+          "note": "memory/bridge.js / memory/routes.js / memory/proposals.js"
+        },
+        "level": "gate",
+        "verified": true
+      },
+      "fileCount": 3,
+      "files": [
+        {
+          "file": "bridge.js",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "proposals.js",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "routes.js",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        }
+      ]
+    },
+    {
+      "path": "auth/",
+      "declaration": {
+        "statement": "Google/GitHub OAuth gating the whole /api surface. The real invariant is bootPosture: \"reachable from the network or unauthenticated, but not both.\"",
+        "mechanism": {
+          "file": "CLAUDE.md",
+          "line": null,
+          "note": "Auth section"
+        },
+        "level": "gate",
+        "verified": true
+      },
+      "fileCount": 5,
+      "files": [
+        {
+          "file": "config.js",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "github.js",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "google.js",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "index.js",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "index.test.js",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        }
+      ]
+    },
+    {
+      "path": "typecheck/",
+      "declaration": {
+        "statement": "The server’s tsc runner (runner.js), its output parser (parse.js), and the /api/typecheck surface. Its scratch tree lives at .preview-work/ inside the repo (not /tmp) so tsc resolves the real @types/react.",
+        "mechanism": {
+          "file": "AGENTS.md",
+          "line": 16
+        },
+        "level": "gate",
+        "verified": true
+      },
+      "fileCount": 3,
+      "files": [
+        {
+          "file": "parse.js",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "routes.js",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "runner.js",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        }
+      ]
+    },
+    {
+      "path": "preview/",
+      "declaration": {
+        "statement": "The server’s bundler: bundle.js (esbuild over a virtual filesystem), css.js (Tailwind v4 compiled in-process), document.js (the one self-contained document, shimming history/localStorage/document.cookie for the opaque-origin iframe), and the /api/preview surface.",
+        "mechanism": {
+          "file": "AGENTS.md",
+          "line": 19
+        },
+        "level": "gate",
+        "verified": true
+      },
+      "fileCount": 4,
+      "files": [
+        {
+          "file": "bundle.js",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "css.js",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "document.js",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "routes.js",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        }
+      ]
+    },
+    {
+      "path": "components/",
+      "declaration": {
+        "statement": "Reusable views. The guided app builder lives under components/builders/; components/editor/ and components/memory/ hold the CodeMirror theme/language config and the memory drawer.",
+        "mechanism": {
+          "file": "AGENTS.md",
+          "line": 5
+        },
+        "level": "lint",
+        "verified": true
+      },
+      "fileCount": 29,
+      "files": [
+        {
+          "file": "AgentManager.tsx",
+          "purpose": "Renders the Experts list and an inline create/edit form (AgentForm) that binds an agent to a persona and a project, with select/delete actions calling useAppContext's handleAddAgent/handleUpdateAgent/handleDeleteAgent, and a guard screen when no projects or personas exist yet.",
+          "verified": true,
+          "mechanism": {
+            "file": "components/AgentManager.tsx",
+            "line": null,
+            "note": "read directly during the architecture audit"
+          }
+        },
+        {
+          "file": "AiControls.tsx",
+          "purpose": "The persona/style configuration panel: a Custom Style Editor modal for creating/editing named instruction blocks, a persona loader/save/export/import (JSON) flow, and a 'Persona Composer' that lets the user set base instructions and reorder/weight a list of composed style blocks, plus Web Search and Low Latency toggles.",
+          "verified": true,
+          "mechanism": {
+            "file": "components/AiControls.tsx",
+            "line": null,
+            "note": "read directly during the architecture audit"
+          }
+        },
+        {
+          "file": "AppDock.tsx",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "AssistantMessage.tsx",
+          "purpose": "Renders one assistant chat turn: a collapsible 'Thinking' block, the message's text/image/video parts, action buttons (regenerate video, continue scene, use image, play/stop TTS audio), a raw tool-call JSON dump, and a list of web-search grounding source links.",
+          "verified": true,
+          "mechanism": {
+            "file": "components/AssistantMessage.tsx",
+            "line": null,
+            "note": "read directly during the architecture audit"
+          }
+        },
+        {
+          "file": "ChatPanel.tsx",
+          "purpose": "The main chat surface: holds per-mode prompt state (chat/plan/coding/image-edit/video-gen/live), wires useChat/useTTS/useLiveChat hooks, renders the mode selector, message list, and mode-specific input controls (text form, or lazily-loaded ImageEditorPane/VideoGeneratorPane/LiveChatPane), and in 'plan' mode shows a 'Send to Builder' button that seeds the web-app wizard via composeBuilderBrief.",
+          "verified": true,
+          "mechanism": {
+            "file": "components/ChatPanel.tsx",
+            "line": null,
+            "note": "read directly during the architecture audit"
+          }
+        },
+        {
+          "file": "CodeBlock.tsx",
+          "purpose": "A syntax-agnostic code display box with a language label and a 'Copy'/'Copied' clipboard button using navigator.clipboard.",
+          "verified": true,
+          "mechanism": {
+            "file": "components/CodeBlock.tsx",
+            "line": null,
+            "note": "read directly during the architecture audit"
+          }
+        },
+        {
+          "file": "CodeEditor.tsx",
+          "purpose": "A CodeMirror 6-based file editor: builds an EditorView keyed on file.id (to preserve undo history across saves), converts tsc line/col diagnostics into CodeMirror Diagnostic ranges and dispatches them via setDiagnostics, retracts diagnostics on any edit, supports Ctrl/Cmd-S save, syncs external file-content rewrites (e.g. from the model) into the live document, and supports scrolling/cursor-placement via a revealAt prop when a Problems-tab entry is clicked.",
+          "verified": true,
+          "mechanism": {
+            "file": "components/CodeEditor.tsx",
+            "line": null,
+            "note": "read directly during the architecture audit"
+          }
+        },
+        {
+          "file": "EditPanel.tsx",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "FileExplorer.tsx",
+          "purpose": "A project file list/sidebar: lets the user select a file, create a new file (via window.prompt), delete a file (with confirm), shows a per-file type-error count badge (from an errorCounts map), and optionally a close button when rendered as a mobile sheet.",
+          "verified": true,
+          "mechanism": {
+            "file": "components/FileExplorer.tsx",
+            "line": null,
+            "note": "read directly during the architecture audit"
+          }
+        },
+        {
+          "file": "Harness.tsx",
+          "purpose": "A two-tab destination ('Experts' / 'Configuration') that composes AgentManager and AiControls into one screen, keeping both mounted (hidden via CSS, not unmounted) so in-progress edits in either tab survive switching.",
+          "verified": true,
+          "mechanism": {
+            "file": "components/Harness.tsx",
+            "line": null,
+            "note": "read directly during the architecture audit"
+          }
+        },
+        {
+          "file": "IdeView.tsx",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "ImageEditorPane.tsx",
+          "purpose": "The image-editing input form for chat's image-edit mode: an ImageUpload control, a text prompt field, quick 'style preset' buttons that append canned prompt suffixes, and a submit button gated on having both a prompt and an image (uploaded or externally supplied).",
+          "verified": true,
+          "mechanism": {
+            "file": "components/ImageEditorPane.tsx",
+            "line": null,
+            "note": "read directly during the architecture audit"
+          }
+        },
+        {
+          "file": "ImageUpload.tsx",
+          "purpose": "A reusable file-upload widget with drag-free <input type=file>, FileReader-based data-URL preview, support for an externally-supplied preview URL that takes precedence/gets cleared on new upload, and a 'Remove' control.",
+          "verified": true,
+          "mechanism": {
+            "file": "components/ImageUpload.tsx",
+            "line": null,
+            "note": "read directly during the architecture audit"
+          }
+        },
+        {
+          "file": "InfinityDock.tsx",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "LiveChatPane.tsx",
+          "purpose": "The live-voice-chat control surface: a start/stop listening button pair and an animated 'VoiceVisualizer' (pulsing circle + mic icon) shown only while isListening is true.",
+          "verified": true,
+          "mechanism": {
+            "file": "components/LiveChatPane.tsx",
+            "line": null,
+            "note": "read directly during the architecture audit"
+          }
+        },
+        {
+          "file": "LoadingIndicator.tsx",
+          "purpose": "A minimal spinner (SVG animate-spin) with an optional status text line beneath it, used across the app wherever an async operation is in flight.",
+          "verified": true,
+          "mechanism": {
+            "file": "components/LoadingIndicator.tsx",
+            "line": null,
+            "note": "read directly during the architecture audit"
+          }
+        },
+        {
+          "file": "MessageItem.tsx",
+          "purpose": "Dispatches a single chat Message to the correct renderer by author (system messages render as centered plain text; USER/ASSISTANT/TOOL delegate to UserMessage/AssistantMessage/ToolMessage) and adds an assistant-only avatar glyph; the component is memoized with React.memo.",
+          "verified": true,
+          "mechanism": {
+            "file": "components/MessageItem.tsx",
+            "line": null,
+            "note": "read directly during the architecture audit"
+          }
+        },
+        {
+          "file": "ModeSelector.tsx",
+          "purpose": "A horizontally-scrolling pill/tab strip for switching the ChatPanel's mode (chat/plan/image-edit/video-gen/live), filtering out modes disabled via utils/features.ts's FEATURES flags.",
+          "verified": true,
+          "mechanism": {
+            "file": "components/ModeSelector.tsx",
+            "line": null,
+            "note": "read directly during the architecture audit"
+          }
+        },
+        {
+          "file": "ModelPicker.tsx",
+          "purpose": "A grouped <select> for choosing the active LLM model (or 'Auto'), reading the model catalog from useAppContext and building per-provider optgroups, with a tooltip showing each model's hint and price.",
+          "verified": true,
+          "mechanism": {
+            "file": "components/ModelPicker.tsx",
+            "line": null,
+            "note": "read directly during the architecture audit"
+          }
+        },
+        {
+          "file": "PreviewHost.tsx",
+          "purpose": "The single shared 'run the generated app' preview component (used by both the wizard's Export step and the IDE): debounce-bundles the project's files via services/buildPreview, renders the result in a sandboxed (allow-scripts only) srcDoc iframe, and separately surfaces three distinct failure states — a build error, a runtime error posted from inside the iframe via postMessage, and an 'app rendered nothing' empty-mount notice.",
+          "verified": true,
+          "mechanism": {
+            "file": "components/PreviewHost.tsx",
+            "line": null,
+            "note": "read directly during the architecture audit"
+          }
+        },
+        {
+          "file": "ProblemsPanel.tsx",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "ProjectManager.tsx",
+          "purpose": "The 'Projects' home screen: a responsive card grid of projects with per-project checkbox (selects the project for both IDE and chat context), buttons to view files, export project as JSON, open ProjectSettingsModal, and delete (with a cost-preview confirmation naming affected files/agents), plus a project-creation input and a sign-out control shown only when auth is enforced.",
+          "verified": true,
+          "mechanism": {
+            "file": "components/ProjectManager.tsx",
+            "line": null,
+            "note": "read directly during the architecture audit"
+          }
+        },
+        {
+          "file": "ProjectSettingsModal.tsx",
+          "purpose": "A responsive dialog (bottom sheet on mobile, centered on desktop) for renaming a project and managing its files — add files via a hidden file input, list/delete existing files — closable via Escape or a backdrop click.",
+          "verified": true,
+          "mechanism": {
+            "file": "components/ProjectSettingsModal.tsx",
+            "line": null,
+            "note": "read directly during the architecture audit"
+          }
+        },
+        {
+          "file": "QuotaBadge.tsx",
+          "purpose": "A small status chip showing either 'X requests left today' (free-tier models, turning accent-colored when nearly/fully spent) or an estimated dollar spend (paid models) for whichever model a given surface ('chat' or 'builder') would actually use, computed from a fetched QuotaSnapshot; also exports the modelForSurface/remainingFor/spentOn helper functions reused by Step_Theme.",
+          "verified": true,
+          "mechanism": {
+            "file": "components/QuotaBadge.tsx",
+            "line": null,
+            "note": "read directly during the architecture audit"
+          }
+        },
+        {
+          "file": "Terminal.tsx",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "ToolMessage.tsx",
+          "purpose": "Renders a tool-call result message: for a pending runPython call it shows the proposed code and Run/Skip approval buttons wired to onResolvePendingTool; for a completed runPython call it shows stdout/stderr/error/result plus a 'View Executed Code' disclosure and an inline SaveScriptForm to save the code into a selected project's files; other tool results fall back to a raw JSON dump.",
+          "verified": true,
+          "mechanism": {
+            "file": "components/ToolMessage.tsx",
+            "line": null,
+            "note": "read directly during the architecture audit"
+          }
+        },
+        {
+          "file": "UserMessage.tsx",
+          "purpose": "Renders a user chat turn as a single raised, right-aligned rounded bubble containing the message's text parts (no avatar, per its own comment, since the bubble alone signals authorship).",
+          "verified": true,
+          "mechanism": {
+            "file": "components/UserMessage.tsx",
+            "line": null,
+            "note": "read directly during the architecture audit"
+          }
+        },
+        {
+          "file": "VideoGeneratorPane.tsx",
+          "purpose": "The video-generation input form for chat's video-gen mode: duration slider, aspect-ratio select, an optional 'Director mode' details panel (shot type/camera movement/artistic style dropdowns), an optional starting-image ImageUpload, a text prompt field, and a submit button.",
+          "verified": true,
+          "mechanism": {
+            "file": "components/VideoGeneratorPane.tsx",
+            "line": null,
+            "note": "read directly during the architecture audit"
+          }
+        },
+        {
+          "file": "VideoPlayer.tsx",
+          "purpose": "A thin wrapper rendering an autoplaying, looping, muted <video> element for a given src URL.",
+          "verified": true,
+          "mechanism": {
+            "file": "components/VideoPlayer.tsx",
+            "line": null,
+            "note": "read directly during the architecture audit"
+          }
+        }
+      ]
+    },
+    {
+      "path": "components/builders/",
+      "declaration": {
+        "statement": "The five-step wizard (Idea/Blueprint/Style/Generate/Export) plus its supporting shelf, step indicator, design-contract preview and Sandpack preview.",
+        "mechanism": {
+          "file": "README.md",
+          "line": 30
+        },
+        "level": "lint",
+        "verified": true
+      },
+      "fileCount": 10,
+      "files": [
+        {
+          "file": "BuildShelf.tsx",
+          "purpose": "The web-app builder's landing screen when no build is active: a 'Start a new build' CTA plus a list of previously saved builds (name, file count, relative save time, and validation verdict) with Open/ZIP-export/Delete actions, and a shortcut link to the Projects destination when the user has existing IDE projects.",
+          "verified": true,
+          "mechanism": {
+            "file": "components/builders/BuildShelf.tsx",
+            "line": null,
+            "note": "read directly during the architecture audit"
+          }
+        },
+        {
+          "file": "DesignContractPreview.tsx",
+          "purpose": "Renders the builder's theme tokens (colors/typography) as an actual laid-out HTML document inside a fully sandboxed (sandbox=\"\"), no-script/no-network iframe generated by utils/designContract.ts, measuring its host's width via ResizeObserver and CSS-scaling (not reflowing) the fixed 760px-wide document down to fit.",
+          "verified": true,
+          "mechanism": {
+            "file": "components/builders/DesignContractPreview.tsx",
+            "line": null,
+            "note": "read directly during the architecture audit"
+          }
+        },
+        {
+          "file": "SandpackAppPreview.tsx",
+          "purpose": "A second, independent live preview of the generated project using CodeSandbox's Sandpack (react-ts template, CDN dependency resolution): remaps the project's own files into Sandpack's expected shape, strips scaffold-owned files (package.json/vite.config/tsconfig/index.html) and Tailwind at-rules/imports, substitutes an @tailwindcss/browser runtime-JIT import for styling, resolves the real entry file, and filters declared dependencies through providers/allowlist.js's PREVIEW_PACKAGES — explicitly documented as never feeding back into the app's own tsc/esbuild validation verdict.",
+          "verified": true,
+          "mechanism": {
+            "file": "components/builders/SandpackAppPreview.tsx",
+            "line": null,
+            "note": "read directly during the architecture audit"
+          }
+        },
+        {
+          "file": "StepIndicator.tsx",
+          "purpose": "A 5-step (Idea/Plan/Theme/Generate/Export) progress indicator rendering completed steps as a filled disc with a checkmark, the current step as a raised disc, and future steps dimmed, connected by rule lines whose brightness (not hue) encodes progress.",
+          "verified": true,
+          "mechanism": {
+            "file": "components/builders/StepIndicator.tsx",
+            "line": null,
+            "note": "read directly during the architecture audit"
+          }
+        },
+        {
+          "file": "Step_Export.tsx",
+          "purpose": "The wizard's final step: shows the generated project's file count and a save/rename form (save or 'save as copy' to the build library), a validation-issues disclosure (errors/warnings by file), both live previews (PreviewHost's esbuild sandbox and the lazily-loaded SandpackAppPreview), Download-as-ZIP and Open-in-IDE buttons, and a collapsible 'build record' evidence log.",
+          "verified": true,
+          "mechanism": {
+            "file": "components/builders/Step_Export.tsx",
+            "line": null,
+            "note": "read directly during the architecture audit"
+          }
+        },
+        {
+          "file": "Step_Generate.tsx",
+          "purpose": "The wizard's generation-in-progress/result screen: while running shows a spinner and a live list of files as they're written; if generation stopped with no candidate files, shows an error message and the partial file list with a retry/back-to-style option; if a candidate failed validation, lists error/warning issues with 'Generate again' / 'Keep it anyway' / 'Back to style' actions — explicitly never asking the model whether it succeeded.",
+          "verified": true,
+          "mechanism": {
+            "file": "components/builders/Step_Generate.tsx",
+            "line": null,
+            "note": "read directly during the architecture audit"
+          }
+        },
+        {
+          "file": "Step_Idea.tsx",
+          "purpose": "The wizard's first step: a single textarea for the user's app idea and a 'Create project blueprint' submit button that calls generateWebAppPlan, disabled while a plan request is in flight.",
+          "verified": true,
+          "mechanism": {
+            "file": "components/builders/Step_Idea.tsx",
+            "line": null,
+            "note": "read directly during the architecture audit"
+          }
+        },
+        {
+          "file": "Step_Plan.tsx",
+          "purpose": "An editable blueprint review step: normalizes the model-produced (or previously saved) plan into a local DraftPlan, lets the user directly add/edit/remove pages, components, shared data 'entities' (with typed fields) and acceptance-criteria items, offers an 'Ask the AI to revise this blueprint' free-text refine action (refineWebAppPlan), tracks dirty state against the last plan, and an Approve button that commits the draft and advances to the Theme step.",
+          "verified": true,
+          "mechanism": {
+            "file": "components/builders/Step_Plan.tsx",
+            "line": null,
+            "note": "read directly during the architecture audit"
+          }
+        },
+        {
+          "file": "Step_Theme.tsx",
+          "purpose": "The wizard's style step: palette tile grid, per-role custom color pickers (switches to a synthetic 'Custom' palette on edit), typography tile grid, 'design variety' aesthetic-dimension pill pickers plus anti-slop/self-reflection checkboxes, a live DesignContractPreview of the current tokens, an AI 'suggest 3 art directions' feature (each rendered as its own DesignContractPreview card), and a 'Generate My Web App' button that first estimates/cost-warns (paid model $ estimate, or free-tier quota-remaining warning) before calling generateWebAppCode.",
+          "verified": true,
+          "mechanism": {
+            "file": "components/builders/Step_Theme.tsx",
+            "line": null,
+            "note": "read directly during the architecture audit"
+          }
+        },
+        {
+          "file": "WebAppBuilder.tsx",
+          "purpose": "The wizard's outer shell/router: renders BuildShelf when inactive or the step component matching builderState.currentStep (Step_Idea/Step_Plan/Step_Theme/Step_Generate/Step_Export) inside a scrolling container, shows the StepIndicator and a sticky 'Reset' button only while a build is active, and dims content to 50% opacity while a step's async status.isLoading is true.",
+          "verified": true,
+          "mechanism": {
+            "file": "components/builders/WebAppBuilder.tsx",
+            "line": null,
+            "note": "read directly during the architecture audit"
+          }
+        }
+      ]
+    },
+    {
+      "path": "components/editor/",
+      "declaration": {
+        "statement": "CodeMirror 6 theme and language-mode config, split out beside CodeEditor.tsx per CONSOLIDATED-PATH.md Stage 1.",
+        "mechanism": {
+          "file": "~/.claude/plans/CONSOLIDATED-PATH.md",
+          "line": 82
+        },
+        "level": "lint",
+        "verified": true
+      },
+      "fileCount": 2,
+      "files": [
+        {
+          "file": "language.ts",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "theme.ts",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        }
+      ]
+    },
+    {
+      "path": "components/memory/",
+      "declaration": {
+        "statement": "MemoryPanel.tsx — the right-hand drawer (sheet on phone) surfacing what needs human review in the lesson ladder.",
+        "mechanism": {
+          "file": "DESIGN.md",
+          "line": 21,
+          "note": "\"Memory panel: Right-hand drawer, sheet on phone\""
+        },
+        "level": "review",
+        "verified": true
+      },
+      "fileCount": 1,
+      "files": [
+        {
+          "file": "MemoryPanel.tsx",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        }
+      ]
+    },
+    {
+      "path": "context/",
+      "declaration": {
+        "statement": "AppContext.tsx: the builder state machine, candidate promotion, the evidence trail, and the client-side memory taps.",
+        "mechanism": {
+          "file": "AGENTS.md",
+          "line": 12
+        },
+        "level": "gate",
+        "verified": true
+      },
+      "fileCount": 1,
+      "files": [
+        {
+          "file": "AppContext.tsx",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        }
+      ]
+    },
+    {
+      "path": "hooks/",
+      "declaration": {
+        "statement": "Reusable React behavior. useChat.ts attaches a fresh file tree, tsc diagnostics summary, and preview verdict to every coding-mode chat turn, computed fresh each time rather than read from IdeView’s own live state.",
+        "mechanism": {
+          "file": "CLAUDE.md",
+          "line": null,
+          "note": "IDE / peer-programmer section, for useChat.ts specifically"
+        },
+        "level": "gate",
+        "verified": true
+      },
+      "fileCount": 5,
+      "files": [
+        {
+          "file": "useAuth.ts",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "useChat.ts",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "useDiagnostics.ts",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "useLiveChat.ts",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "useTTS.ts",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        }
+      ]
+    },
+    {
+      "path": "services/",
+      "declaration": {
+        "statement": "HTTP calls and platform integrations. memoryService.ts is the client’s only route to memory — every function answers null rather than throwing, bounded at 2s. buildStorage.ts persists in-progress builder state and the saved-build library (quota-aware, evicts oldest).",
+        "mechanism": {
+          "file": "AGENTS.md",
+          "line": 9,
+          "note": "services/buildStorage.ts, services/memoryService.ts"
+        },
+        "level": "gate",
+        "verified": true
+      },
+      "fileCount": 10,
+      "files": [
+        {
+          "file": "apiService.ts",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "buildPreview.ts",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "buildStorage.ts",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "geminiService.ts",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "memoryService.test.ts",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "memoryService.ts",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "previewVerdict.ts",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "pyodideService.ts",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "session.ts",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "typecheckService.ts",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        }
+      ]
+    },
+    {
+      "path": "utils/",
+      "declaration": {
+        "statement": "General helpers, deliberately dependency-free where possible. validateBuild.ts is the model-independent post-generation gate; palettes.ts/designContract.ts are the design tokens and the self-contained HTML preview rendered from them; toolSequence.ts’s splitAtApprovalGate runs the IDE’s tool-call queue.",
+        "mechanism": {
+          "file": "AGENTS.md",
+          "line": 10,
+          "note": "utils/validateBuild.ts, utils/palettes.ts, utils/designContract.ts"
+        },
+        "level": "gate",
+        "verified": true
+      },
+      "fileCount": 14,
+      "files": [
+        {
+          "file": "audio.ts",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "builderBrief.ts",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "codingContext.ts",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "common.ts",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "designContract.ts",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "export.ts",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "features.ts",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "palettes.ts",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "patchFile.test.ts",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "patchFile.ts",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "toolSequence.test.ts",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "toolSequence.ts",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "ui.ts",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "validateBuild.ts",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        }
+      ]
+    },
+    {
+      "path": "types/",
+      "declaration": {
+        "statement": "Domain types, not duplicated outside this directory. project.ts’s Project.origin carries the plan/theme/acceptance-criteria a project was built from.",
+        "mechanism": {
+          "file": "CLAUDE.md",
+          "line": null,
+          "note": "IDE section, for types/project.ts specifically"
+        },
+        "level": "lint",
+        "verified": true
+      },
+      "fileCount": 8,
+      "files": [
+        {
+          "file": "ai.ts",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "build.ts",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "chat.ts",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "diagnostics.ts",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "index.ts",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "preview.ts",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "project.ts",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "ui.ts",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        }
+      ]
+    },
+    {
+      "path": "test/",
+      "declaration": {
+        "statement": "Pipeline-level Vitest specs spanning several modules (generation, the memory ladder) that don’t map to one file to colocate next to — as opposed to colocated *.test.ts beside the module it tests.",
+        "mechanism": {
+          "file": "CLAUDE.md",
+          "line": null,
+          "note": "Commands section, \"Two tiers\""
+        },
+        "level": "gate",
+        "verified": true
+      },
+      "fileCount": 2,
+      "files": [
+        {
+          "file": "generate.test.mjs",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "memory-loop.test.mjs",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        }
+      ]
+    },
+    {
+      "path": "scripts/",
+      "declaration": {
+        "statement": "Standalone checks that need a real browser, a spawned server, or a live model — the ok(label, condition, detail) convention, not ported to Vitest because their setup cost (spawn a process, launch Chrome) differs from what npm test should carry by default.",
+        "mechanism": {
+          "file": "CLAUDE.md",
+          "line": null,
+          "note": "Commands section"
+        },
+        "level": "gate",
+        "verified": true
+      },
+      "fileCount": 9,
+      "files": [
+        {
+          "file": "audit-ui.mjs",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "check-auth.mjs",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "check-css.mjs",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "check-editor.mjs",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "check-pipeline.mjs",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "check-preview.mjs",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "smoke-memory.mjs",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "smoke-providers.mjs",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        },
+        {
+          "file": "ui-harness.mjs",
+          "purpose": null,
+          "verified": false,
+          "level": "gap",
+          "note": "not yet read for this audit — do not infer from the filename"
+        }
+      ]
+    }
+  ]
+}

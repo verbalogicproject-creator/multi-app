@@ -1,0 +1,82 @@
+%% System topology and top-level data flow — multi-app.
+%% Focused sub-flows (the generation pipeline in detail, the memory lifecycle in
+%% detail) live in architecture/diagrams/ instead of being crammed in here — see
+%% gaps-bugs-and-need-to-handle.json's own note on "a filter is a blind spot" for
+%% why one mega-diagram trying to show everything shows nothing clearly.
+flowchart TD
+    subgraph CLIENT["Client — Vite + React 19"]
+        WIZARD["Builder wizard<br/>Idea to Blueprint to Style to Generate to Export"]
+        IDE["IdeView<br/>CodeMirror 6, Terminal/Problems/Ask drawer"]
+        CHAT["ChatPanel<br/>chat / plan / coding modes"]
+    end
+
+    subgraph SERVER["Express server — server.js :8050"]
+        AUTHGATE["/api gate<br/>requireAuth when enforceAuth is true"]
+        ROUTES["Route handlers<br/>chat-stream, builder/*, memory/*, preview/*, typecheck/*"]
+        QUOTA["Daily quota governor<br/>advisory only — warns, does not block"]
+    end
+
+    subgraph PROVIDERS["providers/ — one interface, four adapters"]
+        CATALOG["catalog.js<br/>single source of truth for models"]
+        FALLBACK["withModelFallback<br/>429/503 retry then chain fallback"]
+        GOOGLE["google.js"]
+        ANTHROPIC["anthropic.js"]
+        OPENAI["openai.js"]
+        NVIDIA["nvidia.js"]
+    end
+
+    subgraph VENDORS["LLM vendors"]
+        GEMINI[("Gemini API")]
+        CLAUDE_API[("Anthropic API")]
+        OPENAI_API[("OpenAI Responses API")]
+        NIM[("NVIDIA NIM")]
+    end
+
+    subgraph VERIFY["Independent verification — never collapsed into one"]
+        VALIDATE["utils/validateBuild.ts<br/>pure, no model, deterministic"]
+        TSC["typecheck/ — real tsc<br/>.preview-work/ inside the repo"]
+        BUNDLE["preview/ — esbuild + sandboxed iframe"]
+        SANDPACK["SandpackAppPreview<br/>second, independent live preview"]
+    end
+
+    subgraph MEMORY["Memory — one shared store (since commit 6360b37)"]
+        BRIDGE["memory/bridge.js<br/>ONE GraphMemory, shared across all builds"]
+        SHAREDDB[(".multi-memory/builder.db<br/>written here AND read by the MCP server below")]
+        PROPOSALS["memory/proposals.js<br/>issue code -> lesson, no model"]
+    end
+
+    subgraph ENGINE["multi-graph-memory (sibling repo)"]
+        MCP["MCP server<br/>stdio (B1) + HTTP (B2)"]
+    end
+
+    subgraph AUTH["auth/"]
+        OAUTH["Google / GitHub OAuth<br/>bootPosture: reachable-or-open, never both"]
+    end
+
+    WIZARD --> ROUTES
+    IDE --> ROUTES
+    CHAT --> ROUTES
+    ROUTES --> AUTHGATE
+    AUTHGATE --> OAUTH
+
+    ROUTES -->|"builder/plan, /directions, /generate, /edit"| FALLBACK
+    FALLBACK --> CATALOG
+    FALLBACK --> GOOGLE --> GEMINI
+    FALLBACK --> ANTHROPIC --> CLAUDE_API
+    FALLBACK --> OPENAI --> OPENAI_API
+    FALLBACK --> NVIDIA --> NIM
+    ROUTES --> QUOTA
+
+    ROUTES --> VALIDATE
+    ROUTES --> TSC
+    ROUTES --> BUNDLE
+    WIZARD -.->|"second opinion, never gates the verdict"| SANDPACK
+
+    ROUTES -->|"fire-and-forget server-side; client fetch now keepalive:true"| BRIDGE
+    BRIDGE --> SHAREDDB
+    BRIDGE --> PROPOSALS
+
+    MCP -->|"openMemory() -> .multi-memory.json"| SHAREDDB
+
+    classDef gap stroke:#EA580C,stroke-width:2px,stroke-dasharray:4 3;
+    class SHAREDDB gap;

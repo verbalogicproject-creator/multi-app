@@ -1,0 +1,86 @@
+{
+  "$schema": "declaration-v1",
+  "note": "Hand-authored. The generation pipeline's actual mechanics as declaration triples (statement + mechanism + level), extending HARNESS.md's own table with two things it doesn't cover: the compiler-repair loop's exact revert semantics, and the quota/fallback machinery around every model call. Every entry has an `id` so hetrodox-unconventional-approaches.json can attach a verdict without re-quoting the citation. This file describes WHAT the pipeline does; the verdicts on whether any of it explains the generation pain live in the sibling file, deliberately kept separate so a mechanics claim is never silently also a judgment.",
+
+  "entryPoint": {
+    "statement": "POST /api/builder/generate is the pipeline's sole entry point: plan + theme in, a streaming NDJSON progress log out, ending in one final line carrying the file set and repair statistics.",
+    "mechanism": { "file": "server.js", "line": 720 },
+    "level": "gate"
+  },
+
+  "mechanics": [
+    {
+      "id": "manifest-first",
+      "statement": "Generation asks for a manifest (file paths + one-line purpose, no code) first, then one request per file against it — the manifest and each file request are bounded separately, so neither can approach the 65,536-token ceiling the old single-shot shape routinely hit at ~54k.",
+      "mechanism": { "file": "providers/generate.js", "line": 1, "note": "module header + generatePromptFor" },
+      "level": "lint"
+    },
+    {
+      "id": "scaffold-lint",
+      "statement": "scaffoldFor writes src/main.tsx, vite.config.ts, tsconfig.json, index.html and src/index.css itself — the model never touches them, so 'one router, mounted once' and 'Tailwind v4 imported correctly' cannot be written wrong.",
+      "mechanism": { "file": "HARNESS.md", "line": 30 },
+      "level": "lint"
+    },
+    {
+      "id": "entities-frozen",
+      "statement": "The plan's entities[] are frozen into src/types.ts before the manifest step runs, and fileInstruction inlines that file's literal content (not just its path) into every per-file request — added in A2 specifically because dogfooding found ~50 of ~57 errors in one real build were files disagreeing about the shape of the same named type.",
+      "mechanism": { "file": "HARNESS.md", "line": 35, "note": "typesFileFor / fileInstruction" },
+      "level": "lint"
+    },
+    {
+      "id": "in-generation-repair",
+      "statement": "During generation itself (before the compiler-driven pass below), repairRound re-requests only the files a compiler blamed — one model call per broken file (up to maxFiles=10), concurrency 3, effort 'high', 16,384 tokens — never a whole-project re-ask.",
+      "mechanism": { "file": "providers/generate.js", "line": 505 },
+      "level": "gate"
+    },
+    {
+      "id": "post-generation-repair-loop",
+      "statement": "After generation, repairIfNeeded runs up to MAX_ROUNDS=3 compiler-repair rounds, but only while the previous round strictly reduced the total error count; a round that does not improve things is the last one either way. Per FILE (not per round), a repaired file whose own error count did not fall is individually reverted to its pre-round content; the aggregate result of the last round is kept as final regardless of whether reverting brought the project's overall error count above where the round started.",
+      "mechanism": { "file": "server.js", "line": 766, "note": "repairIfNeeded()" },
+      "level": "gate"
+    },
+    {
+      "id": "salvage-instrument-failure",
+      "statement": "A response cut off by its own output-token budget (finishReason MAX_TOKENS/max_tokens/length, normalized across providers) is salvaged for whichever files completed and reported inconclusive:true — never scored as bad code, because an instrument running out of room is not the same fact as a model writing something wrong.",
+      "mechanism": { "file": "providers/salvage.js", "line": 1 },
+      "level": "gate"
+    },
+    {
+      "id": "transient-retry-fallback",
+      "statement": "Every builder model call goes through withModelFallback: 2 tries per model with 2s/4s backoff on a transient failure (HTTP 429 or 503, or an NVIDIA-specific 'resource exhausted' message with no status field), then falls to the next model in the chain — the requested model's own declared `fallback` array, then MODELS.coding, deduped and filtered to configured providers.",
+      "mechanism": { "file": "server.js", "line": 484, "note": "TRANSIENT_STATUSES, isTransient(), withModelFallback()" },
+      "level": "gate"
+    },
+    {
+      "id": "quota-governor-advisory",
+      "statement": "Per-model daily request counts are tracked and persisted (logs/quota.json) and surfaced in the UI, but the governor is advisory only — it warns before a run, it does not block one. A build already in flight is not stopped from exceeding its model's stated daily limit.",
+      "mechanism": { "file": "server.js", "line": 172, "note": "recordModelCall(); see misc-other.json for the full declaration" },
+      "level": "gap"
+    },
+    {
+      "id": "effort-levels",
+      "statement": "Effort was deliberately raised where it is bounded and argued from evidence (manifest: low->medium at 8,192 tokens; per-file generation: medium->high at 16,384 tokens; repair: medium->high, argued from the compiler's own diagnostics) and deliberately left unchanged on the whole-app fallback path, which shares its 65,536-token ceiling with thinking and was the documented original cause of truncation — raising it there is explicitly deferred to an unrun 'A4 bench measurement'.",
+      "mechanism": { "file": "HARNESS.md", "line": 80, "note": "the effort-levels table" },
+      "level": "gate"
+    },
+    {
+      "id": "prompt-caching-order",
+      "statement": "generatePromptFor puts the fully-static block (stack rules, allowlist instruction, design-contract sub-rules) first and the per-build variable block (plan, acceptance criteria, palette, typography) last, so Gemini's implicit prefix caching matches the longest shared prefix across the manifest/per-file/repair requests of one build — and, because the invariant block never varies between builds either, in principle across builds too.",
+      "mechanism": { "file": "HARNESS.md", "line": 100 },
+      "level": "lint"
+    },
+    {
+      "id": "acceptance-self-report",
+      "statement": "Acceptance-criteria checking is the model that wrote the code reporting whether it believes each criterion holds — explicitly labelled a self-report, not a gate, and deliberately excluded from memory/proposals.js's PROPOSAL_TABLE so a self-graded pass can never manufacture a lesson.",
+      "mechanism": { "file": "HARNESS.md", "line": 40 },
+      "level": "review"
+    }
+  ],
+
+  "requestCountArithmetic": {
+    "statement": "A single build's worst-case request count: 1 (manifest) + up to N (one per manifest file, N = page/component count, unbounded by any cap) + up to maxFiles(10) x MAX_ROUNDS(3) = 30 (post-generation repair). The one real build in this repo's history with full telemetry (build-mtoemkqa-ffy5sk24, a 5-page/6-component idea) already needed 20 initial per-file requests (fileCount=manifestCount=20) plus 2 repair rounds — 21+ requests from generation alone, on gemini-3.6-flash, which this app's own quota governor treats as a 20/day model, before any repair calls are even counted.",
+    "mechanism": { "file": ".multi-memory/build-mtoemkqa-ffy5sk24.db", "line": null, "note": "candidate.created event payload: fileCount:20, manifestCount:20, preRepairErrors:47, postRepairErrors:61, repairRounds:2" },
+    "level": "gate",
+    "crossReference": "See hetrodox-unconventional-approaches.json entries 'quota-vs-request-count' and 'repair-can-end-worse-than-it-started'."
+  }
+}

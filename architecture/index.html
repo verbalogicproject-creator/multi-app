@@ -1,0 +1,578 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>multi-app — Architecture</title>
+<style>
+/* ===== Tokens — copied verbatim from /root/multi-app/index.css. This doc reuses
+   the shipped product's own design system exactly; no new hex values, no new
+   typefaces. See DESIGN.md. ===== */
+:root {
+    --color-ground:   #0b0b0c;
+    --color-surface:  #161617;
+    --color-raised:   #1e1e20;
+    --color-metal-100:#f4f4f5;
+    --color-metal-200:#c9c9ce;
+    --color-metal-300:#9a9aa2;
+    --color-metal-400:#6e6e76;
+    --color-metal-500:#4a4a51;
+    --color-metal-700:#2a2a2e;
+    --color-accent:       #ea580c;
+    --color-accent-strong:#c2410c;
+    --color-accent-soft:  #fb923c;
+    --font-display: "Clash Display", "Geist Sans", ui-sans-serif, system-ui, sans-serif;
+    --font-sans:    "Geist Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+    --font-mono:    "Geist Mono", ui-monospace, SFMono-Regular, "Roboto Mono", monospace;
+    --radius-shell: 1.75rem;
+    --radius-core:  1.375rem;
+    --radius-card:  0.75rem;
+    --ease-fluid: cubic-bezier(0.32, 0.72, 0, 1);
+    color-scheme: dark;
+}
+
+/* Self-hosted — no CDN. Same font files index.css already ships, served here
+   under /fonts/ by architecture/server.js. "This device is often offline." */
+@font-face { font-family: "Geist Sans"; src: url("/fonts/Geist-Variable.woff2") format("woff2-variations"); font-weight: 100 900; font-style: normal; font-display: swap; }
+@font-face { font-family: "Geist Mono"; src: url("/fonts/GeistMono-Variable.woff2") format("woff2-variations"); font-weight: 100 900; font-style: normal; font-display: swap; }
+@font-face { font-family: "Clash Display"; src: url("/fonts/ClashDisplay-Semibold.woff2") format("woff2"); font-weight: 600; font-style: normal; font-display: swap; }
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+    background: var(--color-ground);
+    color: var(--color-metal-100);
+    font-family: var(--font-sans);
+    font-synthesis: none;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+}
+a { color: var(--color-accent-soft); }
+code, .mono { font-family: var(--font-mono); }
+
+.container { max-width: 72rem; margin: 0 auto; padding: 0 1rem; }
+@media (min-width: 768px) { .container { padding: 0 1.5rem; } }
+
+/* ===== Header ===== */
+header.top {
+    position: sticky; top: 0; z-index: 20;
+    background: color-mix(in srgb, var(--color-ground) 92%, transparent);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+header.top .row { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; padding: 1rem; }
+@media (min-width: 768px) { header.top .row { padding: 1.25rem 1.5rem; } }
+header.top h1 {
+    font-family: var(--font-display); font-weight: 600; letter-spacing: -0.03em;
+    font-size: 1.5rem; margin: 0;
+}
+@media (min-width: 768px) { header.top h1 { font-size: 1.875rem; } }
+header.top .sub { font-family: var(--font-mono); font-size: 0.75rem; color: var(--color-metal-400); text-align: right; }
+
+/* ===== Tabs — horizontally-scrolling pill bar, mobile-first ===== */
+nav.tabs {
+    display: flex; gap: 0.5rem; overflow-x: auto; scrollbar-width: thin;
+    padding: 0.75rem 1rem; border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+@media (min-width: 768px) { nav.tabs { padding: 0.75rem 1.5rem; } }
+nav.tabs button {
+    flex: none; font-family: var(--font-sans); font-weight: 500; font-size: 0.8125rem;
+    color: var(--color-metal-300); background: var(--color-surface);
+    border: 1px solid rgba(255,255,255,0.06); border-radius: 999px;
+    padding: 0.5rem 0.9rem; min-height: 2.25rem; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 0.4rem;
+    transition: background 160ms var(--ease-fluid), color 160ms var(--ease-fluid);
+}
+nav.tabs button[aria-selected="true"] {
+    background: var(--color-raised); color: var(--color-metal-100);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+}
+nav.tabs button .dot { width: 6px; height: 6px; border-radius: 999px; background: var(--color-accent); flex: none; }
+
+/* ===== Sections ===== */
+main { padding: 2.5rem 0; }
+@media (min-width: 768px) { main { padding: 3.5rem 0; } }
+section.panel { display: none; }
+section.panel[data-active="true"] { display: block; }
+section.panel h2 {
+    font-family: var(--font-display); font-weight: 600; letter-spacing: -0.02em;
+    font-size: 1.125rem; margin: 0 0 0.25rem;
+}
+@media (min-width: 768px) { section.panel h2 { font-size: 1.25rem; } }
+section.panel .lede { color: var(--color-metal-300); font-size: 0.875rem; margin: 0 0 1.5rem; max-width: 62ch; }
+.group { margin-bottom: 2.5rem; }
+.group > h3 {
+    font-family: var(--font-sans); font-weight: 600; font-size: 0.9375rem;
+    color: var(--color-metal-200); margin: 0 0 0.75rem;
+}
+.stack { display: flex; flex-direction: column; gap: 0.75rem; }
+@media (min-width: 768px) { .stack { gap: 1rem; } }
+.grid { display: grid; gap: 1rem; grid-template-columns: 1fr; }
+@media (min-width: 768px) { .grid.cols-2 { grid-template-columns: 1fr 1fr; } }
+
+/* ===== Cards — flat planes only. No bezels here: DESIGN.md reserves the
+   shell/core bezel for the live preview, the Memory drawer, the plan card —
+   this doc isn't those, so every surface below is a flat value-separated plane. ===== */
+.card {
+    background: rgba(255,255,255,0.04); border-radius: var(--radius-card);
+    padding: 1rem;
+}
+@media (min-width: 768px) { .card { padding: 1.25rem; } }
+.card .stmt { font-size: 0.9375rem; line-height: 1.5; margin: 0 0 0.5rem; }
+.card .meta-row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 0.5rem; }
+
+/* ===== Verdict badges — three tiers, orange only means "needs you" =====
+   strong: confirmed / high-severity — accent-strong fill, white text (5.18:1, measured in DESIGN.md)
+   soft:   plausible-suspect / needs-measurement / medium-severity — accent-soft outline, no fill
+   quiet:  ruled-out / informational / low-severity — metal-400 text, no badge shape at all */
+.badge {
+    display: inline-flex; align-items: center; gap: 0.35rem;
+    font-family: var(--font-mono); font-size: 0.6875rem; letter-spacing: 0.01em;
+    padding: 0.2rem 0.55rem; border-radius: 999px; line-height: 1.4;
+}
+.badge.strong { background: var(--color-accent-strong); color: #fff; }
+.badge.soft   { color: var(--color-accent-soft); border: 1px solid var(--color-accent-soft); background: transparent; }
+.badge.quiet  { color: var(--color-metal-400); }
+.badge .level { color: var(--color-metal-400); font-weight: 400; }
+
+.label { font-size: 0.75rem; font-weight: 500; color: var(--color-metal-300); }
+.data  { font-family: var(--font-mono); font-size: 0.75rem; color: var(--color-metal-300); }
+.why { font-size: 0.8125rem; color: var(--color-metal-200); margin: 0.5rem 0 0; }
+.confidence { font-size: 0.75rem; color: var(--color-metal-400); margin: 0.5rem 0 0; font-style: normal; }
+
+details.evidence { margin-top: 0.5rem; }
+details.evidence summary {
+    cursor: pointer; font-size: 0.75rem; color: var(--color-metal-300);
+    font-family: var(--font-mono); min-height: 2.75rem; display: flex; align-items: center;
+}
+details.evidence ul { margin: 0.5rem 0 0; padding-left: 1.1rem; }
+details.evidence li { font-family: var(--font-mono); font-size: 0.75rem; color: var(--color-metal-300); margin-bottom: 0.5rem; line-height: 1.5; }
+
+.cite { font-family: var(--font-mono); font-size: 0.75rem; color: var(--color-metal-400); }
+
+/* raw-JSON toggle — per section, per the "AI-readable too" requirement */
+.raw-toggle {
+    font-family: var(--font-mono); font-size: 0.75rem; color: var(--color-metal-400);
+    background: none; border: 1px solid rgba(255,255,255,0.08); border-radius: var(--radius-card);
+    padding: 0.4rem 0.7rem; min-height: 2.25rem; cursor: pointer; margin-top: 0.5rem;
+}
+.raw-toggle:hover { color: var(--color-metal-200); }
+pre.raw {
+    display: none; background: var(--color-surface); border-radius: var(--radius-card);
+    padding: 1rem; overflow-x: auto; font-family: var(--font-mono); font-size: 0.75rem;
+    color: var(--color-metal-200); margin-top: 0.5rem; max-height: 28rem;
+}
+pre.raw[data-open="true"] { display: block; }
+
+table.data-table { width: 100%; border-collapse: collapse; font-size: 0.8125rem; }
+table.data-table th { text-align: left; font-weight: 500; color: var(--color-metal-300); font-size: 0.75rem; padding: 0.5rem 0.75rem; border-bottom: 1px solid rgba(255,255,255,0.08); }
+table.data-table td { padding: 0.6rem 0.75rem; border-bottom: 1px solid rgba(255,255,255,0.04); vertical-align: top; }
+.table-scroll { overflow-x: auto; border-radius: var(--radius-card); background: rgba(255,255,255,0.02); }
+
+.diagram-block { background: var(--color-surface); border-radius: var(--radius-card); padding: 1rem; margin-bottom: 1rem; overflow-x: auto; }
+.diagram-block h3 { margin-top: 0; }
+/* Render at native size and let the block scroll — a diagram meant to be read
+   carefully is more useful full-size-and-scrollable than tiny-and-all-visible. */
+.diagram-block svg { max-width: none !important; width: auto !important; height: auto; display: block; }
+.diagram-block .zoom-hint { font-size: 0.6875rem; color: var(--color-metal-500); margin: 0 0 0.5rem; font-family: var(--font-mono); }
+
+.file-tree-dir { margin-bottom: 1.25rem; }
+.file-tree-dir .dirpath { font-family: var(--font-mono); font-size: 0.8125rem; color: var(--color-metal-200); }
+.file-row { display: flex; gap: 0.6rem; padding: 0.4rem 0; border-bottom: 1px solid rgba(255,255,255,0.03); font-size: 0.8125rem; align-items: baseline; }
+.file-row .fname { font-family: var(--font-mono); color: var(--color-metal-200); flex: none; width: 13rem; overflow-wrap: anywhere; }
+.file-row .fpurpose { color: var(--color-metal-300); flex: 1; }
+.file-row .fpurpose.gap { color: var(--color-metal-500); font-style: italic; }
+
+footer.foot { padding: 2rem 1rem 4rem; color: var(--color-metal-500); font-size: 0.75rem; text-align: center; }
+
+.loading { color: var(--color-metal-400); font-size: 0.875rem; padding: 2rem 0; }
+</style>
+</head>
+<body>
+
+<header class="top">
+    <div class="row">
+        <h1>Architecture</h1>
+        <div class="sub" id="generated-sub">multi-app — loading…</div>
+    </div>
+    <nav class="tabs" role="tablist" aria-label="Architecture sections" id="tab-bar">
+        <button role="tab" data-tab="diagnosis" aria-selected="true"><span class="dot" id="diagnosis-dot" hidden></span>Diagnosis</button>
+        <button role="tab" data-tab="pipeline" aria-selected="false">Pipeline</button>
+        <button role="tab" data-tab="memory" aria-selected="false">Memory</button>
+        <button role="tab" data-tab="systemmap" aria-selected="false">System Map</button>
+        <button role="tab" data-tab="diagrams" aria-selected="false">Diagrams</button>
+        <button role="tab" data-tab="meta" aria-selected="false">Meta</button>
+    </nav>
+</header>
+
+<main class="container">
+    <section class="panel" id="panel-diagnosis" data-active="true">
+        <h2>Diagnosis</h2>
+        <p class="lede">What was actually found auditing the generation pipeline and the memory system against real code and real measured data — no assumptions, every entry cites its evidence. Ordered highest-attention first.</p>
+        <div id="diagnosis-findings" class="stack"><p class="loading">Loading hetrodox-unconventional-approaches.json…</p></div>
+        <div class="group" style="margin-top:2rem">
+            <h3>Everything that needs fixing or handling</h3>
+            <div id="gaps-content" class="stack"><p class="loading">Loading gaps-bugs-and-need-to-handle.json…</p></div>
+        </div>
+        <button class="raw-toggle" data-raw="hetrodox-unconventional-approaches.json,gaps-bugs-and-need-to-handle.json">view raw JSON</button>
+        <pre class="raw" id="raw-diagnosis"></pre>
+    </section>
+
+    <section class="panel" id="panel-pipeline">
+        <h2>Generation pipeline — the mechanics</h2>
+        <p class="lede">What the builder's generation pipeline actually does, cited line-by-line. This is the reference the Diagnosis tab's findings point back to.</p>
+        <div id="pipeline-content" class="stack"><p class="loading">Loading harness-agentic-loop.json…</p></div>
+        <button class="raw-toggle" data-raw="harness-agentic-loop.json">view raw JSON</button>
+        <pre class="raw" id="raw-pipeline"></pre>
+    </section>
+
+    <section class="panel" id="panel-memory">
+        <h2>Memory system</h2>
+        <p class="lede">The episode/lesson ladder as multi-app consumes it, and the engine's own internals (multi-graph-memory) — included in depth because the MCP scope mismatch spans both repos.</p>
+        <div id="memory-content" class="stack"><p class="loading">Loading memory-system-ladder.json…</p></div>
+        <button class="raw-toggle" data-raw="memory-system-ladder.json">view raw JSON</button>
+        <pre class="raw" id="raw-memory"></pre>
+    </section>
+
+    <section class="panel" id="panel-systemmap">
+        <h2>System map</h2>
+        <p class="lede">Models and adapters, REST endpoints, and the component/module inventory — generated from source where mechanically possible, not hand-transcribed.</p>
+        <div class="group">
+            <h3>Models &amp; providers</h3>
+            <div id="models-content"><p class="loading">Loading models-adapters.json…</p></div>
+            <button class="raw-toggle" data-raw="models-adapters.json">view raw JSON</button>
+            <pre class="raw" id="raw-models"></pre>
+        </div>
+        <div class="group">
+            <h3>REST endpoints</h3>
+            <div id="routes-content"><p class="loading">Loading rest-curl-api-endpoints-schema.json…</p></div>
+            <button class="raw-toggle" data-raw="rest-curl-api-endpoints-schema.json">view raw JSON</button>
+            <pre class="raw" id="raw-routes"></pre>
+        </div>
+        <div class="group">
+            <h3>Components &amp; modules</h3>
+            <div id="modules-content"><p class="loading">Loading components-and-modules.json…</p></div>
+            <button class="raw-toggle" data-raw="components-and-modules.json">view raw JSON</button>
+            <pre class="raw" id="raw-modules"></pre>
+        </div>
+    </section>
+
+    <section class="panel" id="panel-diagrams">
+        <h2>Diagrams</h2>
+        <p class="lede">System topology first, then the two flows the diagnosis is actually about — rendered locally (vendored mermaid.js, no CDN).</p>
+        <div id="diagrams-content"><p class="loading">Loading diagrams…</p></div>
+    </section>
+
+    <section class="panel" id="panel-meta">
+        <h2>Meta — how this was built</h2>
+        <p class="lede">The tooling (agents, skills, MCP servers) used on this project, and everything else that didn't fit elsewhere.</p>
+        <div class="group">
+            <h3>Workflows, skills &amp; MCP agents</h3>
+            <div id="workflows-content"><p class="loading">Loading workflows-skills-mcp-agents.json…</p></div>
+            <button class="raw-toggle" data-raw="workflows-skills-mcp-agents.json">view raw JSON</button>
+            <pre class="raw" id="raw-workflows"></pre>
+        </div>
+        <div class="group">
+            <h3>Misc</h3>
+            <div id="misc-content"><p class="loading">Loading misc-other.json…</p></div>
+            <button class="raw-toggle" data-raw="misc-other.json">view raw JSON</button>
+            <pre class="raw" id="raw-misc"></pre>
+        </div>
+    </section>
+</main>
+
+<footer class="foot">Generated from source, not hand-typed where the source allowed it. Run <code>node architecture/server.js --verify</code> to check it still matches.</footer>
+
+<script src="/vendor/mermaid.min.js"></script>
+<script type="module">
+const cache = {};
+async function j(name) {
+    if (cache[name]) return cache[name];
+    const res = await fetch(name);
+    const data = await res.json();
+    cache[name] = data;
+    return data;
+}
+async function text(name) {
+    const res = await fetch(name);
+    return res.text();
+}
+const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html !== undefined) e.innerHTML = html; return e; };
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function tierFor(item) {
+    const v = item.verdict, s = item.severity, lvl = item.level;
+    if (v === 'confirmed' || s === 'high') return 'strong';
+    if (v === 'plausible-suspect' || v === 'needs-measurement' || s === 'medium') return 'soft';
+    if (v === 'ruled-out' || s === 'low' || s === 'informational' || lvl === 'review') return 'quiet';
+    return 'soft';
+}
+function badge(item) {
+    const tier = tierFor(item);
+    const label = item.verdict ?? item.severity ?? item.level ?? '';
+    return `<span class="badge ${tier}">${esc(label)}${item.level ? ` <span class="level">· ${esc(item.level)}</span>` : ''}</span>`;
+}
+function citeLine(mechanism) {
+    if (!mechanism) return '';
+    const { file, line, note } = mechanism;
+    if (!file) return '';
+    return `<div class="cite">${esc(file)}${line ? `:${line}` : ''}${note ? ` — ${esc(note)}` : ''}</div>`;
+}
+
+/* ---------- Diagnosis tab ---------- */
+async function renderDiagnosis() {
+    const hetero = await j('hetrodox-unconventional-approaches.json');
+    const order = { strong: 0, soft: 1, quiet: 2 };
+    const findings = [...hetero.findings].sort((a, b) => order[tierFor(a)] - order[tierFor(b)]);
+    const host = document.getElementById('diagnosis-findings');
+    host.innerHTML = '';
+    const anyHigh = findings.some(f => tierFor(f) === 'strong');
+    document.getElementById('diagnosis-dot').hidden = !anyHigh;
+    for (const f of findings) {
+        const card = el('div', 'card');
+        card.id = `finding-${f.id}`;
+        card.innerHTML = `
+            <div class="meta-row">${badge(f)}</div>
+            <p class="stmt">${esc(f.statement)}</p>
+            ${f.evidence ? `<details class="evidence"><summary>evidence (${f.evidence.length})</summary><ul>${f.evidence.map(e => `<li>${esc(e)}</li>`).join('')}</ul></details>` : ''}
+            ${f.whyThisMatters ? `<p class="why"><strong>Why this matters:</strong> ${esc(f.whyThisMatters)}</p>` : ''}
+            ${f.confidence ? `<p class="confidence">${esc(f.confidence)}</p>` : ''}
+            ${f.relatedMechanism && f.relatedMechanism.length ? `<p class="data">see Pipeline: ${f.relatedMechanism.map(esc).join(', ')}</p>` : ''}
+        `;
+        host.appendChild(card);
+    }
+    const gapsData = await j('gaps-bugs-and-need-to-handle.json');
+    const gapsHost = document.getElementById('gaps-content');
+    gapsHost.innerHTML = '';
+    const sections = [
+        ['Generation pipeline', gapsData.generationPipeline],
+        ['Memory system', gapsData.memorySystem],
+        ['Documentation drift found during this audit', gapsData.documentationDriftFoundDuringThisAudit],
+        ['Open risks (CONSOLIDATED-PATH.md)', gapsData.openRisksFromConsolidatedPath],
+        ['Misc, not blocking', gapsData.miscFoundNotBlocking],
+    ];
+    for (const [title, items] of sections) {
+        if (!items || !items.length) continue;
+        const wrap = el('div', 'group');
+        wrap.appendChild(el('h3', null, esc(title)));
+        const stack = el('div', 'stack');
+        for (const item of items) {
+            const card = el('div', 'card');
+            card.innerHTML = `
+                <div class="meta-row">${item.severity ? badge(item) : (item.level ? `<span class="badge quiet">${esc(item.level)}</span>` : '')}</div>
+                <p class="stmt">${esc(item.statement)}</p>
+                ${citeLine(item.mechanism)}
+                ${item.crossReference ? `<p class="data">${esc(item.crossReference)}</p>` : ''}
+                ${item.suggestedNextStep ? `<p class="why"><strong>Next step:</strong> ${esc(item.suggestedNextStep)}</p>` : ''}
+            `;
+            stack.appendChild(card);
+        }
+        wrap.appendChild(stack);
+        gapsHost.appendChild(wrap);
+    }
+}
+
+/* ---------- Pipeline tab ---------- */
+async function renderPipeline() {
+    const data = await j('harness-agentic-loop.json');
+    const host = document.getElementById('pipeline-content');
+    host.innerHTML = '';
+    const entry = el('div', 'card');
+    entry.innerHTML = `<div class="meta-row"><span class="badge quiet">${esc(data.entryPoint.level)}</span></div><p class="stmt">${esc(data.entryPoint.statement)}</p>${citeLine(data.entryPoint.mechanism)}`;
+    host.appendChild(entry);
+    for (const m of data.mechanics) {
+        const card = el('div', 'card');
+        card.id = `mech-${m.id}`;
+        card.innerHTML = `<div class="meta-row"><span class="badge quiet">${esc(m.level)}</span><span class="data">${esc(m.id)}</span></div><p class="stmt">${esc(m.statement)}</p>${citeLine(m.mechanism)}`;
+        host.appendChild(card);
+    }
+    const arith = data.requestCountArithmetic;
+    const card = el('div', 'card');
+    card.innerHTML = `<div class="meta-row"><span class="badge soft">${esc(arith.level)}</span></div><p class="stmt">${esc(arith.statement)}</p>${citeLine(arith.mechanism)}${arith.crossReference ? `<p class="data">${esc(arith.crossReference)}</p>` : ''}`;
+    host.appendChild(card);
+}
+
+/* ---------- Memory tab ---------- */
+function declCard(d, idPrefix) {
+    if (!d) return '';
+    const extra = d.hazard ? `<p class="why"><strong>Hazard:</strong> ${esc(d.hazard)}</p>` : (d.realState ? `<p class="why">${esc(d.realState)}</p>` : (d.measuredImpact ? `<p class="why"><strong>Measured impact:</strong> ${esc(d.measuredImpact)}</p>` : ''));
+    const fix = d.possibleFix ? `<p class="confidence"><strong>Possible fix:</strong> ${esc(d.possibleFix)}</p>` : '';
+    const note = d.note && typeof d.note === 'string' ? `<p class="data">${esc(d.note)}</p>` : '';
+    return `<div class="card"><div class="meta-row">${d.level ? `<span class="badge ${d.level === 'gap' ? 'soft' : 'quiet'}">${esc(d.level)}</span>` : ''}</div><p class="stmt">${esc(d.statement)}</p>${citeLine(d.mechanism)}${extra}${fix}${note}</div>`;
+}
+async function renderMemory() {
+    const data = await j('memory-system-ladder.json');
+    const host = document.getElementById('memory-content');
+    host.innerHTML = '';
+    const groups = [
+        ['Client side', [data.clientSide]],
+        ['Server side', [data.serverSide]],
+        ['Episode lifecycle', [data.episodeLifecycle]],
+        ['Lesson ladder', [data.lessonLadder]],
+        ['Engine internals (multi-graph-memory)', [
+            data.engineInternals.readOnlyMcpCore, data.engineInternals.sdkAdapter,
+            data.engineInternals.stdioTransport, data.engineInternals.httpTransport,
+            data.engineInternals.scopeResolutionAndTheRealDefect, data.engineInternals.deterministicRetrievalReference,
+        ]],
+        ['Planned upgrade', [data.plannedUpgrade_localRagStack]],
+    ];
+    for (const [title, items] of groups) {
+        const wrap = el('div', 'group');
+        wrap.appendChild(el('h3', null, esc(title)));
+        const stack = el('div', 'stack');
+        for (const item of items) { if (item) stack.insertAdjacentHTML('beforeend', declCard(item)); }
+        wrap.appendChild(stack);
+        host.appendChild(wrap);
+    }
+}
+
+/* ---------- System map tab ---------- */
+async function renderModels() {
+    const data = await j('models-adapters.json');
+    const host = document.getElementById('models-content');
+    host.innerHTML = '';
+    for (const provider of data.providers) {
+        const wrap = el('div', 'table-scroll');
+        const rows = provider.models.map(m => `<tr><td class="mono">${esc(m.id)}</td><td>${esc(m.label)}</td><td>${esc(m.hint)}</td><td>${m.priceIn === 0 ? 'free' : `$${m.priceIn}/$${m.priceOut} per 1M`}</td><td>${m.dailyLimit ?? '—'}</td></tr>`).join('');
+        wrap.innerHTML = `<table class="data-table"><caption style="text-align:left;padding:.5rem .75rem;color:var(--color-metal-200)"><strong>${esc(provider.label)}</strong> ${provider.enabledOnThisMachine ? '' : '<span class="data">(no key configured on this machine)</span>'}</caption><thead><tr><th>id</th><th>label</th><th>hint</th><th>price</th><th>daily limit</th></tr></thead><tbody>${rows}</tbody></table>`;
+        host.appendChild(wrap);
+    }
+    const quirks = el('div', 'group');
+    quirks.appendChild(el('h3', null, 'Adapter quirks'));
+    const stack = el('div', 'stack');
+    for (const q of data.adapterQuirks) stack.insertAdjacentHTML('beforeend', declCard(q));
+    quirks.appendChild(stack);
+    host.appendChild(quirks);
+    const rag = el('div', 'group');
+    rag.appendChild(el('h3', null, 'Planned: on-device RAG stack'));
+    const ragCard = el('div', 'card');
+    ragCard.innerHTML = `<div class="meta-row"><span class="badge soft">${esc(data.localRagStack.level)}</span></div><p class="stmt">${esc(data.localRagStack.purpose)}</p><p class="data">${data.localRagStack.components.map(c => `${esc(c.role)}: ${esc(c.model ?? c.note)} (${esc(c.endpoint)})`).join(' · ')}</p>`;
+    rag.appendChild(ragCard);
+    host.appendChild(rag);
+}
+async function renderRoutes() {
+    const data = await j('rest-curl-api-endpoints-schema.json');
+    const host = document.getElementById('routes-content');
+    host.innerHTML = '';
+    for (const e of data.endpoints) {
+        const card = el('div', 'card');
+        card.innerHTML = `
+            <div class="meta-row"><span class="data mono">${esc(e.method)} ${esc(e.path)}</span></div>
+            <p class="stmt">${esc(e.purpose)}</p>
+            <p class="why"><strong>Request:</strong> ${esc(e.request)}</p>
+            <p class="why"><strong>Response:</strong> ${esc(e.response)}</p>
+            <details class="evidence"><summary>curl example</summary><pre class="raw" data-open="true" style="display:block">${esc(e.curl)}</pre></details>
+            ${e.notes ? `<p class="confidence">${esc(e.notes)}</p>` : ''}
+            ${citeLine(e.mechanism)}
+        `;
+        host.appendChild(card);
+    }
+}
+async function renderModules() {
+    const data = await j('components-and-modules.json');
+    const host = document.getElementById('modules-content');
+    host.innerHTML = '';
+    for (const dir of data.directories) {
+        const wrap = el('div', 'file-tree-dir');
+        wrap.innerHTML = `<div class="dirpath">${esc(dir.path)} <span class="data">(${dir.fileCount} files)</span></div>
+            ${dir.declaration.statement ? `<p class="why">${esc(dir.declaration.statement)}</p>` : `<p class="confidence">not yet documented</p>`}`;
+        const files = el('div');
+        for (const f of dir.files) {
+            files.insertAdjacentHTML('beforeend', `<div class="file-row"><span class="fname">${esc(f.file)}</span><span class="fpurpose ${f.purpose ? '' : 'gap'}">${esc(f.purpose ?? f.note ?? 'undocumented')}</span></div>`);
+        }
+        wrap.appendChild(files);
+        host.appendChild(wrap);
+    }
+}
+
+/* ---------- Diagrams tab ---------- */
+async function renderDiagrams() {
+    const host = document.getElementById('diagrams-content');
+    host.innerHTML = '';
+    mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'strict',
+        themeVariables: { background: '#161617', primaryColor: '#1e1e20', primaryTextColor: '#f4f4f5',
+            primaryBorderColor: '#4a4a51', lineColor: '#6e6e76', secondaryColor: '#2a2a2e', tertiaryColor: '#161617' } });
+    const diagrams = [
+        ['System topology & data flow', 'architecture-and-dataflow.mmd'],
+        ['Generation pipeline, in detail', 'diagrams/generation-pipeline.mmd'],
+        ['Memory lifecycle & the MCP scope mismatch', 'diagrams/memory-lifecycle.mmd'],
+    ];
+    let i = 0;
+    for (const [title, file] of diagrams) {
+        const src = await text(file);
+        const block = el('div', 'diagram-block');
+        const id = `mmd-${i++}`;
+        block.innerHTML = `<h3>${esc(title)}</h3><p class="zoom-hint">scrolls horizontally — rendered at full size</p><pre class="mermaid" id="${id}">${esc(src)}</pre>`;
+        host.appendChild(block);
+    }
+    await mermaid.run();
+}
+
+/* ---------- Meta tab ---------- */
+async function renderMeta() {
+    const wf = await j('workflows-skills-mcp-agents.json');
+    const wfHost = document.getElementById('workflows-content');
+    wfHost.innerHTML = '';
+    wfHost.insertAdjacentHTML('beforeend', declCard(wf.personalAgentTeamRouting));
+    const rolesCard = el('div', 'card');
+    rolesCard.innerHTML = `<p class="label">Routing</p>` + wf.personalAgentTeamRouting.roles.map(r => `<p class="why"><strong>${esc(r.role)}:</strong> ${esc(r.usedWhen)}</p>`).join('');
+    wfHost.appendChild(rolesCard);
+    for (const m of wf.mcpServersBuiltForThisProject) {
+        wfHost.insertAdjacentHTML('beforeend', `<div class="card"><div class="meta-row"><span class="badge soft">${esc(m.level)}</span><span class="data">${esc(m.name)}</span></div><p class="stmt">${esc(m.statement)}</p>${citeLine(m.mechanism)}${m.knownDefect ? `<p class="why"><strong>Known defect:</strong> ${esc(m.knownDefect)}</p>` : ''}</div>`);
+    }
+    const misc = await j('misc-other.json');
+    const miscHost = document.getElementById('misc-content');
+    miscHost.innerHTML = '';
+    for (const key of Object.keys(misc)) {
+        if (key === 'note') continue;
+        miscHost.insertAdjacentHTML('beforeend', declCard(misc[key]));
+    }
+}
+
+/* ---------- raw JSON toggles ---------- */
+document.querySelectorAll('.raw-toggle').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+        const pre = btn.nextElementSibling;
+        const isOpen = pre.getAttribute('data-open') === 'true';
+        if (isOpen) { pre.setAttribute('data-open', 'false'); return; }
+        if (!pre.textContent) {
+            const files = btn.dataset.raw.split(',');
+            const bodies = await Promise.all(files.map(async (f) => `// ${f}\n` + JSON.stringify(await j(f), null, 2)));
+            pre.textContent = bodies.join('\n\n');
+        }
+        pre.setAttribute('data-open', 'true');
+    });
+});
+
+/* ---------- tabs ---------- */
+const RENDERERS = {
+    diagnosis: renderDiagnosis, pipeline: renderPipeline, memory: renderMemory,
+    systemmap: async () => { await renderModels(); await renderRoutes(); await renderModules(); },
+    diagrams: renderDiagrams, meta: renderMeta,
+};
+const rendered = new Set();
+async function activate(name) {
+    document.querySelectorAll('nav.tabs button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === name)));
+    document.querySelectorAll('section.panel').forEach(s => s.dataset.active = String(s.id === `panel-${name}`));
+    if (!rendered.has(name)) { rendered.add(name); await RENDERERS[name](); }
+    try { sessionStorage.setItem('arch-tab', name); } catch {}
+}
+document.getElementById('tab-bar').addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-tab]');
+    if (btn) activate(btn.dataset.tab);
+});
+
+/* ---------- generated-at stamp ---------- */
+(async () => {
+    try {
+        const m = await j('models-adapters.json');
+        document.getElementById('generated-sub').textContent = `models-adapters.json generated by ${m.generatedBy}`;
+    } catch { document.getElementById('generated-sub').textContent = 'multi-app'; }
+})();
+
+let initial = 'diagnosis';
+try { initial = sessionStorage.getItem('arch-tab') || 'diagnosis'; } catch {}
+activate(initial);
+</script>
+</body>
+</html>
