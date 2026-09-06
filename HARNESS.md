@@ -31,7 +31,7 @@ gap.** A known gap is still a declaration — a statement about the limits of wh
 | Tailwind v4 is imported correctly, entry exists, tsconfig is exact | `scaffoldFor` writes `vite.config.ts`/`tsconfig.json`/`index.html`/`src/index.css` | `lint` |
 | `package.json` lists exactly the packages the code imports | `packageJsonFor` derives it from `importedPackages`, never from the model's own list | `lint` |
 | An import resolves only to a package the preview can actually load | `providers/allowlist.js`'s `PREVIEW_PACKAGES`, checked by `attributeBundleErrors` (gate) and enforced by `packageJsonFor` refusing to declare an unlisted one (lint) | `lint` + `gate` |
-| Every allowlisted package is genuinely installed | `check:generate`'s "every allowlisted package is actually installed" — a check on the declaration itself | `gate` (CI-time) |
+| Every allowlisted package is genuinely installed | `test/generate.test.mjs`'s (`npm test`) "every allowlisted package is actually installed" — a check on the declaration itself | `gate` (CI-time) |
 | **A shared data shape (`PhotoItem`, `ServicePackage`, …) means the same thing everywhere** | `scaffoldFor`'s `typesFileFor` writes `src/types.ts` from the plan's `entities[]`; `fileInstruction` includes its literal content, not just its path | `lint` (A2) |
 | A dropped page/component is restored before generation spends a request on it | `coverPlan`/`planCoverage` | `lint` |
 | A page/component the plan approved actually exists in the output | `validateBuild`'s `plan-page-missing`/`plan-component-missing` | `gate` |
@@ -47,9 +47,13 @@ A model judging whether its own code satisfies a criterion is not an independent
 observer — the same defendant grading its own homework, which is exactly what the memory
 ladder's independence property already forbids for every other signal. Building a real
 per-criterion gate (a generated Playwright assertion per criterion, run against the
-preview) is real, buildable work — deferred to A3, once the IDE can drive the preview and
-there is a natural place for generated tests to live. Until then: the self-check closes
-the *silence* (a person now sees an actual answer) without pretending it closes the
+preview) is real, buildable work. **Still deferred, not scheduled to any phase** — A3
+shipped (`Project.origin`, live diagnostics/preview context in chat, a multi-call tool
+queue, `patchFile`, `/api/builder/edit`) without it; the IDE can now drive the preview,
+which was the precondition this section named, but building the per-criterion gate itself
+was never in A3's approved scope and nothing since has picked it up. Until it is: the
+self-check closes the *silence* (a person now sees an actual answer) without pretending
+it closes the
 *verification gap*. Always `severity: 'warning'`, always suffixed "(self-reported...not
 independently verified)", never present in `memory/proposals.js`'s `PROPOSAL_TABLE` — see
 its `NOT_A_LESSON` entry for `acceptance-criterion-unmet`.
