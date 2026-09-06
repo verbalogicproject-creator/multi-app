@@ -13,16 +13,16 @@
     "dev:server": "node --watch server.js",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "smoke": "curl -sf http://localhost:8050/healthz",
     "smoke:providers": "node scripts/smoke-providers.mjs",
-    "check:memory-loop": "node scripts/check-memory-loop.mjs",
     "smoke:memory": "node scripts/smoke-memory.mjs",
     "check:css": "node scripts/check-css.mjs",
     "audit:ui": "npm run build && node scripts/audit-ui.mjs",
     "shoot:ui": "npm run build && node scripts/audit-ui.mjs --shots /tmp/ui-shots",
     "check:editor": "npm run build && node scripts/check-editor.mjs",
     "check:preview": "npm run build && node scripts/check-preview.mjs",
-    "check:generate": "node scripts/check-generate.mjs",
     "check:auth": "node scripts/check-auth.mjs",
     "check:pipeline": "npm run build && node scripts/check-pipeline.mjs"
   },
@@ -66,6 +66,7 @@
     "playwright-core": "^1.62.1",
     "tailwindcss": "^4.3.3",
     "typescript": "5.9.3",
-    "vite": "^5.2.13"
+    "vite": "^5.2.13",
+    "vitest": "^3.2.7"
   }
 }

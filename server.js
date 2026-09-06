@@ -887,7 +887,7 @@ app.post('/api/builder/generate', async (req, res) => {
          * the 65,536 budget the single-shot shape routinely hit at ~54k.
          *
          * Every dependency is passed in so the whole path is drivable by a stub in
-         * `check:generate` — the branches that matter most here are the ones that occur
+         * `test/generate.test.mjs` (`npm test`) — the branches that matter most here are the ones that occur
          * least, and they were unverifiable while this lived inline.
          *
          * If the manifest step fails, the whole-app path below still runs. It salvages

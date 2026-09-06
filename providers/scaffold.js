@@ -52,7 +52,7 @@ const BASE_DEV_DEPENDENCIES = {
 /**
  * Versions for the packages the preview can resolve.
  *
- * Keys must match `providers/allowlist.js` exactly — `check:generate` asserts it, because
+ * Keys must match `providers/allowlist.js` exactly — `test/generate.test.mjs` (`npm test`) asserts it, because
  * a name in one and not the other is how a generated app comes to declare something that
  * cannot load.
  */

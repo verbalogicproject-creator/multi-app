@@ -211,13 +211,15 @@ npm run typecheck        # strict tsc, zero errors expected
 npm run build            # production bundle
 npm run smoke            # backend health (server must be running)
 
-# The learning loop end to end on a throwaway database: a failure proposes a
-# lesson, the next attempt trials it, passing promotes it to qualified. No model,
-# no server, no key — every rung is enforced by the engine, so a break here is a
-# real break rather than a flaky test.
-npm run check:memory-loop
+# Every pure check under Vitest: the generation pipeline, the memory learning
+# loop end to end on a throwaway database (a failure proposes a lesson, the next
+# attempt trials it, passing promotes it to qualified), auth's OAuth state-nonce
+# handling, and colocated utils tests. No model, no server, no key — every rung
+# is enforced by the engine itself, so a break here is a real break rather than
+# a flaky test.
+npm test
 
-# The same loop through a real server process: builds the engine's dist, spawns
+# The memory loop again, through a real server process: builds the engine's dist, spawns
 # the backend on a free port over a scratch database, drives the routes, proves
 # recall reached the outgoing prompt and that the art-direction bar excludes a
 # lesson it would otherwise have recalled, restarts and re-reads, then cross-checks

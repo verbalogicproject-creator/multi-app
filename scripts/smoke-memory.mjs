@@ -1,7 +1,7 @@
 /**
  * The memory loop end to end, over HTTP, against a real server process.
  *
- * `check:memory-loop` proves the ladder against the bridge in one process. This
+ * `test/memory-loop.test.mjs` (`npm test`) proves the ladder against the bridge in one process. This
  * proves the parts that only exist when there IS a process: the engine's dist
  * build being importable by plain JavaScript, the routes, recall actually reaching
  * an outgoing prompt, the direction bar, survival across a restart, and the CLI
