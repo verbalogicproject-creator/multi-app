@@ -20,7 +20,7 @@
  * generate prompt names the list and asks it to stay inside.
  *
  * **Adding to this list is two steps, and both are required**: add the name here, and
- * `npm install` it into multi-app. `check:generate` asserts the two agree, because a name
+ * `npm install` it into multi-app. `test/generate.test.mjs` (`npm test`) asserts the two agree, because a name
  * here without an install recreates exactly the fault this file exists to prevent.
  */
 

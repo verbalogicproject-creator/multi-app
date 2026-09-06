@@ -43,7 +43,7 @@ export const MANIFEST_FLOOR = ['index.html', 'package.json', 'src/main.tsx', 'sr
  * Extracted from `server.js` as its own pure function for exactly one reason: the
  * prompt is server-internal, sent to Gemini and never back to a client, so nothing
  * short of importing this function directly can check that the ordering actually
- * holds. `check:generate` asserts the stack rules appear before the plan JSON by
+ * holds. `test/generate.test.mjs` (`npm test`) asserts the stack rules appear before the plan JSON by
  * string index — a revert of the reorder fails by name instead of silently costing
  * whatever the reorder was for.
  */
