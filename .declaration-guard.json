@@ -1,0 +1,10 @@
+{
+  "declarationDocs": [
+    "architecture/harness-agentic-loop.json",
+    "architecture/hetrodox-unconventional-approaches.json",
+    "architecture/gaps-bugs-and-need-to-handle.json",
+    "architecture/memory-system-ladder.json",
+    "architecture/workflows-skills-mcp-agents.json",
+    "architecture/misc-other.json"
+  ]
+}
