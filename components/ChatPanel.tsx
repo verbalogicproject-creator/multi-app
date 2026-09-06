@@ -1,9 +1,16 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, Suspense, lazy } from 'react';
 import MessageItem from './MessageItem';
 import ModeSelector from './ModeSelector';
-import ImageEditorPane from './ImageEditorPane';
-import VideoGeneratorPane from './VideoGeneratorPane';
-import LiveChatPane from './LiveChatPane';
+/* Each of these three panes exists for a feature that ships disabled
+   (`utils/features.ts`'s `FEATURES`) — the mode picker never offers them, so most
+   sessions never render one. Lazy, same as `CodeEditor` in `IdeView.tsx`, so their
+   code is not paid for on every chat load, only on the visit that actually reaches
+   one. `useLiveChat`'s own `@google/genai` dependency is the load-bearing half of
+   this fix — see that hook's own dynamic import — this half is the smaller,
+   consistency win on top of it. */
+const ImageEditorPane = lazy(() => import('./ImageEditorPane'));
+const VideoGeneratorPane = lazy(() => import('./VideoGeneratorPane'));
+const LiveChatPane = lazy(() => import('./LiveChatPane'));
 import LoadingIndicator from './LoadingIndicator';
 import ModelPicker from './ModelPicker';
 import QuotaBadge from './QuotaBadge';
@@ -222,13 +229,17 @@ const ChatPanel: React.FC = () => {
                         </button>
                     </form>
                 )}
-                {mode === 'image-edit' && (
-                    <ImageEditorPane prompt={imagePrompt} setPrompt={setImagePrompt} isLoading={isLoading} uploadedFile={uploadedFile} onFileSelect={setUploadedFile} externalPreviewUrl={externalPreviewUrl} onClearExternalPreview={() => setExternalPreviewUrl(null)} onSubmit={handleSubmit} />
+                {(mode === 'image-edit' || mode === 'video-gen' || mode === 'live') && (
+                    <Suspense fallback={<div className="h-11" aria-hidden />}>
+                        {mode === 'image-edit' && (
+                            <ImageEditorPane prompt={imagePrompt} setPrompt={setImagePrompt} isLoading={isLoading} uploadedFile={uploadedFile} onFileSelect={setUploadedFile} externalPreviewUrl={externalPreviewUrl} onClearExternalPreview={() => setExternalPreviewUrl(null)} onSubmit={handleSubmit} />
+                        )}
+                        {mode === 'video-gen' && (
+                            <VideoGeneratorPane prompt={videoPrompt} setPrompt={setVideoPrompt} isLoading={isLoading} uploadedFile={uploadedFile} onFileSelect={setUploadedFile} duration={duration} setDuration={setDuration} aspectRatio={aspectRatio} setAspectRatio={setAspectRatio} directorControls={directorControls} setDirectorControls={setDirectorControls} onSubmit={handleSubmit} />
+                        )}
+                        {mode === 'live' && <LiveChatPane isListening={isListening} startListening={startListening} stopListening={stopListening} />}
+                    </Suspense>
                 )}
-                {mode === 'video-gen' && (
-                    <VideoGeneratorPane prompt={videoPrompt} setPrompt={setVideoPrompt} isLoading={isLoading} uploadedFile={uploadedFile} onFileSelect={setUploadedFile} duration={duration} setDuration={setDuration} aspectRatio={aspectRatio} setAspectRatio={setAspectRatio} directorControls={directorControls} setDirectorControls={setDirectorControls} onSubmit={handleSubmit} />
-                )}
-                 {mode === 'live' && <LiveChatPane isListening={isListening} startListening={startListening} stopListening={stopListening} />}
               </div>
             </div>
         </main>

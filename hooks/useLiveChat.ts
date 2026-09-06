@@ -1,6 +1,14 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { GoogleGenAI, Session as LiveSession, LiveServerMessage, Modality } from '@google/genai';
+import type { Session as LiveSession, LiveServerMessage } from '@google/genai';
 import { createBlob, decode, decodeAudioData } from '../utils/audio';
+
+/* `@google/genai` is an 11MB package and this hook is the only thing in the client
+   bundle that needs it — for a feature (`FEATURES.liveAudio`) that ships disabled.
+   A static import here made it dead weight in every user's initial download anyway:
+   measured at 385KB minified / 69KB gzipped of the largest chunk, gone once this
+   became a dynamic import instead. `import type` above costs nothing at runtime;
+   the value import happens here, the one place it is actually used. */
+const loadGenAI = () => import('@google/genai');
 
 const INPUT_SAMPLE_RATE = 16000;
 const OUTPUT_SAMPLE_RATE = 24000;
@@ -80,6 +88,7 @@ export const useLiveChat = () => {
             if (!process.env.API_KEY) {
                 throw new Error("API_KEY environment variable not configured.");
             }
+            const { GoogleGenAI, Modality } = await loadGenAI();
             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
             microphoneStream.current = await navigator.mediaDevices.getUserMedia({ audio: true });
