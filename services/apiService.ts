@@ -195,6 +195,9 @@ export const generateWebAppCode = async (plan: any, theme: any, model?: string, 
     let missing: string[] = [];
     let repaired: string[] = [];
     let repairRounds = 0;
+    let requestedModel: string | null = null;
+    let servedModel: string | null = null;
+    let fellBack = false;
 
     const handleLine = (line: string) => {
         if (!line.trim()) return;
@@ -211,6 +214,11 @@ export const generateWebAppCode = async (plan: any, theme: any, model?: string, 
             missing = Array.isArray(event.missing) ? event.missing : [];
             repaired = Array.isArray(event.repaired) ? event.repaired : [];
             repairRounds = event.repairRounds ?? 0;
+            /* `server.js`'s `servedPayload` — always present on this line, but
+               guarded anyway since older recorded fixtures/mocks may not carry it. */
+            requestedModel = event.requestedModel ?? null;
+            servedModel = event.servedModel ?? null;
+            fellBack = event.fellBack === true;
         } else {
             /* The manifest arrives on its own, before any file, so the UI can show
                the whole list up front instead of a log that grows from nothing. */
@@ -230,7 +238,7 @@ export const generateWebAppCode = async (plan: any, theme: any, model?: string, 
     if (tail.trim()) handleLine(tail);
 
     if (!files) throw new Error('Generation stream ended without a result. Please try again.');
-    return { files, truncated, salvagedCount, finishReason, manifest, missing, repaired, repairRounds };
+    return { files, truncated, salvagedCount, finishReason, manifest, missing, repaired, repairRounds, requestedModel, servedModel, fellBack };
 };
 
 /**

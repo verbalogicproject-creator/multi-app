@@ -80,6 +80,17 @@ export interface WebAppBuilderState {
         message: string;
         isLoading: boolean;
         log: string[];
+        /**
+         * Set once a generation attempt's final NDJSON line arrives, straight
+         * from `server.js`'s `servedPayload`. `fellBack` is what a silent
+         * quota/overload downgrade looks like from here — the request asked for
+         * one model and a different, weaker one actually wrote the code. Reset
+         * at the start of every attempt so a stale notice from a previous run
+         * never survives into one that did not fall back.
+         */
+        requestedModel?: string | null;
+        servedModel?: string | null;
+        fellBack?: boolean;
     };
 }
 
@@ -1023,7 +1034,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setBuilderState(prev => ({
             ...prev, currentStep: 4, candidateFiles: null, validation: null,
             evidence: requested,
-            status: { isLoading: true, message: 'Contacting Gemini…', log: [] },
+            status: { isLoading: true, message: 'Contacting Gemini…', log: [], fellBack: false, requestedModel: null, servedModel: null },
         }));
 
         /*
@@ -1097,6 +1108,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
              * a real build, three lessons were proposed and all three were wrong.
              */
             const { files, truncated, missing } = generated;
+
+            // Surfaced as soon as it is known, before validation even runs — a
+            // silent downgrade to a weaker model is worth showing regardless of
+            // whether the result it produced later passes or fails.
+            if (generated.fellBack) {
+                setBuilderState(prev => ({
+                    ...prev,
+                    status: { ...prev.status, fellBack: true, requestedModel: generated.requestedModel, servedModel: generated.servedModel },
+                }));
+            }
+
             const lexical = validateBuild(files, builderState.plan);
 
             /*

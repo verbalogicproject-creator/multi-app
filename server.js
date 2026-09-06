@@ -43,6 +43,7 @@ import { toolsForRequest } from './providers/tools.js';
 import { PLAN_SCHEMA, DIRECTIONS_SCHEMA, GENERATE_SCHEMA, MANIFEST_SCHEMA, FILE_SCHEMA, ACCEPTANCE_CHECK_SCHEMA, EDIT_SCHEMA, filesArrayToRecord } from './providers/schemas.js';
 import { salvageFiles, isTruncation } from './providers/salvage.js';
 import { generateFromManifest, repairRound, acceptanceIssuesFrom, generatePromptFor } from './providers/generate.js';
+import { createBestTracker } from './providers/repairGate.js';
 import { scaffoldFor, packageJsonFor } from './providers/scaffold.js';
 import { buildAestheticDirective } from './providers/aesthetic.js';
 import { buildSystemPrompt, builderPreamble } from './providers/prompts.js';
@@ -798,6 +799,11 @@ app.post('/api/builder/generate', async (req, res) => {
             let rounds = 0;
             const kept = [];
             let anyReverted = false;
+            /* The outer net: the per-file revert above only judges one file at a
+               time and never rolls the whole loop back to its best-ever aggregate
+               state. See providers/repairGate.js -- the pre-repair state is itself
+               always a valid candidate, hence seeding it with `preRepairErrors`. */
+            const bestTracker = createBestTracker({ errors: preRepairErrors, files: record, keptFiles: [] });
 
             while (rounds < MAX_ROUNDS && !current.ok && current.diagnostics.length > 0) {
                 const snapshot = { ...record };
@@ -853,16 +859,21 @@ app.post('/api/builder/generate', async (req, res) => {
                 res.write(JSON.stringify({
                     repairRound: rounds, errors: settled.diagnostics.length, from: current.diagnostics.length,
                 }) + '\n');
+                bestTracker.consider(settled.diagnostics.length, record, kept);
 
                 /* The bound: no strict improvement, no further round. */
                 if (settled.diagnostics.length >= current.diagnostics.length) { current = settled; break; }
                 current = settled;
             }
 
+            const finalErrors = current.completed ? current.diagnostics.length : preRepairErrors;
+            const outcome = bestTracker.resolve(record, finalErrors);
+            if (outcome.reverted) anyReverted = true;
+
             return {
                 preRepairErrors,
-                postRepairErrors: current.completed ? current.diagnostics.length : preRepairErrors,
-                repairedFiles: [...new Set(kept)],
+                postRepairErrors: outcome.postRepairErrors,
+                repairedFiles: [...new Set(outcome.repairedFiles ?? kept)],
                 repairRounds: rounds,
                 repairReverted: anyReverted,
             };
@@ -955,6 +966,11 @@ app.post('/api/builder/generate', async (req, res) => {
                 files: run.record,
                 manifest: run.manifest.map(f => f.path),
                 missing: run.missing,
+                /* Recorded in the memory event below all along — this is the same
+                   attribution finally reaching the client that asked, so a silent
+                   downgrade (quota/overload fallback) can be shown rather than read
+                   as unexplained inconsistent quality. */
+                ...servedPayload(requestedModel, servingModel),
                 ...(repairedFiles.length > 0
                     ? { repaired: repairedFiles, repairRounds, preRepairErrors, postRepairErrors }
                     : {}),
@@ -1054,6 +1070,7 @@ app.post('/api/builder/generate', async (req, res) => {
 
             res.write(JSON.stringify({
                 files,
+                ...servedPayload(requestedModel, servingModel),
                 ...(fix.repairedFiles.length > 0
                     ? { repaired: fix.repairedFiles, repairRounds: fix.repairRounds, preRepairErrors: fix.preRepairErrors, postRepairErrors: fix.postRepairErrors }
                     : {}),
@@ -1103,6 +1120,7 @@ app.post('/api/builder/generate', async (req, res) => {
                     truncated: true,
                     salvagedCount: recovered.length,
                     finishReason: accumulated.finishReason ?? null,
+                    ...servedPayload(requestedModel, servingModel),
                 }) + '\n');
 
                 memory.appendEventSafe({
@@ -1327,11 +1345,26 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
 // after itself. Start from empty rather than inheriting it.
 await cleanTypecheckScratch();
 
-app.listen(port, host, () => {
+app.listen(port, host, async () => {
     console.log(`Server listening at http://${host}:${port} (auth ${enforceAuth ? 'enforced' : 'not enforced'})`);
     // Which databases this process will write to, said out loud at boot.
     // A second server on an occupied port dies with EADDRINUSE, so requests keep
     // being answered -- by the one already there, writing wherever IT was told to.
     // That cost a whole verification run before the two lines below existed.
-    console.log(`Memory databases: ${memory.health().databaseDir}`);
+    //
+    // `probe()` forces the lazy engine load right now, at boot, instead of on
+    // whatever request happens to touch memory first. Without this, `health()`
+    // reports `available: null` ("not yet asked") for the server's entire
+    // lifetime unless something calls /api/memory/state -- which nothing does by
+    // default -- so a broken or unbuilt engine (multi-graph-memory's dist/
+    // missing, per this file's own header comment) would silently no-op every
+    // write for the life of the process, with the only symptom being an empty
+    // database discovered much later. An architecture audit found exactly that:
+    // builder.db confirmed empty despite real generation activity, with no boot
+    // log that would have said why. This line exists so that failure is loud on
+    // the first line of output, not found by auditing SQLite files days later.
+    const health = await memory.probe();
+    console.log(
+        `Memory databases: ${health.databaseDir} (engine ${health.available ? 'available' : `UNAVAILABLE — ${health.reason}`})`,
+    );
 });
