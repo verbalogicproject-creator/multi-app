@@ -9,10 +9,29 @@ const solidButton = `${button} bg-metal-700 text-metal-100 shadow-[inset_0_1px_0
 const quietButton = `${button} bg-transparent text-metal-300 hairline md:hover:text-metal-100`;
 
 const Step_Generate: React.FC = () => {
-    const { builderState, promoteCandidate, discardCandidate, generateWebAppCode, globalError, setBuilderState } = useAppContext();
+    const { builderState, promoteCandidate, discardCandidate, generateWebAppCode, globalError, setBuilderState, catalog } = useAppContext();
     const { status, candidateFiles, validation } = builderState;
 
     const fileList = status.log;
+
+    // A human-readable name where the catalog has one, the raw id otherwise —
+    // matches how QuotaBadge labels a model rather than inventing a second style.
+    const modelLabel = (id: string | null | undefined): string =>
+        id ? (catalog.find(m => m.id === id)?.label ?? id) : 'a different model';
+
+    /* A silent quota/overload downgrade is exactly the kind of thing that needs
+       the user's attention — the model the request asked for was not the one
+       that actually wrote the code. Persistent rather than auto-dismissing: it
+       stays visible through validation failure, success and export alike,
+       since "which model actually wrote this" stays relevant the whole time. */
+    const fallbackNotice = status.fellBack ? (
+        <div className="mt-4 w-full max-w-md mx-auto text-left p-3 bg-raised rounded-card hairline text-xs flex items-start gap-2">
+            <span aria-hidden className="mt-1 inline-block w-1.5 h-1.5 rounded-full bg-accent shrink-0" />
+            <p className="text-metal-200">
+                Continued on <span className="text-accent-soft">{modelLabel(status.servedModel)}</span> — {modelLabel(status.requestedModel)} was temporarily unavailable (quota or overload).
+            </p>
+        </div>
+    ) : null;
 
     // A candidate that failed validation waits here for a decision — the previously
     // saved build is untouched until the user promotes this one.
@@ -37,6 +56,7 @@ const Step_Generate: React.FC = () => {
                     {validation.checked} files were generated and checked without asking the model whether it succeeded.
                     Nothing has overwritten your saved builds.
                 </p>
+                {fallbackNotice}
 
                 <div className="mt-6 max-h-72 overflow-y-auto space-y-2">
                     {errors.map((issue, index) => (
@@ -90,6 +110,7 @@ const Step_Generate: React.FC = () => {
                 <p className="mt-3 text-sm text-metal-300">
                     {globalError || status.message || 'The model did not return a usable result.'}
                 </p>
+                {fallbackNotice}
 
                 {fileList.length > 0 && (
                     <div className="mt-6 w-full max-w-md mx-auto text-left bg-raised rounded-card hairline
@@ -129,6 +150,7 @@ const Step_Generate: React.FC = () => {
             <div className="mt-8 flex justify-center">
                 <LoadingIndicator />
             </div>
+            {fallbackNotice}
 
             {/* A build running quietly shows no orange at all, and that is the
                 feature. Progress is metal. */}

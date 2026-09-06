@@ -116,6 +116,21 @@ const usableBuildId = (buildId: string | null): string | null => {
     return null;
 };
 
+/**
+ * `keepalive: true` is not a style preference here — it is the actual fix for a
+ * measured defect. `closeEpisode` and `record` below are fire-and-forget by
+ * design (the caller does not await them), which means the wizard can move on —
+ * reset state, navigate, unmount — before this fetch would otherwise finish.
+ * Without `keepalive`, a browser is free to abort an in-flight fetch the moment
+ * its originating context goes away, and does. A real architecture audit found
+ * the consequence: 23 real generation calls logged by the server's own quota
+ * counter on one day, against only 2 episodes ever recorded in memory for that
+ * day. `keepalive` tells the browser to hand this request to the network layer
+ * and let it finish independently of the page/component that started it — the
+ * same mechanism `navigator.sendBeacon` exists for, kept as `fetch` so every
+ * call site here stays one function. The ~64KB keepalive body ceiling most
+ * browsers enforce is not a real constraint for these small JSON payloads.
+ */
 const post = async <T>(path: string, body: unknown): Promise<T | null> => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -125,6 +140,7 @@ const post = async <T>(path: string, body: unknown): Promise<T | null> => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body),
             signal: controller.signal,
+            keepalive: true,
         });
         return response.ok ? ((await response.json()) as T) : null;
     } catch {

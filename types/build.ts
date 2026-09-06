@@ -34,4 +34,15 @@ export interface GenerateResult {
     repairRounds: number;
     /** The provider's own word for why it stopped — `MAX_TOKENS`, `length`, … */
     finishReason: string | null;
+    /**
+     * Attribution for whichever model actually served this attempt, carried
+     * straight through from `server.js`'s `servedPayload` — the same fields it
+     * has always recorded to memory, now reaching the client that asked. `null`
+     * when the picker was `'auto'` or nothing served (the request never got far
+     * enough to know).
+     */
+    requestedModel: string | null;
+    servedModel: string | null;
+    /** True only when `servedModel` differs from `requestedModel` — a quota/overload fallback. */
+    fellBack: boolean;
 }
