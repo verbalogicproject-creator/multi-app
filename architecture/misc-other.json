@@ -1,51 +1,98 @@
 {
   "$schema": "declaration-v1",
   "note": "Hand-authored catch-all for real mechanisms that don't fit components/models/endpoints/memory/gaps categories.",
-
   "dailyQuotaGovernor": {
     "statement": "Requests per model per day are counted server-side, persisted to disk, and reset at UTC-date rollover; the UI can warn before a run fails.",
-    "mechanism": { "file": "server.js", "line": 172, "note": "recordModelCall(), QUOTA_FILE = logs/quota.json" },
-    "level": "gate",
-    "defaults": { "gemini-3.7-flash": 20, "gemini-3.5-flash": 250, "gemini-3.5-flash-lite": 1000, "gemini-3.1-pro-preview": 25 },
+    "mechanism": {
+      "file": "server.js",
+      "line": 172,
+      "note": "recordModelCall(), QUOTA_FILE = logs/quota.json",
+      "verifiedContentHash": "sha256:e3b0c44298fc1c14",
+      "staleness": "verified"
+    },
+    "level": "review",
+    "correction": "Relabeled from 'gate' 2026-09-06: cited to real code, no named automated test exercises the counting/persistence logic itself. See de-clutter-protocol-finder-of-truth.md / declarations-clarification-correction.md.",
+    "defaults": {
+      "gemini-3.7-flash": 20,
+      "gemini-3.5-flash": 250,
+      "gemini-3.5-flash-lite": 1000,
+      "gemini-3.1-pro-preview": 25
+    },
     "overrideEnvVar": "QUOTA_LIMITS (JSON, merged over defaults)",
     "crossReference": "gemini-3.7-flash is also the default MODELS.builder (server.js:163) — its 20/day default limit is the same number HARNESS.md's repair-pass arithmetic (up to 30 requests) is measured against. See harness-agentic-loop.json / hetrodox-unconventional-approaches.json.",
     "declaredButNotEnforced": "Approximate by design (comment at server.js:170): the governor warns, it does not block. A build that starts under quota can still exceed it mid-generation; nothing here stops that from happening, it only informs the UI."
   },
-
   "featureFlags": {
     "statement": "Disabled features are hidden from the UI entirely and their code paths are unreachable until re-enabled.",
-    "mechanism": { "file": "utils/features.ts", "line": 1 },
+    "mechanism": {
+      "file": "utils/features.ts",
+      "line": 1,
+      "verifiedContentHash": "sha256:732488444cb92145",
+      "staleness": "verified"
+    },
     "level": "lint",
     "flags": {
-      "imageEdit": { "value": false, "reason": "needs current image model verified live" },
-      "videoGen": { "value": false, "reason": "needs Veo 3.1 verified live + poll-loop hardening" },
-      "liveAudio": { "value": false, "reason": "needs server-side ephemeral tokens — the raw key must never reach the browser" },
-      "pyodide": { "value": true, "reason": "model-generated Python runs only after explicit user approval" }
+      "imageEdit": {
+        "value": false,
+        "reason": "needs current image model verified live"
+      },
+      "videoGen": {
+        "value": false,
+        "reason": "needs Veo 3.1 verified live + poll-loop hardening"
+      },
+      "liveAudio": {
+        "value": false,
+        "reason": "needs server-side ephemeral tokens — the raw key must never reach the browser"
+      },
+      "pyodide": {
+        "value": true,
+        "reason": "model-generated Python runs only after explicit user approval"
+      }
     }
   },
-
   "portConvention": {
     "statement": "The backend must run on 8050, not 8080 — 8080 is contended by other tools on this device and a stranger holding it hangs the dev proxy instead of failing it.",
-    "mechanism": { "file": "server.js", "line": null, "note": "PORT env var overrides; API_TARGET must move with it for the Vite proxy" },
+    "mechanism": {
+      "file": "server.js",
+      "line": null,
+      "note": "PORT env var overrides; API_TARGET must move with it for the Vite proxy",
+      "verifiedContentHash": "sha256:58ee2302788874cd",
+      "staleness": "verified"
+    },
     "level": "review",
     "incidentHistory": "CONSOLIDATED-PATH.md's Stage 1 record: an unrelated project's server already held :8080 and answered /healthz with {status:'ok'}, which made a preview-readiness probe pass against the wrong process. The default was moved to :8050 partly because of this."
   },
-
   "dualEnvFilePrecedence": {
     "statement": "Credential precedence is shell env > .env.auth > .env; a value the caller explicitly set in the shell is never overridden by a file, specifically so smoke:memory's deliberately-invalid key stays invalid.",
-    "mechanism": { "file": "server.js", "line": 18, "note": "fromShell captured before dotenv loads either file" },
-    "level": "gate"
+    "mechanism": {
+      "file": "server.js",
+      "line": 18,
+      "note": "fromShell captured before dotenv loads either file",
+      "verifiedContentHash": "sha256:f6b006a61016a30b",
+      "staleness": "verified"
+    },
+    "level": "review",
+    "correction": "Relabeled from 'gate' 2026-09-06: cited to real code; smoke:memory relies on a bad key staying bad but doesn't specifically assert this precedence chain in isolation. See de-clutter-protocol-finder-of-truth.md / declarations-clarification-correction.md."
   },
-
   "onDeviceDevWorkflow": {
     "statement": "This runs on Android/PRoot; node_modules cannot live on shared storage (no symlinks), so the working repo is /root/multi-app and sources are mirrored to /mnt/sdcard for backup.",
-    "mechanism": { "file": "README.md", "line": 286, "note": "rsync --exclude node_modules --exclude dist --exclude .git --exclude .env --exclude logs" },
+    "mechanism": {
+      "file": "README.md",
+      "line": 286,
+      "note": "rsync --exclude node_modules --exclude dist --exclude .git --exclude .env --exclude logs",
+      "verifiedContentHash": "sha256:7170984884b1c128",
+      "staleness": "verified"
+    },
     "level": "review"
   },
-
   "factCheckingArtifacts": {
     "statement": "A `.vouch/` directory of per-session 'reads' manifests exists at repo root, produced by the `vouch` skill (fact-checking Claude's own prior answers against real files).",
-    "mechanism": { "file": ".vouch/reads-*.json", "line": null },
+    "mechanism": {
+      "file": ".vouch/reads-*.json",
+      "line": null,
+      "verifiedContentHash": null,
+      "staleness": "not-applicable — not a single trackable file (a glob or a directory)"
+    },
     "level": "gap",
     "note": "Tooling artifact, not part of the app; untracked in git. Not further investigated as part of this audit."
   }

@@ -1,66 +1,110 @@
 {
   "$schema": "declaration-v1",
   "note": "Hand-authored. Covers both multi-app's consumption of the memory engine and the engine's own internals (multi-graph-memory, a sibling repo at /root/multi-graph-memory, consumed as a local file: dependency) — the user chose to include engine internals rather than treat it as a black box, since the MCP scope mismatch (see below) is a real defect that spans both repos.",
-
   "clientSide": {
     "statement": "services/memoryService.ts is the client's only route to memory. Every function is bounded at 2s and answers null rather than throwing; the one awaited call is opening an episode, because a null episode id is what makes every later tap a no-op.",
-    "mechanism": { "file": "AGENTS.md", "line": 27, "note": "services/memoryService.ts" },
-    "level": "gate",
+    "mechanism": {
+      "file": "AGENTS.md",
+      "line": 27,
+      "note": "services/memoryService.ts",
+      "verifiedContentHash": "sha256:cf3a0e2e050e5506",
+      "staleness": "verified"
+    },
+    "level": "review",
+    "correction": "Relabeled from 'gate' 2026-09-06: services/memoryService.test.ts (added this session) covers the keepalive fix specifically, but not the full 2s-timeout/null-on-failure behavior this statement describes end to end — a partial, not a full, running check. See de-clutter-protocol-finder-of-truth.md / declarations-clarification-correction.md.",
     "hazard": "Read the memory link from memoryRef.current, never builderState.memory — a handler closes over the render that created it, and a generation opens its episode during that handler. Already caused a real bug: a verified build failed to close its own episode, recorded 'abandoned' on the next reload."
   },
-
   "serverSide": {
     "statement": "One SHARED GraphMemory instance for the whole app, backed by .multi-memory/builder.db (workspace 'multi-app', project 'builder'). memory/bridge.js wraps it; memory/routes.js exposes /api/memory/*; memory/proposals.js is the declared table mapping validator issue codes to lessons — a code in neither PROPOSAL_TABLE nor NOT_A_LESSON is logged as an open question.",
-    "mechanism": { "file": "memory/bridge.js", "line": 43, "note": "STORE_FILE = 'builder.db'" },
+    "mechanism": {
+      "file": "memory/bridge.js",
+      "line": 43,
+      "note": "STORE_FILE = 'builder.db'",
+      "verifiedContentHash": "sha256:1f1ad893fd8c4d2b",
+      "staleness": "verified"
+    },
     "level": "gate",
     "correction": "CORRECTED 2026-09-06, mid-fix-cycle: this entry originally said 'one GraphMemory instance per build id, backed by .multi-memory/<buildId>.db' — README.md's own prose, taken at face value during the original audit instead of reading memory/bridge.js's actual current source. That was already wrong: commit 6360b37 ('a lesson outlives the build that learned it', 2026-09-05) migrated bridge.js from one-store-per-build to this single shared store specifically because 'a lesson learned in one build was invisible to the next.' The 125 build-*.db files in .multi-memory/ are pre-migration leftovers nothing writes to anymore, not live parallel storage. This is the exact failure mode this audit exists to catch, caught against its own output — see de-clutter-protocol-finder-of-truth.md."
   },
-
   "episodeLifecycle": {
     "statement": "An episode is one generation attempt. It opens when generation starts and closes exactly once: verified (validator passed), failed (validator failed or the attempt threw), or abandoned (a reload/reset cut it short). The engine reuses an episode still open for the same objective rather than forking a second one, and any episode left open by a reload is closed at startup before anything can join it.",
-    "mechanism": { "file": "README.md", "line": 150, "note": "'How memory works'" },
+    "mechanism": {
+      "file": "README.md",
+      "line": 150,
+      "note": "'How memory works'",
+      "verifiedContentHash": "sha256:a1776b2b31478869",
+      "staleness": "verified"
+    },
     "level": "gate"
   },
-
   "lessonLadder": {
     "statement": "proposed -> qualified -> approved. proposed: something broke once and the table says what it teaches. qualified: tried in a LATER, DIFFERENT attempt, and that attempt passed. approved: a human said yes, only via POST /api/memory/lessons/:id/approve — reachable from no prompt or tool schema. The engine only ever puts qualified/approved lessons in its governed recall; a trial channel (bridge.trialBlock) additively injects up to 3 unproven, issue-matched proposals into the next attempt after a failure, in their own labelled block, recorded as applied so a pass is checkable rather than assumed.",
-    "mechanism": { "file": "README.md", "line": 180 },
+    "mechanism": {
+      "file": "README.md",
+      "line": 180,
+      "verifiedContentHash": "sha256:f2875c5f6fff93de",
+      "staleness": "verified"
+    },
     "level": "gate",
     "realState": "As of this audit: 6 lessons total exist, ALL status=proposed. None have ever reached qualified or approved — see hetrodox-unconventional-approaches.json#lesson-ladder-never-climbed for why (not a ladder defect; a direct consequence of almost no episodes ever being recorded)."
   },
-
   "engineInternals": {
     "note": "multi-graph-memory (/root/multi-graph-memory), version 0.2.0 in package.json. Verified directly against source for this audit, not recalled from a prior session's notes.",
     "readOnlyMcpCore": {
       "statement": "src/mcp/server.ts's ReadOnlyMcpServer is a hand-rolled, SDK-free, transport-agnostic dispatch core exposing READ_ONLY_TOOLS (fgm_read_memory_context, fgm_list_lessons, fgm_get_lesson, fgm_list_episodes, fgm_query_events, fgm_project_status). It has no mutation tools at all — not gated by a flag, simply never registered or dispatched, on the stated reasoning 'a flag can be set wrongly; an absent capability cannot.'",
-      "mechanism": { "file": "/root/multi-graph-memory/src/mcp/server.ts", "line": 1, "note": "header comment cites 'Ruling 9'/'Ruling 10'" },
+      "mechanism": {
+        "file": "/root/multi-graph-memory/src/mcp/server.ts",
+        "line": 1,
+        "note": "header comment cites 'Ruling 9'/'Ruling 10'",
+        "verifiedContentHash": "sha256:8d64a30d9de151b6",
+        "staleness": "verified"
+      },
       "level": "lint"
     },
     "sdkAdapter": {
       "statement": "src/mcp/sdkAdapter.ts is the one place the real @modelcontextprotocol/sdk is imported, wiring the SDK's low-level Server class's tools/list and tools/call to ReadOnlyMcpServer.handleRequest. The low-level Server is used deliberately over the newer, SDK-recommended McpServer, because McpServer.registerTool only accepts a Zod schema and READ_ONLY_TOOLS is already raw JSON Schema — converting would fork one source of truth into two hand-maintained copies.",
-      "mechanism": { "file": "/root/multi-graph-memory/src/mcp/sdkAdapter.ts", "line": 1 },
+      "mechanism": {
+        "file": "/root/multi-graph-memory/src/mcp/sdkAdapter.ts",
+        "line": 1,
+        "verifiedContentHash": "sha256:8d64a30d9de151b6",
+        "staleness": "verified"
+      },
       "level": "lint"
     },
     "stdioTransport": {
       "statement": "bin/multi-memory-mcp.ts is the stdio entrypoint (B1): resolves scope via openMemory() -> loadConfig() -> the same config chain the multi-memory CLI uses, so an MCP client asking 'which project is this' gets the identical answer a CLI command from the same directory would. Registered in ~/.mcp.json as `node /root/multi-graph-memory/dist/bin/multi-memory-mcp.js` with cwd /root/multi-app.",
-      "mechanism": { "file": "/root/multi-graph-memory/bin/multi-memory-mcp.ts", "line": 1 },
+      "mechanism": {
+        "file": "/root/multi-graph-memory/bin/multi-memory-mcp.ts",
+        "line": 1,
+        "verifiedContentHash": "sha256:4949218de757741f",
+        "staleness": "verified"
+      },
       "level": "gate"
     },
     "httpTransport": {
       "statement": "src/mcp/http.ts (B2) is a Streamable HTTP transport, Cloud-Run-shaped: X-Api-Key header (not Authorization: Bearer, which Cloud Run's own front door intercepts), stateless (sessionIdGenerator: undefined, since Cloud Run kills idle connections), /.well-known/* forced to 404 (so a spec-following client doesn't stall discovery before falling back to the configured API key), and the key check fails closed via a constant-time compare.",
-      "mechanism": { "file": "/root/multi-graph-memory/src/mcp/http.ts", "line": 12 },
+      "mechanism": {
+        "file": "/root/multi-graph-memory/src/mcp/http.ts",
+        "line": 12,
+        "verifiedContentHash": "sha256:c003487474df8f1f",
+        "staleness": "verified"
+      },
       "level": "gate"
     },
     "scopeResolutionAndTheRealDefect": {
       "statement": "openMemory() resolves scope from /root/multi-app/.multi-memory.json — {\"projectId\": \"builder\", \"workspace\": \"multi-app\"} — the SAME single project-scoped store (builder.db) multi-app's own memory/bridge.js writes to (see serverSide.correction above — this was NOT always true, but is as of commit 6360b37). There is no ongoing structural addressing mismatch between where multi-app writes and where the MCP reads.",
-      "mechanism": { "file": "/root/multi-app/.multi-memory.json", "line": null },
+      "mechanism": {
+        "file": "/root/multi-app/.multi-memory.json",
+        "line": null,
+        "verifiedContentHash": "sha256:c81e3fb22ea296a7",
+        "staleness": "verified"
+      },
       "level": "gap",
       "correction": "CORRECTED 2026-09-06: this entry originally described a live per-build-vs-project-scoped mismatch and proposed a buildId-scoped MCP fix on that basis. An implementer agent began that fix, was stopped mid-task once bridge.js's actual current source was read, cleanly reverted its changes, and confirmed (read-only) that multi-graph-memory's own SqliteStorageAdapter/GraphMemory write path is genuinely synchronous end-to-end (node:sqlite DatabaseSync, non-async methods, real transactions) — the engine cannot silently lose a write. That narrows the real defect to multi-app's own call sites.",
       "measuredImpact": "builder.db was independently confirmed empty (0 events/episodes/lessons/evidence) via both the MCP tools and direct SQL, DESPITE already being bridge.js's correct, sole write target since 2026-09-05. The 6 real episodes found during the original audit live in the pre-migration legacy build-*.db files, not evidence of an ongoing split. See hetrodox-unconventional-approaches.json#memory-cannot-see-most-real-usage for the now-corrected root cause: client-side fire-and-forget fetch calls in services/memoryService.ts lacked `keepalive: true` (fixed 2026-09-06), and server-side memory.appendEventSafe() calls in server.js are unawaited before their response ends, vulnerable to a node --watch dev restart or process exit interrupting the async forBuild() step before the (synchronous, once reached) engine write runs.",
       "possibleFix": "Client-side fixed: services/memoryService.ts's post() now sets keepalive:true (see services/memoryService.test.ts). Server-side: await memory.appendEventSafe(...) in server.js's builder/* route handlers before the response ends, rather than firing it unawaited — in progress as part of this fix cycle."
     }
   },
-
   "plannedUpgrade_localRagStack": {
     "statement": "An on-device (Termux/llama.cpp) RAG stack — generator (qwen2.5-3b-instruct), reranker (bge-reranker-v2-m3), embedder (embeddinggemma-300m), classifier proxy — is running locally, intended to give the lesson ladder embedding-based semantic recall instead of the current rule/keyword-based lookup in memory/proposals.js.",
     "mechanism": null,
@@ -68,7 +112,12 @@
     "note": "Nothing in either repo calls these ports yet. See models-adapters.json's localRagStack entry for the full component list. Worth sequencing AFTER the memory-blind-spot finding is addressed — a smarter recall mechanism built on top of a store that captures ~1% of real generation activity would inherit the same blind spot, just with better math on top of it.",
     "deterministicRetrievalReference": {
       "statement": "The user has pointed at ~/projects/kg-rag-cookbook/TS-kg-rag-of-kg-rag.md as methodology to draw on for a deterministic retrieval layer, once the current architecture-doc work is done. That document is itself generated from a graph database with every claim ending in a resolvable node anchor, checked on every build/render run — the same generate-and-verify discipline this /architecture folder applies, arrived at independently.",
-      "mechanism": { "file": "~/projects/kg-rag-cookbook/TS-kg-rag-of-kg-rag.md", "line": null },
+      "mechanism": {
+        "file": "~/projects/kg-rag-cookbook/TS-kg-rag-of-kg-rag.md",
+        "line": null,
+        "verifiedContentHash": "sha256:720205a9d1cdd7f1",
+        "staleness": "verified"
+      },
       "level": "review",
       "status": "not yet read in depth — explicitly deferred by the user until this implementation is finished; noted here so the pointer isn't lost."
     }
