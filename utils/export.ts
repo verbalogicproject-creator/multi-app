@@ -1,11 +1,17 @@
-import JSZip from 'jszip';
-
 /**
  * Creates a .zip file from a record of file paths and their content.
  * @param files A record where keys are file paths (e.g., "src/App.tsx") and values are the file content.
  * @param projectName The name of the project, used for the zip file name.
+ *
+ * jszip is imported dynamically, not at module scope. This module is reached from
+ * `context/AppContext.tsx`, which every session loads, so a static import put ~95K of
+ * zip machinery into the eagerly-fetched bundle for every visitor — to serve the one
+ * click at the end of the wizard that actually exports a project. The function was
+ * already async, so deferring costs nothing at the call site and nothing in behaviour;
+ * the fetch happens while the zip is being built.
  */
 export const createProjectZip = async (files: Record<string, string>, projectName: string): Promise<void> => {
+    const { default: JSZip } = await import('jszip');
     const zip = new JSZip();
 
     for (const [path, content] of Object.entries(files)) {

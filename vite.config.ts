@@ -32,9 +32,25 @@ const proxy = {
  */
 const watch = { ignored: ['**/.preview-work/**'] }
 
+/**
+ * React gets its own chunk.
+ *
+ * Not to shrink the bundle — the bytes are the same either way — but to stop them
+ * being re-downloaded. Default chunking put react-dom, react and scheduler in the same
+ * file as application code, so every deploy changed that file's hash and every returning
+ * visitor fetched ~560K of framework they already had. React changes when React is
+ * upgraded; app code changes constantly. Splitting on that boundary is the difference.
+ *
+ * Matched with a trailing slash so `node_modules/react/` does not also claim
+ * `node_modules/react-dom/`, and `jsx-runtime` is inside `react/` already.
+ */
+const manualChunks = (id: string) =>
+  /node_modules\/(react|react-dom|scheduler)\//.test(id) ? 'react-vendor' : undefined
+
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  build: { rollupOptions: { output: { manualChunks } } },
   server: { proxy, watch },
   // `vite preview` needs the same proxy: the UI audit runs against the built
   // output rather than the dev server, because transpiling on demand for a

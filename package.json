@@ -25,6 +25,7 @@
     "smoke:providers": "node scripts/smoke-providers.mjs",
     "smoke:memory": "node scripts/smoke-memory.mjs",
     "check:css": "node scripts/check-css.mjs",
+    "check:bundle": "node scripts/check-bundle.mjs",
     "audit:ui": "npm run build && node scripts/audit-ui.mjs",
     "shoot:ui": "npm run build && node scripts/audit-ui.mjs --shots /tmp/ui-shots",
     "check:editor": "npm run build && node scripts/check-editor.mjs",

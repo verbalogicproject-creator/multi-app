@@ -40,7 +40,7 @@ done
 # this tier anyway, as pure Vitest cases in test/check-css.test.mjs.
 FAST_GATES="typecheck test check:auth smoke:memory"
 # Needs dist/, nothing more — runs in the full tier straight after the build.
-POST_BUILD_GATES="check:css"
+POST_BUILD_GATES="check:css check:bundle"
 # Full tier adds the CDP gates. Each npm script is `npm run build && node scripts/X.mjs`;
 # we build ONCE and invoke the second half directly, so a full run does one build, not five.
 # CDP_GATES maps gate name -> the script it runs. verify_cdp_mapping() below proves the
