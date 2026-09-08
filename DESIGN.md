@@ -22,11 +22,12 @@ used.
 | Panel is | **An inbox** — what needs you | A ledger; a ladder |
 | Approval | **Read the evidence, then approve** | One click; sign every time |
 | Quiet states | **Explain the ladder** | Facts only; fall back to the trail |
-| Phone nav | **Bottom tab bar** — Projects · Chat/Build · Code · Memory | Rail as an overlay sheet; a full screen stack |
-| Phone vs desktop | **Two designs** — desktop keeps its split, the phone gets its own | One layout that recomposes at every width |
+| Nav | **The dock, at every width** — Projects · Chat · Build · Code · Preview · Harness, plus Memory *(changed 2026-09-04, §5)* | A bottom bar plus a rail; a full screen stack |
+| Phone vs desktop | **One layout** — a destination fills the screen at every width *(changed 2026-09-04, §5)* | Two designs; a desktop-only two-up split |
 | Chat identity | **Shape** — one raised bubble for you, flat text for the assistant | Indigo vs teal; two greys; the accent for your turn |
 | Counterpoint | **Mono is the machine's voice** | The hairline as a grid; concentric radii alone |
 | Preview runtime | **iframe over a server-bundled blob**, behind one seam | WebContainer now; deciding later |
+| Interactive preview | **Sandpack, one named cross-origin exception** *(added 2026-09-05, A0)* | Self-host Sandpack's bundler; WebContainer instead |
 
 ### The glance test
 
@@ -156,11 +157,18 @@ highlight above, and it faces up.
 
 ---
 
-## 5. The phone shell
+## 5. The shell
 
-The phone and the desktop are **two designs**, not one design at two widths.
-That is a deliberate choice, taken after measuring what the "mobile-first" claim
-at the top of this document was actually worth:
+> **Changed 2026-09-04.** Two locked decisions were overturned here — *"phone nav:
+> bottom tab bar"* and *"phone vs desktop: two designs"*. The original reasoning is kept
+> below, because it was right about the problem and wrong about the remedy, and a locked
+> decision is allowed to change but not to change silently.
+
+### What the two-design rule was for, and why it stopped working
+
+The phone and the desktop were **two designs**, not one design at two widths. That was
+a deliberate choice, taken after measuring what the "mobile-first" claim at the top of
+this document was actually worth:
 
 ```
 19 breakpoints  Step_Theme        │  0 breakpoints  ProjectManager  (w-96, shrink-0)
@@ -174,11 +182,16 @@ Three blocking consequences, all in the shell: a 384px rail on a 390px screen; a
 terminal pinned to `h-1/3` of a `h-full` inside an `h-dvh` — nested
 fixed-fraction scrolling, the exact pattern a phone cannot absorb.
 
-**Desktop is unchanged and stays unchanged.** Rail, then the main panel — which
-for an active agent is `IdeView` at two thirds beside its chat at one third —
-with the memory drawer over the top. Only its colours moved onto tokens.
+The diagnosis held. The remedy — a second design — did not, and it failed in the way
+second designs fail: the phone got a four-slot bar, the desktop kept a rail with a tab
+strip inside it, and the two became **two answers to one question**. `Chat` and `Build`
+shared a slot whose label flipped depending on a rail tab, so what you tapped and what
+you got were decided in different places. `AI Tools` was worse than ambiguous: its tab
+lived in the rail while its content rendered in the main panel, so a phone that tapped
+it got an empty card. That is not a bug that was introduced; it is what two navigation
+systems do to each other over time.
 
-**The phone turns those three panels into destinations.**
+**The phone shell as it was, kept for the record:**
 
 ```
 ┌──────────────────┐
@@ -193,20 +206,61 @@ with the memory drawer over the top. Only its colours moved onto tokens.
 └──────────────────┘
 ```
 
-- **Projects** — the rail, full width. Its own Projects/Agents/AI Tools/AI
-  Settings tabs stay; the row scrolls horizontally rather than shrinking below
-  44px. Collapsing is gated at `md:` in CSS, not in state, so one source of
-  truth crosses the breakpoint.
-- **Chat / Build** — the label tracks what the main panel actually is rather
-  than asserting a fixed word.
-- **Code** — `IdeView`, and **disabled without an active agent**, because code
-  follows the agent. A disabled tab keeps the bar's arity stable instead of
-  making destinations appear and vanish under a thumb — the same idiom the rail
-  already uses for AI Tools while an agent is active.
-- **Memory** — a toggle, not a destination: the drawer is already a full sheet
-  on a phone. It carries the accent dot, so the glance test works from every
-  screen. The floating trigger becomes `md:` only; two ways in at the same
-  corner is one too many.
+- **Projects** — the rail, full width, with its own Projects/Agents/AI Tools/AI
+  Settings tab strip.
+- **Chat / Build** — one slot whose label tracked what the main panel actually was.
+- **Code** — `IdeView`, disabled without an active agent.
+- **Memory** — a toggle, with a `md:`-only floating trigger beside it.
+
+### The dock is the only navigation
+
+```
+┌────────────────────┐
+│                    │
+│    destination     │  one surface, the whole screen, every width
+│                    │
+│                    │
+├────────────────────┤
+│ ▤  ◆  ✦  ⟨⟩  ▭  ⚙  ●│  44px, safe-b, revolving, no ends
+│ Pr Ch Bu Co Pv Ha Me│
+└────────────────────┘
+```
+
+Six destinations — **Projects · Chat · Build · Code · Preview · Harness** — plus
+**Memory**, which stays the drawer §1 locks it as rather than becoming a seventh
+destination: it must be reachable *from* wherever you are rather than instead of it,
+and it carries the accent dot so the glance test works from every screen. Its floating
+`md:` trigger is gone; its own comment said "two ways in at the same corner is one too
+many", and the dock now runs at every width, so that reasoning applies at every width.
+
+**A destination fills the screen.** No `md:w-2/3` primary beside a `md:w-1/3` companion,
+because that arrangement is what made every destination need two layouts and two sets
+of widths — six destinations' worth of second design to keep right, forever. One layout
+that grows is not a compromise here; it is the reason one dock could replace two
+navigation systems at all.
+
+*What it costs, stated rather than glossed:* you can no longer watch chat beside the
+editor on a wide screen. That is a real loss. The honest way to give it back is a split
+the user opts into on the one destination that wants it — a toggled editor panel, noted
+as a later upgrade — never a breakpoint-driven second layout returning by the back door.
+
+**Disabled, not absent.** `Code` and `Preview` need an open project — a project, not an
+agent, since `b8399a7`. They stay in the dock, greyed, with the reason in their title,
+so the dock's contents never shuffle under a thumb between visits.
+
+**Three copies, one of them real.** The dock renders its children three times to fake an
+endless strip. The middle set is live and carries `data-dock-live`; the outer two are
+`aria-hidden` **and** `inert`. `inert` is the load-bearing half — `aria-hidden` alone
+leaves a focusable button a keyboard walks into and a screen reader then refuses to
+describe. React 19 takes `inert` as a real boolean and silently drops `inert=""`, which
+is how this first shipped: eighteen focusable controls for six destinations. `audit:ui`
+asserts it, and asserts that the dock's items are exactly the destinations `types/ui.ts`
+declares — a surface with no dock item is a page with no door, and a dock item for
+nothing declared is a door to nowhere. Both render perfectly.
+
+**One state variable.** The shell used to hold `activeTab` *and* `surface`. Two values
+answering "where am I" is how the two navigation systems came to disagree, so `AppTab`
+is gone and `surface` is the only answer.
 
 **Surfaces are hidden, not unmounted.** `hidden` rather than a conditional
 render, so chat scroll position, an unsent message and terminal history all
@@ -214,8 +268,10 @@ survive a trip to Code and back.
 
 ### The preview runs in an iframe, and that is a decision about headers
 
-Generated React will render in an **iframe fed a self-contained document** that
-the server bundles with esbuild — not in a WebContainer.
+Generated React renders in an **iframe fed a self-contained document** that the
+server bundles with esbuild — not in a WebContainer. Shipped as described: the
+seam below is `components/PreviewHost.tsx` and `services/buildPreview.ts`, and
+the bundler is `preview/` behind `POST /api/preview/build`.
 
 WebContainer is the better product: a real Node runtime in the tab, real
 `npm install`, real Vite, real HMR. It needs `SharedArrayBuffer`, which since
@@ -243,6 +299,51 @@ cheap to take later:
   expensive part of COEP compliance, it is good practice regardless, and doing it
   during the wizard migration means the headers become a config line if
   WebContainer is ever wanted.
+
+#### The one exception, taken with its eyes open (A0)
+
+`SandpackAppPreview.tsx` embeds `<iframe src="https://*.codesandbox.io">` — a
+second, interactive preview next to the esbuild one, for the reason WebContainer
+was attractive in the first place: unlimited npm packages, CDN-resolved, no local
+install. `scripts/audit-ui.mjs`'s origins check has one named exception for it.
+
+This is not free, and it is not the same deferral as above. Everything else in
+the app stays cross-origin-fetch-free specifically so `COEP: require-corp` stays
+a config line; this one surface cannot make that promise, because the entire
+point of it is a bundler we do not run. If WebContainer is ever pursued, this
+component is what has to change first — self-host Sandpack's bundler (it is
+open-source) or remove the exception — not a header.
+
+Taken anyway because Sandpack, today, delivers most of what WebContainer was
+being kept open *for* — packages the local `node_modules` does not have — at a
+fraction of the cost, and WebContainer itself was never scheduled, only kept
+cheap. `tsc` and esbuild remain the verdict regardless of which preview a person
+is looking at; see `SandpackAppPreview.tsx`'s doc comment.
+
+#### What the sandbox costs, measured
+
+`sandbox="allow-scripts"` **without** `allow-same-origin` — the two together are
+not a sandbox — gives the document an **opaque origin**, and a surprising amount
+of ordinary React throws there. Measured in a real sandboxed frame, not read:
+
+| API | At an opaque origin |
+|---|---|
+| `history.pushState` / `replaceState` | `SecurityError` |
+| `localStorage` / `sessionStorage` | `SecurityError` on *property access* |
+| `document.cookie` (read and write) | `SecurityError` |
+| `location.hash = '#/x'` | works |
+| `indexedDB`, `matchMedia`, `fetch` | present |
+
+The first two rows are what generated apps do: the generate prompt **mandates**
+`react-router-dom` v6, and persisting to `localStorage` is routine. Unshimmed,
+the first click on a nav link throws and the pane goes white — and it reads as
+the model's bug rather than ours. So the bundler substitutes `MemoryRouter` for
+`BrowserRouter` (`HashRouter` is no escape; v6's hash history is also built on
+`pushState`) and the document shims the storage APIs before the app runs.
+
+`postMessage` works, which is what carries runtime errors back out — but
+`event.origin` is the string `"null"` and identifies nothing, so the parent
+verifies the frame's own `contentWindow` instead.
 
 The rule that follows, and it binds the migration: **when a component that loads
 media is migrated, its media is proxied at the same time.** Doing the colours now
@@ -602,7 +703,7 @@ after the shell pass     13 files   204 usages
 after the wizard          6 files    62 usages
 ```
 
-Done: `App` · `MobileTabBar` · `ProjectManager` · `AgentManager` · `ChatPanel` ·
+Done: `App` · `AppDock` · `ProjectManager` · `AgentManager` · `ChatPanel` ·
 `MessageItem` · `UserMessage` · `IdeView` · `FileExplorer` · `CodeEditor` ·
 `Terminal` · `LoadingIndicator` · `QuotaBadge` · `ModelPicker` · `MemoryPanel` ·
 `AiControls` · `AssistantMessage` · `ImageEditorPane` · `ModeSelector` ·

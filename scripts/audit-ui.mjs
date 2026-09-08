@@ -24,7 +24,7 @@
  */
 import { mkdirSync } from 'node:fs';
 import { spawn } from 'node:child_process';
-import { launch, openPage, assertBackend, SURFACES, PHONE, DESKTOP } from './ui-harness.mjs';
+import { launch, openPage, assertBackend, SURFACES, DECLARED_DESTINATIONS, PHONE, DESKTOP } from './ui-harness.mjs';
 
 const arg = (flag, fallback) => {
     const i = process.argv.indexOf(flag);
@@ -67,7 +67,16 @@ const assertFreshBuild = async () => {
     let built;
     try { built = newest('dist/assets'); }
     catch { console.error('No dist/. Run `npm run build` (or use `npm run audit:ui`).'); process.exit(1); }
-    const source = Math.max(newest('components'), statSync('App.tsx').mtimeMs, statSync('index.css').mtimeMs);
+    /* Every source root the client bundle is built from. `components/` alone was
+       enough while the UI lived entirely there; diagnostics put real behaviour in
+       `hooks/` and `services/`, and a root that is not listed here is a change this
+       check will cheerfully certify as already built. */
+    const roots = ['components', 'hooks', 'services', 'context', 'utils', 'types'];
+    const source = Math.max(
+        ...roots.map(r => { try { return newest(r); } catch { return 0; } }),
+        statSync('App.tsx').mtimeMs,
+        statSync('index.css').mtimeMs,
+    );
     if (source > built) {
         const age = Math.round((source - built) / 1000);
         console.error(`dist/ is ${age}s older than the source it is built from.`);
@@ -76,12 +85,22 @@ const assertFreshBuild = async () => {
     }
 };
 
+const stopPreview = (proc) => {
+    if (!proc) return;
+    try { process.kill(-proc.pid, 'SIGTERM'); }
+    catch { proc.kill('SIGTERM'); }
+};
+
 const startPreview = async () => {
     // --host 127.0.0.1 is not optional: `vite preview` binds "localhost", which
     // resolves to ::1 here, and the readiness probe on 127.0.0.1 then fails
     // against a server that is perfectly alive.
     const proc = spawn('npx', ['vite', 'preview', '--port', String(PORT), '--strictPort', '--host', '127.0.0.1'], {
-        stdio: ['ignore', 'pipe', 'pipe'], detached: false,
+        // `detached` so the whole group can be signalled at once: `npx` is not the
+        // server, it is the server's parent, and killing it alone leaves vite holding
+        // the port for the next run to trip over -- and its pipes open, which keeps
+        // this script alive long after it has printed its verdict.
+        stdio: ['ignore', 'pipe', 'pipe'], detached: true,
     });
     let log = '';
     proc.stdout.on('data', d => { log += d; });
@@ -98,7 +117,8 @@ const startPreview = async () => {
             console.error(`preview server exited (code ${proc.exitCode}) instead of serving ${PORT}:`);
             console.error(log.trim() || '(no output)');
             if (/already in use/i.test(log)) {
-                console.error(`\nSomething else holds ${PORT}. Free it:  pkill -f "vite preview --port ${PORT}"`);
+                console.error(`\nSomething else holds ${PORT}. Free it by port, never by pattern:`);
+                console.error(`  fuser -k ${PORT}/tcp    # or: lsof -ti:${PORT} | xargs -r kill`);
             }
             process.exit(1);
         }
@@ -110,13 +130,17 @@ const startPreview = async () => {
     }
     console.error(`preview server never came up on ${PORT}:\n${log}`);
     console.error('Did you run `npm run build` first?');
-    proc.kill();
+    stopPreview(proc);
     process.exit(1);
 };
 const URL = arg('--url', `http://127.0.0.1:${PORT}/`);
+/* `--only <substring>` narrows the walk while iterating on one surface. It is never
+   how the gate runs — a filtered pass is not a pass — so the summary says so out loud
+   and refuses to print the all-clear. */
+const ONLY = arg('--only', null);
 
 /** Runs inside the page. Returns findings for the surface currently shown. */
-const AUDIT = () => {
+const AUDIT = (expected) => {
     const visible = el => {
         const r = el.getBoundingClientRect();
         if (r.width === 0 || r.height === 0) return false;
@@ -129,7 +153,7 @@ const AUDIT = () => {
         return `${el.tagName.toLowerCase()}${cls ? '.' + cls : ''}${text ? ` "${text}"` : ''}`;
     };
 
-    const findings = { tokens: [], targets: [], clipping: [], overflow: [] };
+    const findings = { tokens: [], targets: [], clipping: [], overflow: [], duplicates: [] };
 
     // --- tokens: a utility whose declaration the browser dropped --------------
     // Each entry: the class, the property it must change, and the value that
@@ -279,13 +303,137 @@ const AUDIT = () => {
     // self-hosted. That invariant is easy to break with one convenient CDN URL,
     // so it is checked rather than remembered.
     const ORIGIN_OK = /^(data:|blob:|about:|$)/;
+    /**
+     * The one named exception, and it is a real cost rather than a formality.
+     *
+     * `SandpackAppPreview.tsx` embeds `*.codesandbox.io` on purpose — there is no
+     * same-origin way to get Sandpack's CDN-resolved bundling (A0's plan). Taking
+     * that iframe means WebContainer (DESIGN.md §5) is no longer "cheap to take
+     * later": `COEP: require-corp` would silently kill this surface too, and
+     * unlike the rest of the app this one cannot be routed through our own server
+     * first, because the whole point is Sandpack's own bundler. If WebContainer is
+     * ever pursued, this surface is what has to change — self-host Sandpack's
+     * bundler or drop it — not a config line.
+     */
+    const CROSS_ORIGIN_EXCEPTIONS = [/(^|\.)codesandbox\.io$/];
     for (const el of document.querySelectorAll('img[src], video[src], source[src], iframe[src], audio[src], link[rel="stylesheet"], script[src]')) {
         const raw = el.getAttribute('src') || el.getAttribute('href') || '';
         if (ORIGIN_OK.test(raw)) continue;
         let url;
         try { url = new URL(raw, location.href); } catch { continue; }
         if (url.origin === location.origin) continue;
+        if (CROSS_ORIGIN_EXCEPTIONS.some(re => re.test(url.hostname))) continue;
         findings.overflow.push(`cross-origin resource: <${el.tagName.toLowerCase()}> ${url.origin}${url.pathname} — breaks under COEP`);
+    }
+
+    // --- duplicates: one reachable control per destination -------------------
+    // The dock renders its children three times to fake an endless strip, so every
+    // destination exists three times in the DOM. Two sets must be `inert` — not merely
+    // `aria-hidden`, which leaves a focusable button a keyboard walks into and a screen
+    // reader then refuses to describe. It shipped wrong once: React 19 takes `inert` as
+    // a boolean and silently drops `inert=""`, giving eighteen focusable controls for
+    // six destinations, with every name announced three times.
+    // Scoped to the dock itself. A first attempt counted matching names across the whole
+    // page and reported 98 findings that were all real controls with the same label — the
+    // rail's own Projects tab, the floating Memory trigger. The hazard being guarded is
+    // narrower than "two things share a name": it is *the same control rendered three
+    // times*, which is a property of the dock and of nothing else.
+    const dockRoot = document.querySelector('[data-dock-live]')?.parentElement;
+    if (dockRoot) {
+        const inDock = [...dockRoot.querySelectorAll('button, a[href], [role="button"]')]
+            .filter(el => !el.closest('[inert]') && !el.closest('[aria-hidden="true"]'));
+        const byName = new Map();
+        for (const el of inDock) {
+            const name = (el.getAttribute('aria-label') || el.textContent || '').trim();
+            if (name) byName.set(name, (byName.get(name) ?? 0) + 1);
+        }
+        for (const [name, count] of byName) {
+            if (count > 1) {
+                findings.duplicates.push(`dock: "${name}" is reachable ${count} times — a clone that is not inert`);
+            }
+        }
+        const copies = dockRoot.children.length;
+        const hiddenCopies = [...dockRoot.children].filter(c => c.getAttribute('aria-hidden') === 'true').length;
+        if (copies > 1 && hiddenCopies !== copies - 1) {
+            findings.duplicates.push(`dock: ${copies} copies but ${hiddenCopies} aria-hidden — every copy but one must be hidden`);
+        }
+
+        /* **A control you can see must do something.**
+           This is the check that was missing, and its absence is why the dock shipped
+           with fourteen visible dead buttons on a 1440px desktop: one copy is ~510px, so
+           the scrollport showed most of both outer copies flanking the live one, and the
+           duplicates check above passed *because* it deliberately filters clones out.
+           A clean report and a two-thirds-dead dock looked identical from here.
+
+           `inert` and `pointer-events: none` are the two ways a rendered control silently
+           refuses input. Measured against the viewport, not the document: a clone parked
+           off screen is the mechanism working, not a fault. */
+        const vw = document.documentElement.clientWidth;
+        const vh = document.documentElement.clientHeight;
+        for (const el of dockRoot.querySelectorAll('button, a[href], [role="button"]')) {
+            const box = el.getBoundingClientRect();
+            const onScreen = box.width > 0 && box.height > 0
+                && box.right > 0 && box.left < vw && box.bottom > 0 && box.top < vh;
+            if (!onScreen) continue;
+            const name = el.lastElementChild?.textContent?.trim() || el.getAttribute('aria-label') || '(unnamed)';
+            if (el.closest('[inert]')) {
+                findings.duplicates.push(`dock: "${name}" is on screen but inert — a control you can see that ignores you`);
+            } else if (getComputedStyle(el).pointerEvents === 'none') {
+                findings.duplicates.push(`dock: "${name}" is on screen but has pointer-events:none`);
+            }
+        }
+
+        /* And the other half of what `inert` used to buy: one tab stop per destination,
+           not one per copy. A clone stays clickable, so this is what keeps a keyboard
+           from walking the same six destinations three times. */
+        const tabbable = [...dockRoot.querySelectorAll('button, a[href], [role="button"]')]
+            .filter(el => el.tabIndex >= 0 && !el.closest('[inert]'));
+        const tabNames = new Map();
+        for (const el of tabbable) {
+            const name = el.lastElementChild?.textContent?.trim() || el.getAttribute('aria-label') || '(unnamed)';
+            tabNames.set(name, (tabNames.get(name) ?? 0) + 1);
+        }
+        for (const [name, count] of tabNames) {
+            if (count > 1) findings.duplicates.push(`dock: "${name}" is a tab stop ${count} times — a clone left in the focus order`);
+        }
+
+        /* The dock is the only navigation, so its contents are the whole answer to
+           "what can I get to". A destination declared in `types/ui.ts` with no item
+           here is a page with no door; an item here for nothing declared is a door to
+           nowhere. Both render perfectly and audit clean, which is why this is
+           compared rather than eyeballed. `expected` is read from the app's own
+           declaration by the harness, not restated. */
+        /* `lastElementChild`, not `querySelector('span:last-child')`: the accent dot is
+           also a last child, of the icon wrapper, and document order reaches it first.
+           The label is the button's own last element child, which is unambiguous. */
+        const present = new Set([...inDock].map(el => el.lastElementChild?.textContent?.trim()).filter(Boolean));
+        for (const name of expected) {
+            if (!present.has(name)) findings.duplicates.push(`dock: "${name}" is declared but has no item — a destination with no door`);
+        }
+        for (const name of present) {
+            if (!expected.includes(name)) findings.duplicates.push(`dock: "${name}" is an item for nothing declared — a door to nowhere`);
+        }
+    }
+
+    /* --- operable: a control you can see must respond to you -----------------
+       Generalised out of the dock, where it was found. Scoping it to the dock would
+       repeat the mistake that let the dock bug through: a check narrow enough to miss
+       the next instance of its own class.
+
+       `disabled` is not a fault — it is a visible, explained state with a title, and
+       this app uses it deliberately for destinations with nothing behind them. `inert`
+       and `pointer-events: none` are different: the control looks live and silently
+       is not. That gap between what a control promises and what it does is the whole
+       finding. */
+    for (const el of document.querySelectorAll(INTERACTIVE)) {
+        if (!visible(el)) continue;
+        if (el.disabled || el.getAttribute('aria-disabled') === 'true') continue;
+        const name = (el.getAttribute('aria-label') || el.textContent || '').trim().slice(0, 40) || '(unnamed)';
+        if (el.closest('[inert]')) {
+            findings.targets.push(`${label(el)} "${name}" is on screen but inert — it looks live and ignores you`);
+        } else if (getComputedStyle(el).pointerEvents === 'none' && !el.closest('[aria-hidden="true"]')) {
+            findings.targets.push(`${label(el)} "${name}" is on screen but has pointer-events:none`);
+        }
     }
 
     // --- overflow: the page itself must never scroll sideways ----------------
@@ -299,6 +447,32 @@ const AUDIT = () => {
     return findings;
 };
 
+/**
+ * Every iframe's own document must fit the frame it was given.
+ *
+ * Playwright reaches a sandboxed frame through CDP, which the page's own JavaScript
+ * cannot. A frame that scrolls sideways is either a document written for a width it
+ * did not get, or one that should have been scaled — and to a reader it is simply
+ * content cut in half.
+ */
+const framedOverflow = async (page) => {
+    const found = [];
+    for (const frame of page.frames()) {
+        if (frame === page.mainFrame()) continue;
+        try {
+            const box = await frame.evaluate(() => {
+                const de = document.documentElement;
+                return { scroll: de.scrollWidth, client: de.clientWidth, title: document.title };
+            });
+            /* 1px of slack for sub-pixel layout; anything more is a real clip. */
+            if (box.client > 0 && box.scroll > box.client + 1) {
+                found.push(`iframe content ${box.scroll}px wide in a ${box.client}px frame ("${box.title || 'untitled'}")`);
+            }
+        } catch { /* a frame that cannot be read is not evidence of a fault */ }
+    }
+    return [...new Set(found)];
+};
+
 const run = async () => {
     if (!arg('--url', null)) { await assertFreshBuild(); await assertBackend(); }
     const preview = arg('--url', null) ? null : await startPreview();
@@ -309,13 +483,22 @@ const run = async () => {
     for (const [profileName, profile] of [['phone', PHONE], ['desktop', DESKTOP]]) {
         for (const surface of SURFACES) {
             if (!surface[profileName]) continue;
+            if (ONLY && !surface.name.includes(ONLY)) continue;
             const { context, page } = await openPage(browser, profile, URL, surface.seed);
             const where = `${profileName}/${surface.name}`;
             try {
                 await surface.reach(page);
                 await page.waitForTimeout(500);
                 if (SHOTS) await page.screenshot({ path: `${SHOTS}/${profileName}-${surface.name}.png` });
-                const f = await page.evaluate(AUDIT);
+                const f = await page.evaluate(AUDIT, DECLARED_DESTINATIONS);
+                /* Inner frame overflow, measured from outside.
+                   The page probe cannot see this: a `sandbox=""` frame has an opaque
+                   origin, so `contentDocument` is unreachable from the page — which is
+                   exactly why a document overflowing its own iframe was invisible to
+                   every check here while being the most visible fault on the screen.
+                   The design contract laid out at ~760px inside a ~262px card, clipped
+                   mid-nav, and nothing failed. */
+                f.framed = await framedOverflow(page);
                 const count = Object.values(f).flat().length;
                 total += count;
                 report.push({ where, ...f, count });
@@ -336,7 +519,7 @@ const run = async () => {
         console.log('');
     }
 
-    for (const kind of ['tokens', 'targets', 'clipping', 'overflow']) {
+    for (const kind of ['tokens', 'targets', 'clipping', 'overflow', 'framed', 'duplicates']) {
         const hits = report.filter(r => r[kind]?.length);
         if (!hits.length) continue;
         console.log(`${kind.toUpperCase()}`);
@@ -348,14 +531,16 @@ const run = async () => {
     }
 
     const visited = report.length - unreachable.length;
-    console.log(`${visited} surface(s) audited, ${total} finding(s).`);
+    console.log(`${visited} surface(s) audited, ${total} finding(s).${ONLY ? ` (filtered by --only ${ONLY}: NOT a full pass)` : ''}`);
     await browser.close();
-    preview?.kill();
+    stopPreview(preview);
 
     // A surface we could not reach is a coverage hole, and a coverage hole is
     // indistinguishable from a pass. Fail on it.
     if (total > 0 || unreachable.length > 0) process.exit(2);
+    if (ONLY) { console.log('filtered run clean — run without --only before calling it green'); process.exit(0); }
     console.log('ui ok');
+    process.exit(0);
 };
 
 run().catch(e => { console.error('AUDIT FAILED TO RUN:', e.message); process.exit(1); });

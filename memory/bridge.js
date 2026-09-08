@@ -24,14 +24,48 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '..');
 
-/** One database per build. Overridable so the smoke test never touches real memory. */
+/** Where memory lives. Overridable so the gates never touch the real store. */
 const DB_DIR = process.env.MEMORY_DB_DIR || path.join(PROJECT_ROOT, '.multi-memory');
+
+/**
+ * **One store, not one per build.**
+ *
+ * This was `${buildId}.db`, with the engine's `projectId` set to the build id — and every
+ * read in the engine filters on `project_id`. So a lesson learned in one build was
+ * invisible to the next: the ladder was correct all along, and wired to a store that was
+ * discarded the moment its build ended. Nothing ever failed, because nothing ever asked a
+ * second build what the first had learned.
+ *
+ * It also meant a *read* created a database. This function opens eagerly, so
+ * `GET /api/memory/state` — a call whose entire purpose is to ask whether anything was
+ * recorded — brought a 106KB empty schema into being. 447 files existed; 3 had a row.
+ */
+const STORE_FILE = 'builder.db';
 
 /** The workspace every build in this app belongs to. Tenancy beyond this is a later cycle. */
 const WORKSPACE = 'multi-app';
 
-/** Open databases are file handles; a long-lived server must not accumulate them. */
-const MAX_OPEN_BUILDS = 8;
+/**
+ * What the engine scopes lessons and events to.
+ *
+ * A constant, and deliberately not the build id. Builder lessons are about the model and
+ * the toolchain — "this model writes unterminated template literals" is not a fact about
+ * one app — so every build shares them. The build id survives as a *dimension*
+ * (`cycleId` on events, `baseRevisionId` on episodes), which keeps one build's own history
+ * attributable while its lessons are common property.
+ *
+ * The spine migration replaces this with a real project id, at which point recall can ask
+ * for both: what this project learned, and what the builder learned everywhere.
+ */
+const SHARED_PROJECT_ID = 'builder';
+
+/* The two must agree. `multi-memory --build <name>` uses that name as *both* the file
+   stem and the project it queries, so a store filed under one name and scoped to another
+   is invisible to the CLI — it opens the right database and finds nothing. Derived from
+   one constant rather than written twice, because the failure is silent. */
+if (STORE_FILE !== `${SHARED_PROJECT_ID}.db`) {
+    throw new Error(`memory store "${STORE_FILE}" does not match project "${SHARED_PROJECT_ID}"`);
+}
 
 /** Recall must never be the reason a build feels slow. */
 const RECALL_TIMEOUT_MS = 1_200;
@@ -123,69 +157,58 @@ async function loadEngine() {
  */
 const VALID_BUILD_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 
-/** Never evicts `keep`, so the build a request is actively using cannot be closed under it. */
-function evictIfNeeded(keep) {
-    while (open.size > MAX_OPEN_BUILDS) {
-        const oldest = [...open.keys()].find((id) => id !== keep);
-        if (oldest === undefined) return;
-        const entry = open.get(oldest);
-        open.delete(oldest);
-        try {
-            entry?.storage.close();
-        } catch (error) {
-            note('close', error);
-        }
-    }
-}
-
 /**
- * Opens in flight, keyed by build.
+ * The open in flight.
  *
- * The cache check and the open are separated by an `await`, so two requests for
- * the same never-before-opened build (a plan call and a directions call fired
- * together, say) would both miss the cache and both construct a SQLite handle on
- * the same file. The second `open.set` would then overwrite the first, leaking a
- * native handle that eviction can no longer see because it is no longer in the
- * map. Sharing the in-flight promise makes the second caller wait for the first.
+ * The cache check and the open are separated by an `await`, so two requests arriving
+ * together (a plan call and a directions call, say) would both miss and both construct a
+ * SQLite handle on the same file — the second overwriting the first and leaking a native
+ * handle nothing could later close. Sharing the promise makes the second caller wait.
+ *
+ * There is no eviction any more, and no LRU: there is one store, so there is one handle.
  */
-const opening = new Map();
+let opening = null;
 
-/** The GraphMemory for one build, or null. Never throws. */
+/** The GraphMemory, or null. Never throws. */
 export async function forBuild(buildId) {
-    if (!buildId || !VALID_BUILD_ID.test(buildId)) return note('forBuild', new Error(`invalid buildId "${buildId}"`));
+    /* No build id is not a failure. A caller that never opened an episode — an API
+       consumer, a smoke script, the builder before memory is wired — simply has no
+       memory to reach, and logging that as a failure trains the reader to ignore the
+       log. A *malformed* id is different: something meant to be a build id and was
+       not, which is worth saying out loud.
 
-    const cached = open.get(buildId);
-    if (cached) {
-        // Refresh recency: re-inserting moves it to the end of the iteration order.
-        open.delete(buildId);
-        open.set(buildId, cached);
-        return cached.memory;
-    }
+       The id no longer selects a database. It is kept as an argument because it is still
+       what every caller has, and because it is what the writes below stamp on their rows
+       so a build stays attributable inside the shared store. */
+    if (!buildId) return null;
+    if (!VALID_BUILD_ID.test(buildId)) return note('forBuild', new Error(`invalid buildId "${buildId}"`));
 
-    const inFlight = opening.get(buildId);
-    if (inFlight) return inFlight;
+    const cached = open.get(STORE_FILE);
+    if (cached) return cached.memory;
+    if (opening) return opening;
 
-    const attempt = (async () => {
+    opening = (async () => {
         const loaded = await loadEngine();
         if (!loaded) return null;
         try {
             // Re-check: another caller may have finished while the engine loaded.
-            const existing = open.get(buildId);
+            const existing = open.get(STORE_FILE);
             if (existing) return existing.memory;
 
-            const storage = new loaded.SqliteStorageAdapter({ path: path.join(DB_DIR, `${buildId}.db`) });
+            const storage = new loaded.SqliteStorageAdapter({ path: path.join(DB_DIR, STORE_FILE) });
             storage.open();
-            const memory = new loaded.GraphMemory({ storage, scope: { workspace: WORKSPACE, projectId: buildId } });
-            open.set(buildId, { memory, storage });
-            evictIfNeeded(buildId);
+            const memory = new loaded.GraphMemory({
+                storage,
+                scope: { workspace: WORKSPACE, projectId: SHARED_PROJECT_ID },
+            });
+            open.set(STORE_FILE, { memory, storage });
             return memory;
         } catch (error) {
             return note('forBuild', error);
         }
-    })().finally(() => opening.delete(buildId));
+    })().finally(() => { opening = null; });
 
-    opening.set(buildId, attempt);
-    return attempt;
+    return opening;
 }
 
 /* ------------------------------------------------------------------ write -- */
@@ -205,7 +228,10 @@ export async function openEpisodeSafe({ buildId, objective, baseRevisionId, attr
     const memory = await forBuild(buildId);
     if (!memory) return null;
     const cleanObjective = String(objective ?? 'build').slice(0, 2_000);
-    const cleanBase = String(baseRevisionId ?? 'rev-1').slice(0, 512);
+    /* The build id, not `rev-1`. Episodes live in a shared store now, and this is the
+       field that says which run an episode belongs to — the same job `cycleId` does for
+       events. A caller that supplies its own base revision still wins. */
+    const cleanBase = String(baseRevisionId ?? buildId).slice(0, 512);
     try {
         const alreadyOpen = memory
             .listEpisodes()
@@ -255,7 +281,10 @@ export async function appendEventSafe({ buildId, episodeId, kind, payload, evide
         const result = memory.appendEvent({
             kind,
             occurredAt: new Date().toISOString(),
-            projectId: buildId,
+            /* The store is shared, so the project is the workspace's builder and the
+               build id is what keeps this event attributable to the run that caused it.
+               `cycleId` already carried it; only `projectId` was wrong. */
+            projectId: SHARED_PROJECT_ID,
             cycleId: buildId,
             phaseId: rest.phaseId ?? 'builder',
             ...(episodeId ? { episodeId } : {}),
@@ -429,7 +458,10 @@ export async function trialBlock({ buildId, episodeId }) {
          */
         const lastFailure = memory
             .queryEvents({ kind: 'verification.completed' })
-            .filter((event) => event.payload?.ok === false)
+            /* This build's own failure, not the last failure anywhere. With one store
+               per build the scoping was free; now it has to be said, or a trial would be
+               driven by whatever some other run broke on. */
+            .filter((event) => event.cycleId === buildId && event.payload?.ok === false)
             .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt))[0];
         const codes = new Set(Object.keys(lastFailure?.payload?.codes ?? {}));
         if (codes.size === 0) return '';
@@ -546,12 +578,17 @@ export async function listBuildState(buildId) {
     const memory = await forBuild(buildId);
     if (!memory) return null;
     try {
+        /* Episodes and events are this build's; lessons are everyone's. That asymmetry
+           is the whole point of the shared store — a build should see what it did, and
+           what every earlier build learned. The engine has no `cycleId` filter in SQL,
+           so the narrowing happens here; the volumes are small and the alternative is a
+           schema change to the engine. */
         return {
             buildId,
-            episodes: memory.listEpisodes(),
+            episodes: memory.listEpisodes().filter((e) => e.baseRevisionId === buildId),
             lessons: memory.listLessons(),
             evidenceCount: memory.listEvidence().length,
-            eventCount: memory.queryEvents({}).length,
+            eventCount: memory.queryEvents({}).filter((e) => e.cycleId === buildId).length,
         };
     } catch (error) {
         return note('listBuildState', error);

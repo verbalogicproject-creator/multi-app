@@ -69,6 +69,47 @@ export const PROPOSAL_TABLE = {
         recommendation:
             'Always emit index.html, with a root element and a module script pointing at src/main.tsx. Without it nothing can start, however complete the rest is.',
     },
+    'type-error': {
+        trigger: 'Generated code failed a strict TypeScript check',
+        recommendation:
+            'Write code that type-checks under strict mode. Annotate props and state, ' +
+            'do not assign across incompatible types, and do not reference identifiers ' +
+            'that were never declared or imported.',
+    },
+    'syntax-error': {
+        trigger: 'A generated file does not parse',
+        recommendation:
+            'Emit complete, syntactically valid files. Close every brace, bracket and JSX ' +
+            'tag and terminate every string. Escape quotes inside JSX text — ' +
+            'setQuote("I can\'t do this"), never setQuote(\'I can\'t do this\'). And never ' +
+            'store code as data inside a template literal: a snippet containing a backtick ' +
+            'or ${ ends the literal holding it and breaks the whole file. Use a ' +
+            'double-quoted string with \\n, or escape every backtick and ${ in the content.',
+    },
+    'runtime-error': {
+        trigger: 'The generated app threw once it was running',
+        recommendation:
+            'Guard every value that can be absent before you use it. Give useState a ' +
+            'sensible initial value rather than null or undefined, check an array exists ' +
+            'before mapping it, and do not read a property off something a fetch or a ' +
+            'lookup might not have returned. Code that type-checks can still throw on ' +
+            'the first render.',
+    },
+    'renders-nothing': {
+        trigger: 'The app built and ran without error, but mounted nothing',
+        recommendation:
+            'Make sure the entry actually mounts: createRoot on the element index.html ' +
+            'declares, rendering the app inside it. Then make sure the first route ' +
+            'renders something — a router whose paths never match the initial location ' +
+            'produces a page that is blank and not broken.',
+    },
+    'bundle-error': {
+        trigger: 'The project would not bundle',
+        recommendation:
+            'Import only from files you emitted and packages you listed in package.json, ' +
+            'and keep every module a valid ES module. A project that type-checks can ' +
+            'still fail to build.',
+    },
     'unresolved-html-ref': {
         trigger: 'index.html references a file that was never generated',
         recommendation:
@@ -86,10 +127,23 @@ export const PROPOSAL_TABLE = {
 export const NOT_A_LESSON = {
     'no-files': 'The generator returned nothing. "Return some files" is not guidance a model can act on.',
     'missing-src-main': 'A warning, not a failure. The build still runs.',
-    'missing-preview-html': 'A warning. It costs the preview, not the project.',
     'file-too-short': 'A warning, and often correct — some files really are three lines.',
-    'plan-page-missing': 'A warning about plan drift, which is a judgement the human makes, not a rule.',
-    'plan-component-missing': 'The same judgement.',
+    /* These became errors when the plan stopped being a suggestion. They still teach
+       nothing, but for a different reason than before: the manifest is now made to
+       cover the plan before any request is spent (`coverPlan`), so by the time this
+       fires the entry existed and the *file request* failed to deliver it. That is a
+       generation gap, already carried by `missing`, and the lesson it would propose —
+       "emit every page the plan names" — describes something the model was not given
+       the chance to get wrong. */
+    'plan-page-missing': 'The manifest is made to cover the plan, so this now means a file request failed, not that the model forgot the page.',
+    'plan-component-missing': 'The same: a delivery gap, not a planning one.',
+    /* Not a missing entry — a deliberate exclusion. The model that wrote the code is
+       the same one reporting whether it satisfies the criteria; teaching a lesson from
+       that self-report would let a lesson qualify itself, which the ladder's
+       independence property already forbids for every other signal. If this ever
+       needs a real lesson, it needs an independent check first (a per-criterion test
+       harness, not a model's opinion of its own work), not a row here. */
+    'acceptance-criterion-unmet': 'Self-reported by the model that wrote the code, not an independent judge — cannot justify a lesson without the defendant grading its own homework.',
 };
 
 /** Any code the table has never been asked about — the thing this file exists to surface. */
@@ -97,6 +151,69 @@ export function unmappedCodes(codes) {
     return Object.keys(codes ?? {}).filter(
         (code) => !(code in PROPOSAL_TABLE) && !(code in NOT_A_LESSON),
     );
+}
+
+/**
+ * Codes a *resolved* diagnostic can justify a pattern for — deliberately a
+ * subset of `PROPOSAL_TABLE`'s codes, not all of them. The generation-time
+ * codes (`unresolved-import`, `missing-index-html`, `placeholder-content`,
+ * ...) describe a manifest/file-request failure that has no equivalent once a
+ * file already exists and is being edited; only the codes a live
+ * diagnostics/preview comparison can actually re-observe as resolved belong
+ * here.
+ *
+ * Deliberately no hand-written "why this worked" recommendation, unlike
+ * `PROPOSAL_TABLE`'s. A fix lesson can say "avoid X" because the mistake is
+ * named and specific; a pattern can only honestly say "this combination
+ * resolved this class of issue once" — the actual evidence for whether it
+ * generalizes is the ladder's own qualify/approve mechanism (a second,
+ * distinct, verified reuse), not a sentence asserted at proposal time. See
+ * `declarations-clarification-correction.md` — a recommendation this file
+ * cannot back with evidence is exactly the overclaiming that document warns
+ * against.
+ */
+const PATTERN_TABLE = {
+    'type-error': { trigger: 'A type error was present, then resolved without introducing a new one' },
+    'syntax-error': { trigger: 'A syntax error was present, then resolved without introducing a new one' },
+    'runtime-error': { trigger: 'The app threw at runtime, then ran cleanly after a fix' },
+    'bundle-error': { trigger: 'The project failed to bundle, then bundled cleanly after a fix' },
+};
+
+const PATTERN_RECOMMENDATION =
+    'The persona, skill, and model combination active when this was resolved is worth trying again for ' +
+    'a similar issue — but this records that something worked once, not why it will always work. ' +
+    'Confidence comes from a second, distinct, verified reuse (the ladder\'s own qualification gate), not from this note alone.';
+
+/**
+ * The patterns a *resolved* verdict justifies — the success-side mirror of
+ * `proposalsFor`. Reuses the exact same lessons table and ladder (no schema
+ * change): a pattern is a lesson like any other, distinguished only by a
+ * reserved `"pattern"` triggerTag, so the dashboard can separate "corrects a
+ * defect" from "endorses an approach that already worked" while both ride the
+ * same proposed → qualified → approved gates — a pattern still needs a
+ * second, distinct, verified episode to qualify, same as a fix.
+ *
+ * A clean pass with nothing to fix (`codes` empty) proposes nothing — passing
+ * because nothing was ever broken teaches exactly as little as failing
+ * because an instrument gave up (`proposalsFor`'s own `inconclusive` case).
+ */
+export function patternsFor(payload) {
+    if (!payload || payload.ok !== true) return [];
+    if (payload.inconclusive === true) return [];
+
+    const codes = payload.codes ?? {};
+    return Object.keys(codes)
+        .filter((code) => code in PATTERN_TABLE)
+        .sort()
+        .map((code) => ({
+            code,
+            trigger: PATTERN_TABLE[code].trigger,
+            recommendation: PATTERN_RECOMMENDATION,
+            scope: BUILD_SCOPE,
+            domain: 'build',
+            limits: LIMITS,
+            triggerTags: ['pattern', code],
+        }));
 }
 
 /**
@@ -108,6 +225,23 @@ export function unmappedCodes(codes) {
  */
 export function proposalsFor(payload) {
     if (!payload || payload.ok !== false) return [];
+    /**
+     * An instrument that failed has no opinion about the work.
+     *
+     * When a generation is cut off by its output budget, the validators run over a
+     * half-written project and report exactly what you would expect: unbalanced
+     * braces, unterminated strings, a missing entry point. Every one of those is true
+     * of the *text* and false of the *model* — it did not forget `index.html`, it was
+     * stopped before it got there.
+     *
+     * Proposing from that teaches the next attempt to fix mistakes nobody made, and a
+     * single passing build afterwards promotes the lie to `qualified`. Measured on a
+     * real build: three lessons, all three wrong, all three from one truncation.
+     *
+     * So an inconclusive verdict proposes nothing. It is not a pass and not a
+     * failure; it is the absence of a verdict, and the ladder must be told so.
+     */
+    if (payload.inconclusive === true) return [];
 
     const codes = payload.codes ?? {};
     return Object.keys(codes)

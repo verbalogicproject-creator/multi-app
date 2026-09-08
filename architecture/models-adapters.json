@@ -1,0 +1,479 @@
+{
+  "$schema": "declaration-v1",
+  "generatedBy": "architecture/generate/models.mjs",
+  "generatedFrom": "providers/catalog.js (CATALOG, PROVIDER_LABELS, isProviderEnabled — imported directly, not retyped)",
+  "note": "Do not hand-edit the \"providers\" section below; re-run the generator instead. Hand-edit ADAPTER_QUIRKS and LOCAL_RAG_STACK in generate/models.mjs, then re-run.",
+  "providers": [
+    {
+      "id": "google",
+      "label": "Google Gemini",
+      "enabledOnThisMachine": false,
+      "adapterFile": "providers/google.js",
+      "modelCount": 6,
+      "models": [
+        {
+          "id": "gemini-3.5-flash",
+          "provider": "google",
+          "label": "3.5 Flash",
+          "hint": "Fast, free tier — default for chat and coding",
+          "tools": true,
+          "jsonMode": "native",
+          "thinking": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
+          "priceIn": 0,
+          "priceOut": 0,
+          "dailyLimit": 250,
+          "fallback": [
+            "gemini-3.5-flash-lite"
+          ]
+        },
+        {
+          "id": "gemini-3.5-flash-lite",
+          "provider": "google",
+          "label": "3.5 Flash-Lite",
+          "hint": "Cheapest and fastest Gemini",
+          "tools": true,
+          "jsonMode": "native",
+          "thinking": true,
+          "efforts": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
+          "priceIn": 0,
+          "priceOut": 0,
+          "dailyLimit": 1000,
+          "fallback": []
+        },
+        {
+          "id": "gemini-3.8-flash",
+          "provider": "google",
+          "label": "3.8 Flash",
+          "hint": "Newest flash — structured output confirmed working; occasional 503s under load, same as any model",
+          "tools": true,
+          "jsonMode": "native",
+          "thinking": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "priceIn": 0,
+          "priceOut": 0,
+          "dailyLimit": 20,
+          "fallback": [
+            "gemini-3.6-flash",
+            "gemini-3.5-flash"
+          ]
+        },
+        {
+          "id": "gemini-3.6-flash",
+          "provider": "google",
+          "label": "3.6 Flash",
+          "hint": "Verified across streaming, tools and structured output",
+          "tools": true,
+          "jsonMode": "native",
+          "thinking": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "priceIn": 0,
+          "priceOut": 0,
+          "dailyLimit": 20,
+          "fallback": [
+            "gemini-3.5-flash"
+          ]
+        },
+        {
+          "id": "gemini-3.7-flash",
+          "provider": "google",
+          "label": "3.7 Flash",
+          "hint": "Strong coding and agentic work — low daily quota",
+          "tools": true,
+          "jsonMode": "native",
+          "thinking": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "priceIn": 0,
+          "priceOut": 0,
+          "dailyLimit": 20,
+          "fallback": [
+            "gemini-3.6-flash",
+            "gemini-3.5-flash"
+          ]
+        },
+        {
+          "id": "gemini-3.1-pro-preview",
+          "provider": "google",
+          "label": "3.1 Pro (preview)",
+          "hint": "Deepest Gemini reasoning, slowest",
+          "tools": true,
+          "jsonMode": "native",
+          "thinking": true,
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "priceIn": 0,
+          "priceOut": 0,
+          "dailyLimit": 25,
+          "fallback": [
+            "gemini-3.7-flash",
+            "gemini-3.5-flash"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "anthropic",
+      "label": "Anthropic Claude",
+      "enabledOnThisMachine": false,
+      "adapterFile": "providers/anthropic.js",
+      "modelCount": 4,
+      "models": [
+        {
+          "id": "claude-haiku-4-5",
+          "provider": "anthropic",
+          "label": "Haiku 4.5",
+          "hint": "Fastest Claude, cheapest — good default for chat",
+          "tools": true,
+          "jsonMode": "native",
+          "thinking": true,
+          "thinkingStyle": "budget",
+          "priceIn": 1,
+          "priceOut": 5,
+          "maxOutput": 64000,
+          "fallback": []
+        },
+        {
+          "id": "claude-sonnet-5",
+          "provider": "anthropic",
+          "label": "Sonnet 5",
+          "hint": "Balanced speed and intelligence, 1M context",
+          "tools": true,
+          "jsonMode": "native",
+          "thinking": true,
+          "thinkingStyle": "adaptive",
+          "priceIn": 2,
+          "priceOut": 10,
+          "maxOutput": 128000,
+          "fallback": [
+            "claude-haiku-4-5"
+          ]
+        },
+        {
+          "id": "claude-opus-5",
+          "provider": "anthropic",
+          "label": "Opus 5",
+          "hint": "Strongest agentic coding — expensive",
+          "tools": true,
+          "jsonMode": "native",
+          "thinking": true,
+          "thinkingStyle": "adaptive",
+          "priceIn": 5,
+          "priceOut": 25,
+          "maxOutput": 128000,
+          "fallback": [
+            "claude-sonnet-5"
+          ]
+        },
+        {
+          "id": "claude-fable-5",
+          "provider": "anthropic",
+          "label": "Fable 5",
+          "hint": "Deepest reasoning, thinking always on — most expensive",
+          "tools": true,
+          "jsonMode": "native",
+          "thinking": true,
+          "thinkingStyle": "always-on",
+          "priceIn": 10,
+          "priceOut": 50,
+          "maxOutput": 128000,
+          "fallback": [
+            "claude-opus-5",
+            "claude-sonnet-5"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "openai",
+      "label": "OpenAI",
+      "enabledOnThisMachine": false,
+      "adapterFile": "providers/openai.js",
+      "modelCount": 3,
+      "models": [
+        {
+          "id": "gpt-5.6-luna",
+          "provider": "openai",
+          "label": "5.6 Luna",
+          "hint": "Fastest and cheapest GPT-5.6",
+          "tools": true,
+          "jsonMode": "native",
+          "thinking": true,
+          "priceIn": 1,
+          "priceOut": 6,
+          "fallback": []
+        },
+        {
+          "id": "gpt-5.6-terra",
+          "provider": "openai",
+          "label": "5.6 Terra",
+          "hint": "Mid-tier GPT-5.6, balanced",
+          "tools": true,
+          "jsonMode": "native",
+          "thinking": true,
+          "priceIn": 2.5,
+          "priceOut": 15,
+          "fallback": [
+            "gpt-5.6-luna"
+          ]
+        },
+        {
+          "id": "gpt-5.6-sol",
+          "provider": "openai",
+          "label": "5.6 Sol",
+          "hint": "Deepest OpenAI reasoning — expensive",
+          "tools": true,
+          "jsonMode": "native",
+          "thinking": true,
+          "priceIn": 5,
+          "priceOut": 30,
+          "fallback": [
+            "gpt-5.6-terra",
+            "gpt-5.6-luna"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "nvidia",
+      "label": "NVIDIA (free)",
+      "enabledOnThisMachine": false,
+      "adapterFile": "providers/nvidia.js",
+      "modelCount": 5,
+      "models": [
+        {
+          "id": "meta/llama-3.2-11b-vision-instruct",
+          "provider": "nvidia",
+          "label": "Llama 3.2 11B",
+          "hint": "Free, ~0.6s — fastest option for quick tests",
+          "tools": true,
+          "jsonMode": "native",
+          "thinking": false,
+          "priceIn": 0,
+          "priceOut": 0,
+          "maxOutput": 16384,
+          "fallback": []
+        },
+        {
+          "id": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+          "provider": "nvidia",
+          "label": "Nemotron Nano 3",
+          "hint": "Free reasoning model, ~1.6s",
+          "tools": true,
+          "jsonMode": "native",
+          "thinking": true,
+          "priceIn": 0,
+          "priceOut": 0,
+          "maxOutput": 16384,
+          "fallback": [
+            "meta/llama-3.2-11b-vision-instruct"
+          ]
+        },
+        {
+          "id": "nvidia/nemotron-3.5-lightning-30b-a3b",
+          "provider": "nvidia",
+          "label": "Nemotron Lightning",
+          "hint": "Free reasoning model, ~3.9s",
+          "tools": true,
+          "jsonMode": "native",
+          "thinking": true,
+          "priceIn": 0,
+          "priceOut": 0,
+          "maxOutput": 16384,
+          "fallback": [
+            "meta/llama-3.2-11b-vision-instruct"
+          ]
+        },
+        {
+          "id": "minimaxai/minimax-m3",
+          "provider": "nvidia",
+          "label": "MiniMax M3",
+          "hint": "Free, ~6s, JSON and tools",
+          "tools": true,
+          "jsonMode": "native",
+          "thinking": false,
+          "priceIn": 0,
+          "priceOut": 0,
+          "maxOutput": 32768,
+          "fallback": [
+            "meta/llama-3.2-11b-vision-instruct"
+          ]
+        },
+        {
+          "id": "moonshotai/kimi-k3",
+          "provider": "nvidia",
+          "label": "Kimi K3",
+          "hint": "Free, large context, reasoning — ~7s",
+          "tools": true,
+          "jsonMode": "native",
+          "thinking": true,
+          "priceIn": 0,
+          "priceOut": 0,
+          "maxOutput": 32768,
+          "fallback": [
+            "minimaxai/minimax-m3"
+          ]
+        }
+      ]
+    }
+  ],
+  "adapterQuirks": [
+    {
+      "provider": "google",
+      "statement": "Gemini 3.x rejects the legacy thinkingBudget field (including 0 to disable); effort maps to a thinkingLevel enum instead, and \"none\" maps to MINIMAL rather than a zero budget.",
+      "mechanism": {
+        "file": "providers/effort.js",
+        "line": 30,
+        "note": "geminiThinking()"
+      },
+      "level": "gate"
+    },
+    {
+      "provider": "google",
+      "statement": "gemini-3.7-flash and gemini-3.1-pro-preview reject the MINIMAL thinking level that the flash models accept; an unsupported level is a hard 400, not a silent downgrade, so effort is clamped to the nearest supported level before the request is sent.",
+      "mechanism": {
+        "file": "providers/effort.js",
+        "line": 19,
+        "note": "clampEffort()"
+      },
+      "level": "gate"
+    },
+    {
+      "provider": "anthropic",
+      "statement": "5-gen Claude models (sonnet-5, opus-5, fable-5) require adaptive thinking plus output_config.effort; the legacy {type:\"enabled\", budget_tokens} form is rejected with a 400.",
+      "mechanism": {
+        "file": "providers/anthropic.js",
+        "line": 8,
+        "note": "reasoningFor()"
+      },
+      "level": "gate"
+    },
+    {
+      "provider": "anthropic",
+      "statement": "claude-haiku-4-5 is the reverse of the 5-gen models: output_config.effort itself returns a 400 (\"does not support the effort parameter\"), so it needs a manual budget_tokens instead.",
+      "mechanism": {
+        "file": "providers/anthropic.js",
+        "line": 10,
+        "note": "reasoningFor()"
+      },
+      "level": "gate"
+    },
+    {
+      "provider": "anthropic",
+      "statement": "claude-fable-5 has thinking always on; no thinking config is sent for it at all.",
+      "mechanism": {
+        "file": "providers/anthropic.js",
+        "line": 68,
+        "note": "reasoningFor(), style === \"always-on\""
+      },
+      "level": "lint"
+    },
+    {
+      "provider": "openai",
+      "statement": "The OpenAI adapter is built on the Responses API, not Chat Completions; \"none\" is a real, unclamped effort level there.",
+      "mechanism": {
+        "file": "providers/openai.js",
+        "line": 5,
+        "note": "requestFor(), reasoning: { effort: normalizeEffort(effort) }"
+      },
+      "level": "gate"
+    },
+    {
+      "provider": "nvidia",
+      "statement": "NVIDIA reasoning models emit reasoning_content before content; a tight max_tokens lets reasoning consume the whole completion budget and starve the actual answer, so reasoning needs extra headroom.",
+      "mechanism": {
+        "file": "providers/nvidia.js",
+        "line": 9,
+        "note": "header comment + streamChat()"
+      },
+      "level": "gap"
+    },
+    {
+      "provider": "nvidia",
+      "statement": "NVIDIA models cannot be constrained to a JSON schema server-side (no schema-constrained decoding); response_format:{type:\"json_object\"} only guarantees syntactic JSON, so the schema is described in the prompt text instead and validated after the fact.",
+      "mechanism": {
+        "file": "providers/nvidia.js",
+        "line": 112,
+        "note": "schemaPrompt()"
+      },
+      "level": "gap"
+    },
+    {
+      "provider": "all",
+      "statement": "Effort support is not uniform even within one provider; an unsupported level is a hard 400 for every adapter, never a graceful degrade, which is why every adapter calls clampEffort before sending a request.",
+      "mechanism": {
+        "file": "providers/effort.js",
+        "line": 12,
+        "note": "clampEffort()"
+      },
+      "level": "lint"
+    }
+  ],
+  "localRagStack": {
+    "status": "planned — not wired into providers/ or memory/ yet",
+    "purpose": "On-device semantic recall for the graph-memory lesson ladder (embedding-based, replacing/augmenting the current rule/keyword-based lookup in memory/proposals.js).",
+    "runtime": "llama.cpp servers on Termux/Android, on-device, no cloud call",
+    "components": [
+      {
+        "role": "generator",
+        "model": "qwen2.5-3b-instruct-q4_0",
+        "ctx": 16384,
+        "cacheReuse": 512,
+        "endpoint": "127.0.0.1:8147",
+        "backend": "HTP0"
+      },
+      {
+        "role": "reranker",
+        "model": "bge-reranker-v2-m3-q8",
+        "batch": 2048,
+        "endpoint": "127.0.0.1:8144",
+        "backend": "HTP0"
+      },
+      {
+        "role": "embedder",
+        "model": "embeddinggemma-300m-q8",
+        "ctx": 4096,
+        "batch": 1024,
+        "endpoint": "127.0.0.1:8145",
+        "backend": "GPUOpenCL"
+      },
+      {
+        "role": "classifier",
+        "note": "local proxy fanning out to the reranker",
+        "endpoint": "127.0.0.1:8148"
+      }
+    ],
+    "recommendedSampling": {
+      "temperature": 0.7,
+      "topP": 0.8,
+      "topK": 20,
+      "note": "Qwen official guidance; native context 32K"
+    },
+    "mechanism": null,
+    "level": "gap"
+  }
+}

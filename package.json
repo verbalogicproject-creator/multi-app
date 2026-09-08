@@ -1,6 +1,12 @@
 {
   "name": "gemini-multimodal-chat",
-  "version": "1.0.0",
+  "license": "Apache-2.0",
+  "author": "Eyal Nof",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/verbalogicproject-creator/multi-app.git"
+  },
+  "version": "1.1.0",
   "description": "Gemini multimodal chat + app builder (Vite/React client, Express proxy backend).",
   "main": "server.js",
   "type": "module",
@@ -13,14 +19,18 @@
     "dev:server": "node --watch server.js",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "smoke": "curl -sf http://localhost:8050/healthz",
     "smoke:providers": "node scripts/smoke-providers.mjs",
-    "check:memory-loop": "node scripts/check-memory-loop.mjs",
     "smoke:memory": "node scripts/smoke-memory.mjs",
     "check:css": "node scripts/check-css.mjs",
     "audit:ui": "npm run build && node scripts/audit-ui.mjs",
     "shoot:ui": "npm run build && node scripts/audit-ui.mjs --shots /tmp/ui-shots",
-    "check:editor": "npm run build && node scripts/check-editor.mjs"
+    "check:editor": "npm run build && node scripts/check-editor.mjs",
+    "check:preview": "npm run build && node scripts/check-preview.mjs",
+    "check:auth": "node scripts/check-auth.mjs",
+    "check:pipeline": "npm run build && node scripts/check-pipeline.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.122.0",
@@ -28,17 +38,30 @@
     "@codemirror/lang-html": "^6.4.12",
     "@codemirror/lang-javascript": "^6.2.5",
     "@codemirror/lang-json": "^6.0.2",
+    "@codemirror/lint": "^6.9.7",
+    "@codesandbox/sandpack-react": "^2.20.0",
     "@google/genai": "^2.20.0",
     "@lezer/highlight": "^1.2.3",
+    "clsx": "^2.1.1",
     "codemirror": "^6.0.2",
     "cors": "^2.8.5",
+    "date-fns": "^4.4.0",
     "dotenv": "^16.4.5",
+    "esbuild": "^0.21.5",
     "express": "^4.19.2",
+    "framer-motion": "^11.18.2",
+    "lucide-react": "^0.460.0",
     "multer": "1.4.5-lts.1",
     "multi-graph-memory": "file:../multi-graph-memory",
     "openai": "^7.8.0",
     "react": "^19.1.1",
-    "react-dom": "^19.1.1"
+    "react-dom": "^19.1.1",
+    "react-hook-form": "^7.87.0",
+    "react-router-dom": "^6.30.6",
+    "recharts": "^2.15.4",
+    "tailwind-merge": "^2.6.1",
+    "zod": "^3.25.76",
+    "zustand": "^5.0.15"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
@@ -49,6 +72,7 @@
     "playwright-core": "^1.62.1",
     "tailwindcss": "^4.3.3",
     "typescript": "5.9.3",
-    "vite": "^5.2.13"
+    "vite": "^5.2.13",
+    "vitest": "^3.2.7"
   }
 }

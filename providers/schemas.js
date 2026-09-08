@@ -13,6 +13,7 @@ const obj = (properties, description) => ({
     additionalProperties: false,
 });
 const str = (description) => ({ type: 'string', description });
+const bool = (description) => ({ type: 'boolean', description });
 const arr = (items, description) => ({ type: 'array', description, items });
 
 export const PLAN_SCHEMA = obj({
@@ -29,6 +30,34 @@ export const PLAN_SCHEMA = obj({
     }), 'A list of shared UI components to be created.'),
     acceptanceCriteria: arr(str('One concrete, checkable statement.'),
         '3-6 concrete, checkable statements describing what the finished app must do for it to be considered complete.'),
+    /**
+     * The shape every page and component must agree on, decided once instead of
+     * guessed separately by each of them.
+     *
+     * Without this, a photo's `location` and `date` are invented independently by
+     * whichever file needs them next, and by the fourth file three different guesses
+     * exist for the same conceptual object — measured on a real build: six files,
+     * six independent shapes for `PhotoItem`, `ServicePackage` and `ClientReview`,
+     * ~50 type errors from disagreement alone. `scaffoldFor` writes this into
+     * `src/types.ts` verbatim, so it is frozen before a single file is requested —
+     * the same move that made the Router structural instead of remembered.
+     */
+    entities: arr(obj({
+        name: str('The TypeScript interface name for this shared data shape, e.g. PhotoItem. PascalCase.'),
+        fields: arr(obj({
+            name: str('Field name, e.g. location'),
+            type: str('The TypeScript type: string, number, boolean, or a union of string literals like "square" | "portrait" | "landscape".'),
+        }), "Every field this shape has — every field any page or component will need from it. Omitting one here is the mistake this section exists to prevent."),
+    }), 'The shared data shapes referenced by more than one page or component — a photo, a review, a booking. Leave empty for an app with no shared data model.'),
+    /**
+     * The plan's own creative read, decided once instead of left for Style to invent
+     * from nothing. Nothing before this fed a design decision forward — `Step_Theme`
+     * generates three directions from the idea alone, unaware the plan ever formed an
+     * opinion. Hyper-specific and intent-grounded by design (Nano Banana's own
+     * best-practice framing: "a logo for a high-end, minimalist skincare brand" beats
+     * "a logo") — a vague adjective here defeats the point as surely as no field at all.
+     */
+    designDirection: str('A concrete visual direction for THIS idea in one phrase, grounded in its actual purpose and audience — e.g. "dense technical dashboard, dark mono, data-first" or "editorial serif, warm paper tones, unhurried". Never a generic adjective like "modern" or "clean" alone — name the specific tradition, mood, or reference point.'),
 });
 
 const COLOR_ROLES = {
@@ -49,6 +78,38 @@ export const DIRECTIONS_SCHEMA = obj({
     }), 'Exactly three genuinely different art directions.'),
 });
 
+/**
+ * The manifest: what the project is made of, before any of it is written.
+ *
+ * Asking for this separately is what removes the output ceiling. A whole app in one
+ * response reliably exceeds the budget — measured at ~54k output tokens against a
+ * 65,536 cap, shared with thinking — but a list of paths and one-line purposes is a
+ * couple of thousand tokens whatever the app's size, and each file afterwards is
+ * bounded by the size of that one file.
+ *
+ * It also makes a build resumable: the manifest says what should exist, so what is
+ * missing is a set difference rather than a guess.
+ */
+export const MANIFEST_SCHEMA = obj({
+    files: arr(obj({
+        path: str("Full file path relative to the project root, e.g. 'src/pages/HomePage.tsx'."),
+        purpose: str('One line: what this file contains. No code.'),
+        /* Measured, not anticipated: with `purpose` alone, sixteen files written by
+           sixteen requests agreed on every path and still produced 28 type errors —
+           `types/tide.ts` exported `CoastalStation` while `Header.tsx` imported
+           `Station`, and `App.tsx` default-imported a named export. Paths were never
+           the hard part. The contract is. */
+        exports: arr(str("One export, e.g. 'default HomePage' or 'CoastalStation'."),
+            'Every name this file exports. Prefix the default export with "default". Config and CSS files export nothing.'),
+    }), 'Every file the project needs, including config, entry points, pages and components.'),
+});
+
+/** One file, written on its own. The unit that made the ceiling unreachable. */
+export const FILE_SCHEMA = obj({
+    path: str('The path this file was asked for, repeated back unchanged.'),
+    content: str('The complete file contents.'),
+});
+
 // A Record<path, content> map cannot be expressed in a strict schema (arbitrary keys),
 // so generation returns an array and the server converts it back to the map the
 // client protocol already expects.
@@ -56,7 +117,39 @@ export const GENERATE_SCHEMA = obj({
     files: arr(obj({
         path: str("Full file path relative to the project root, e.g. 'src/App.tsx'."),
         content: str('The complete file contents.'),
-    }), 'Every file of the generated project, including preview.html.'),
+    }), 'Every file of the generated project.'),
+});
+
+/**
+ * The acceptance-criteria self-check.
+ *
+ * Not a gate — a model judging its own output is not an independent observer, so this
+ * can never be the thing that decides whether a build passes. What it is: an honest
+ * self-report, structured so the server can tell satisfied from unsatisfied without
+ * parsing prose. See `server.js`'s `/api/builder/check-acceptance` and
+ * `HARNESS.md` for why this is labelled rather than trusted.
+ */
+export const ACCEPTANCE_CHECK_SCHEMA = obj({
+    results: arr(obj({
+        criterion: str('The acceptance criterion being judged, repeated back unchanged.'),
+        satisfied: bool('Whether the generated code actually satisfies this criterion.'),
+        evidence: str('One sentence: what in the code makes this true or false. Name a file if relevant.'),
+    }), 'One entry per acceptance criterion given, in the same order.'),
+});
+
+/**
+ * `/api/builder/edit` — a natural-language change against an already-generated
+ * project. Only the files that actually need to change, not the whole project:
+ * the model is given every current file as context and asked to return the
+ * ones it touched, the same "return only what changed" contract
+ * `REFINE_SYSTEM_PROMPT` already uses for the coding chat's own refine path.
+ */
+export const EDIT_SCHEMA = obj({
+    files: arr(obj({
+        path: str("The path of a file that needs to change, matching an existing path exactly."),
+        content: str('The complete new content of that file.'),
+    }), 'Only the files that need to change. A file not listed here is left exactly as it was.'),
+    summary: str('One or two sentences: what changed and why.'),
 });
 
 /** Converts the generated files array back into the { path: content } map the client expects. */

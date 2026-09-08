@@ -86,6 +86,48 @@ export const editorTheme = EditorView.theme(
             backgroundColor: 'var(--color-metal-500)',
             color: 'var(--color-metal-100)',
         },
+
+        /* The accent, finally spent. Nothing else in this theme carries hue, so an
+           underline here is the only coloured thing on the surface — which is the
+           entire reason it was held back. */
+        '.cm-lintRange-error': {
+            /* A wavy underline drawn as a background image, because a border would
+               change the line box and reflow the text it is marking. */
+            backgroundImage: 'none',
+            textDecoration: 'underline wavy var(--color-accent-soft)',
+            textDecorationSkipInk: 'none',
+            textUnderlineOffset: '0.2em',
+        },
+        '.cm-lintRange-warning': {
+            textDecoration: 'underline wavy var(--color-metal-400)',
+            textDecorationSkipInk: 'none',
+            textUnderlineOffset: '0.2em',
+        },
+        '.cm-lint-marker': { width: '0.7em', height: '0.7em' },
+        '.cm-lint-marker-error': { content: 'none', backgroundColor: 'var(--color-accent-strong)', borderRadius: '50%' },
+        '.cm-lint-marker-warning': { content: 'none', backgroundColor: 'var(--color-metal-400)', borderRadius: '50%' },
+
+        '.cm-tooltip': {
+            backgroundColor: 'var(--color-surface)',
+            color: 'var(--color-metal-200)',
+            border: 'none',
+            borderRadius: '0.5rem',
+            boxShadow: '0 8px 24px rgb(0 0 0 / 0.45), inset 0 0 0 1px rgb(255 255 255 / 0.08)',
+        },
+        '.cm-tooltip .cm-tooltip-arrow:before, .cm-tooltip .cm-tooltip-arrow:after': { borderTopColor: 'transparent', borderBottomColor: 'transparent' },
+        '.cm-diagnostic': {
+            padding: '0.5rem 0.75rem',
+            fontFamily: 'var(--font-sans)',
+            fontSize: '0.8125rem',
+            lineHeight: '1.4',
+            /* The default is a thick coloured left border. The hairline is this
+               app's idiom for the same job. */
+            borderLeft: 'none',
+            boxShadow: 'inset 1px 0 0 var(--color-accent-strong)',
+            whiteSpace: 'pre-wrap',
+        },
+        '.cm-diagnostic-warning': { boxShadow: 'inset 1px 0 0 var(--color-metal-400)' },
+        '.cm-diagnosticSource': { fontFamily: 'var(--font-mono)', opacity: '0.7', fontSize: '0.75rem' },
     },
     { dark: true },
 );

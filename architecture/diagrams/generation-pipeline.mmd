@@ -1,0 +1,47 @@
+%% The builder generation pipeline in detail — POST /api/builder/generate.
+%% Annotated with the two confirmed findings from hetrodox-unconventional-approaches.json
+%% at the exact steps they occur, rather than as a separate note nobody connects to the flow.
+flowchart TD
+    START(["Plan + theme approved"]) --> MANIFEST["Manifest request<br/>effort medium, 8192 tokens<br/>file paths + one-line purpose, no code"]
+    MANIFEST -->|"manifest usable"| PERFILE
+    MANIFEST -->|"manifest step fails"| WHOLEAPP["Whole-app fallback path<br/>effort frozen at medium<br/>shares 65536-token budget with thinking<br/>NEEDS-MEASUREMENT: A4 bench never run"]
+
+    subgraph PERFILE["Per-file generation — one request per manifest file"]
+        F1["File request<br/>effort high, 16384 tokens<br/>entities[] frozen into types.ts inlined"]
+    end
+
+    PERFILE --> INGEN["In-generation repair<br/>repairRound(): 1 model call per broken file<br/>up to maxFiles=10, concurrency 3"]
+    WHOLEAPP --> SALVAGE{"Response truncated?"}
+    SALVAGE -->|"yes — MAX_TOKENS/length"| SALVAGEREC["salvage.js<br/>recover complete files<br/>inconclusive:true — barred from lesson ladder"]
+    SALVAGE -->|"no"| INGEN
+
+    INGEN --> FIRSTCHECK["typecheck (pre-repair)<br/>preRepairErrors = diagnostics.length"]
+    FIRSTCHECK -->|"ok"| CANDIDATE
+    FIRSTCHECK -->|"errors found"| REPAIRLOOP
+
+    subgraph REPAIRLOOP["Post-generation repair loop — up to MAX_ROUNDS=3"]
+        direction TB
+        ROUND["Repair round<br/>re-request only files tsc blamed"]
+        PERFILECHECK{"Per-FILE error count<br/>fell for this file?"}
+        ROUND --> PERFILECHECK
+        PERFILECHECK -->|"no, for this file"| REVERTFILE["Revert THIS file only<br/>to its pre-round content"]
+        PERFILECHECK -->|"yes"| KEEPFILE["Keep this file's repair"]
+        REVERTFILE --> SETTLE["Re-check the whole project"]
+        KEEPFILE --> SETTLE
+        SETTLE --> PROGRESS{"Aggregate errors<br/>strictly fell this round?"}
+        PROGRESS -->|"yes, rounds < 3"| ROUND
+    end
+
+    REPAIRLOOP -->|"round did not improve<br/>in aggregate, OR 3 rounds done"| SHIP["Ship 'current' as final<br/>NO comparison to preRepairErrors<br/>NO rollback to best-seen snapshot"]
+    SHIP -.->|"CONFIRMED: real build went<br/>47 errors to 61/62 errors<br/>and this is what shipped"| BUG["gap: repair-loop-no-whole-round-rollback<br/>see hetrodox-unconventional-approaches.json"]
+
+    SHIP --> CANDIDATE["Candidate created<br/>candidate.created event"]
+    CANDIDATE --> VALIDATE["utils/validateBuild.ts<br/>deterministic, no model"]
+    VALIDATE --> VERDICT{"Verdict"}
+    VERDICT -->|"pass"| PROMOTE["Promoted — becomes the build"]
+    VERDICT -->|"fail"| HELD["Held for review<br/>Generate again / Keep anyway / Back to style"]
+
+    CANDIDATE -.->|"fire-and-forget, after response sent<br/>never gates the transition"| MEMTAP["memory.appendEventSafe<br/>CONFIRMED: only 6 episodes ever<br/>recorded across 570 db files"]
+
+    classDef gap fill:#2A2A2E,stroke:#EA580C,stroke-width:2px,color:#F4F4F5;
+    class BUG,MEMTAP,WHOLEAPP gap;

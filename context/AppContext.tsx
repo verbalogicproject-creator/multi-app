@@ -3,12 +3,15 @@ import { Project, ProjectFile, CustomAiStyle, Persona, Agent, AiResponseStyle } 
 import * as storageService from '../services/geminiService';
 import * as apiService from '../services/apiService';
 import type { CatalogModel } from '../services/apiService';
+import type { Surface } from '../types/ui';
 import * as buildStorage from '../services/buildStorage';
 import type { SavedBuild } from '../services/buildStorage';
 import * as memoryService from '../services/memoryService';
+import { runTypecheck } from '../services/typecheckService';
+import { previewVerdict } from '../services/previewVerdict';
 import type { EpisodeOutcome, MemoryEvent, MemoryEvidence } from '../services/memoryService';
 import { DEFAULT_PALETTE, sanitizeColors, type ArtDirection, type ThemeColors } from '../utils/palettes';
-import { validateBuild, type BuildValidation } from '../utils/validateBuild';
+import { validateBuild, type BuildValidation, type BuildIssue } from '../utils/validateBuild';
 import { generateUniqueId } from '../utils/common';
 import { createProjectZip } from '../utils/export';
 
@@ -32,6 +35,19 @@ export interface WebAppBuilderState {
         palette: string;
         typography: string;
         colors?: ThemeColors;      // concrete tokens; absent on builds saved before the token picker
+        /**
+         * The variety lever `providers/aesthetic.js` turns into prompt directives.
+         * Every field optional and independently toggleable — absent on every build
+         * saved before A0, and `buildAestheticDirective` treats an unset or unknown
+         * value as "say nothing about this dimension" rather than an error.
+         */
+        aesthetic?: {
+            typography?: string;
+            motion?: string;
+            background?: string;
+            antiSlop?: boolean;
+            selfReflection?: boolean;
+        };
     };
     generatedFiles: Record<string, string> | null;
     // A fresh generation lands here first and is only promoted once it passes
@@ -64,6 +80,17 @@ export interface WebAppBuilderState {
         message: string;
         isLoading: boolean;
         log: string[];
+        /**
+         * Set once a generation attempt's final NDJSON line arrives, straight
+         * from `server.js`'s `servedPayload`. `fellBack` is what a silent
+         * quota/overload downgrade looks like from here — the request asked for
+         * one model and a different, weaker one actually wrote the code. Reset
+         * at the start of every attempt so a stale notice from a previous run
+         * never survives into one that did not fall back.
+         */
+        requestedModel?: string | null;
+        servedModel?: string | null;
+        fellBack?: boolean;
     };
 }
 
@@ -134,10 +161,19 @@ export const restoreBuilderState = (): WebAppBuilderState => {
         validation: persisted.validation ?? null,
         savedBuildId: persisted.savedBuildId ?? null,
         memory: {
-            // A build in progress from before memory existed gets its cluster now
-            // rather than never: with no id, every tap for the rest of this build
-            // would silently no-op.
-            buildId: persisted.memory?.buildId ?? memoryService.newBuildId(),
+            /**
+             * A build in progress from before memory existed gets its cluster now rather
+             * than never: with no id, every tap for the rest of that build would silently
+             * no-op.
+             *
+             * **Only for a build in progress.** This minted an id unconditionally, and
+             * `resetWebAppBuild` persists `buildId: null` — so once anyone had finished or
+             * cancelled a build, every subsequent page load minted a fresh id, and
+             * `MemoryPanel`'s status poll materialised a database to ask whether that id
+             * had recorded anything. That is where 447 stores came from, 3 of them with a
+             * row in them. An idle builder has nothing to record and needs no identity.
+             */
+            buildId: persisted.memory?.buildId ?? (persisted.isActive ? memoryService.newBuildId() : null),
             episodeId: persisted.memory?.episodeId ?? null,
             lastOutcome: OUTCOMES.includes(persisted.memory?.lastOutcome as EpisodeOutcome)
                 ? (persisted.memory!.lastOutcome as EpisodeOutcome)
@@ -188,7 +224,6 @@ const defaultCustomStyles: CustomAiStyle[] = [
     }
 ];
 
-type AppTab = 'projects' | 'agents' | 'ai-settings' | 'tools';
 
 interface AppContextType {
     projects: Project[];
@@ -198,12 +233,21 @@ interface AppContextType {
     /** Loads a project's files if they are not in the map yet. See its definition. */
     ensureProjectFiles: (projectId: string) => Promise<void>;
     editingProject: Project | null;
-    isProjectPanelCollapsed: boolean;
     analyzingProjects: Set<string>;
-    activeTab: AppTab;
-    setActiveTab: React.Dispatch<React.SetStateAction<AppTab>>;
+    /**
+     * Which destination is on screen. It lives here, not in `App`, because things that
+     * are not the dock need to move you — the builder's hand-off has to be able to land
+     * you in the IDE it just filled, and choosing an expert has to land you in the
+     * conversation it changed.
+     *
+     * It was `MobileSurface` when the phone had destinations and the desktop had a
+     * layout. There is one layout now, so it is just `Surface`.
+     */
+    surface: Surface;
+    setSurface: React.Dispatch<React.SetStateAction<Surface>>;
     handleCreateProject: (name: string) => Promise<Project>;
     handleDeleteProject: (id: string) => Promise<void>;
+    projectDeletionCost: (id: string) => { files: number; agents: string[] };
     handleToggleProjectSelection: (id: string) => void;
     handleViewProjectFiles: (id: string) => Promise<void>;
     handleAddFile: (projectId: string, file: File) => Promise<void>;
@@ -215,7 +259,6 @@ interface AppContextType {
     handleOpenProjectSettings: (project: Project) => Promise<void>;
     handleCloseProjectSettings: () => void;
     handleRenameProject: (projectId: string, newName: string) => Promise<void>;
-    handleToggleProjectPanel: () => void;
     setSelectedProjectIds: React.Dispatch<React.SetStateAction<Set<string>>>;
     useWebSearch: boolean;
     setUseWebSearch: React.Dispatch<React.SetStateAction<boolean>>;
@@ -248,7 +291,7 @@ interface AppContextType {
     // Web App Builder context
     builderState: WebAppBuilderState;
     setBuilderState: React.Dispatch<React.SetStateAction<WebAppBuilderState>>;
-    startWebAppBuild: () => void;
+    startWebAppBuild: (idea?: string) => void;
     resetWebAppBuild: () => void;
     generateWebAppPlan: () => Promise<void>;
     refineWebAppPlan: (currentPlan: any, feedback: string) => Promise<void>;
@@ -261,6 +304,7 @@ interface AppContextType {
     bumpQuotaTick: () => void;
     generateWebAppCode: () => Promise<void>;
     loadGeneratedProjectIntoIDE: () => Promise<void>;
+    editOpenProject: (projectId: string, instruction: string) => Promise<{ validation: BuildValidation; changedPaths: string[]; summary: string }>;
     exportGeneratedProject: () => Promise<void>;
     savedBuilds: SavedBuild[];
     saveCurrentBuild: (name: string, asCopy?: boolean) => void;
@@ -281,11 +325,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     filesByProjectRef.current = filesByProject;
     const [activeProjectView, setActiveProjectView] = useState<string | null>(null);
     const [editingProject, setEditingProject] = useState<Project | null>(null);
-    const [isProjectPanelCollapsed, setIsProjectPanelCollapsed] = useState(false);
     const [analyzingProjects, setAnalyzingProjects] = useState<Set<string>>(new Set());
-    // Land on the builder when a build was in progress, so a reload never looks like data loss.
-    const [activeTab, setActiveTab] = useState<AppTab>(() => getRestoredBuilderState().isActive ? 'tools' : 'projects');
-    
+
     const [useWebSearch, setUseWebSearch] = useState(false);
     const [lowLatencyMode, setLowLatencyMode] = useState(false);
     const [selectedModel, setSelectedModelState] = useState<string>(() => {
@@ -318,6 +359,20 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const [activePersona, setActivePersona] = useState<Persona>(defaultPersona);
     const [agents, setAgents] = useState<Agent[]>([]);
     const [activeAgentId, setActiveAgentId] = useState<string | null>(null);
+    /**
+     * Where you are. One value, because the dock is the only navigation.
+     *
+     * It used to be two: this, plus an `activeTab` naming a tab inside a rail that no
+     * longer exists. Two values for one question is how the old shell came to disagree
+     * with itself — the tab said `AI Tools` while the surface rendered something else.
+     *
+     * Landing on the builder when a build was interrupted is the one piece of that
+     * state worth keeping, so it moves here: a reload never looks like data loss, and
+     * `Projects` is home otherwise.
+     */
+    const [surface, setSurface] = useState<Surface>(
+        () => getRestoredBuilderState().isActive ? 'build' : 'projects',
+    );
 
     const [globalError, setGlobalError] = useState<string | null>(null);
     // Bumped after every served model request so quota badges refetch.
@@ -382,11 +437,21 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         loadInitialData();
     }, []);
 
+    /**
+     * Keep the persona being edited in step with the one that is selected.
+     *
+     * This read `if (foundPersona) setActivePersona(foundPersona)` — which updates on a
+     * hit and **silently keeps the previous value on a miss**. Delete the selected
+     * persona and `activePersona` went on holding the deleted one, so its instructions
+     * kept reaching the model with nothing on screen to say so. The same shape as the
+     * dock and the dangling project: a check for the weaker property standing in for the
+     * stronger one. A selection that no longer resolves is no selection.
+     */
     useEffect(() => {
-        if (selectedPersonaId) {
-            const foundPersona = personas.find(p => p.id === selectedPersonaId);
-            if (foundPersona) setActivePersona(foundPersona);
-        }
+        if (!selectedPersonaId) return;
+        const found = personas.find(p => p.id === selectedPersonaId);
+        if (found) setActivePersona(found);
+        else setSelectedPersonaId(null);
     }, [selectedPersonaId, personas]);
 
     const analyzeDependencies = useCallback(async (projectId: string) => {
@@ -421,7 +486,28 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setSelectedProjectIds((prev: Set<string>) => { const newSet = new Set(prev); newSet.delete(id); return newSet; });
         setFilesByProject((prev: Map<string, ProjectFile[]>) => { const newMap = new Map(prev); newMap.delete(id); return newMap; });
         if (activeProjectView === id) setActiveProjectView(null);
+
+        /* An agent's `projectId` is required and is used as a lookup key, so an agent
+           bound to a deleted project is invalid data that renders as a working control.
+           Leaving them was the "dangling record" half of the review finding: the shell
+           stopped trusting them, and the store went on lying.
+           
+           They go with the project. That is only acceptable because the confirmation
+           step names them first — a deletion that quietly takes things it did not
+           mention is worse than one that takes more. */
+        const orphaned = agents.filter(a => a.projectId === id);
+        if (orphaned.length) {
+            if (orphaned.some(a => a.id === activeAgentId)) handleSelectAgent(null);
+            for (const agent of orphaned) await storageService.deleteAgent(agent.id);
+            setAgents((prev: Agent[]) => prev.filter(a => a.projectId !== id));
+        }
     };
+
+    /** What a deletion would take with it, so the confirmation can say so. */
+    const projectDeletionCost = (id: string) => ({
+        files: filesByProjectRef.current.get(id)?.length ?? 0,
+        agents: agents.filter(a => a.projectId === id).map(a => a.name),
+    });
     const handleToggleProjectSelection = (id: string) => {
         setSelectedProjectIds((prev: Set<string>) => { 
             const newSet = new Set(prev); 
@@ -431,12 +517,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         });
     };
     /**
-     * `filesByProject` is filled lazily, and until this existed the *only* thing
-     * that filled it was expanding a project in the rail. Any surface that
-     * opened a project's files directly — the IDE — therefore showed an empty
-     * tree for a project that had files, which was invisible while the IDE was
-     * only ever reached by way of the rail and obvious the moment Code became a
-     * destination of its own.
+     * `filesByProject` is filled lazily, and until this existed the *only* thing that
+     * filled it was expanding a project in the old rail. Any surface that opened a
+     * project's files directly — the IDE — therefore showed an empty tree for a project
+     * that had files, which was invisible while the IDE was only ever reached by way of
+     * the rail and obvious the moment Code became a destination of its own.
      */
     const ensureProjectFiles = useCallback(async (projectId: string) => {
         if (!projectId || filesByProjectRef.current.has(projectId)) return;
@@ -526,7 +611,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             if (editingProject?.id === projectId) setEditingProject(updatedProject);
         }
     };
-    const handleToggleProjectPanel = () => setIsProjectPanelCollapsed(prev => !prev);
     
     // AI & Persona Handlers
     const handleAddCustomStyle = async (name: string, instructions: string) => {
@@ -575,6 +659,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             await storageService.deletePersona(personaId);
             setPersonas((prev: Persona[]) => prev.filter(p => p.id !== personaId));
             if (selectedPersonaId === personaId) setSelectedPersonaId(null);
+            /* Same class as the project case: an agent's `personaId` is a lookup key,
+               and an agent whose persona is gone resolves to nothing while still looking
+               like an expert you can activate. */
+            const orphaned = agents.filter(a => a.personaId === personaId);
+            if (orphaned.length) {
+                if (orphaned.some(a => a.id === activeAgentId)) handleSelectAgent(null);
+                for (const agent of orphaned) await storageService.deleteAgent(agent.id);
+                setAgents((prev: Agent[]) => prev.filter(a => a.personaId !== personaId));
+            }
         } catch (error) {
             // FIX: Safely handle the 'unknown' type of the caught error by checking if it's an instance of Error to access its message, or converting to a string as a fallback.
             if (error instanceof Error) {
@@ -609,7 +702,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                 setSelectedProjectIds(new Set([agent.projectId]));
                 setSelectedPersonaId(agent.personaId);
             }
-            setActiveTab('projects');
+            /* Choosing an expert changes who you are talking to, so it lands you in the
+               conversation. It used to select a tab in a rail — a selection whose only
+               visible effect was somewhere you were not. */
+            setSurface('chat');
         } else {
             setSelectedProjectIds(new Set());
             setSelectedPersonaId(null);
@@ -676,11 +772,20 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         memoryService.closeEpisode(buildId, episodeId, 'abandoned', attributionFor(servingModel));
     };
 
-    const startWebAppBuild = () => {
+    /**
+     * Open the wizard, optionally already holding an idea.
+     *
+     * It took no arguments, which is why chat and the builder were two islands: you
+     * could talk an idea through and then had to retype it from memory. `Step_Idea`
+     * reads `builderState.idea` through plain state, so seeding it is enough — and the
+     * seed lands in an editable textarea rather than being sent anywhere, so the person
+     * still confirms before a single model call.
+     */
+    const startWebAppBuild = (idea = '') => {
         abandonOpenEpisode();   // starting over abandons whatever the last build left open
         const memory = { buildId: memoryService.newBuildId(), episodeId: null, lastOutcome: null, servingModel: null };
         memoryRef.current = memory;
-        setBuilderState({ ...initialBuilderState, isActive: true, currentStep: 1, memory });
+        setBuilderState({ ...initialBuilderState, isActive: true, currentStep: 1, idea, memory });
     };
     const resetWebAppBuild = () => {
         abandonOpenEpisode();
@@ -689,6 +794,29 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
     const generateWebAppPlan = async () => {
         setBuilderState(prev => ({ ...prev, status: { ...prev.status, isLoading: true, message: 'AI is analyzing your idea and creating a blueprint...' }}));
+        /**
+         * The episode starts here, where the build starts.
+         *
+         * It used to open at the generate step, four screens later — so the planning
+         * answer, the art directions and the chosen direction were all recorded with a
+         * **null episode id**. They were in the store and attached to nothing, which
+         * makes them invisible to anything reading a build as a sequence: the objective,
+         * what was proposed, what was chosen, then what was produced. A build log that
+         * begins at "generate" cannot say what was asked for.
+         *
+         * Keyed on the idea rather than the plan, because the plan does not exist yet.
+         * The server reuses an episode still open for the same objective, so a retry of
+         * the plan step joins the attempt in flight rather than forking a second one, and
+         * `generateWebAppCode` finds this one already open.
+         */
+        if (memoryRef.current.buildId && !memoryRef.current.episodeId) {
+            const episodeId = await memoryService.openEpisode(
+                memoryRef.current.buildId,
+                `build ${builderState.idea.slice(0, 120) || 'a web application'}`,
+                builderState.savedBuildId,
+            );
+            setMemory({ episodeId });
+        }
         try {
             const plan = await apiService.generateWebAppPlan(
                 builderState.idea,
@@ -906,7 +1034,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setBuilderState(prev => ({
             ...prev, currentStep: 4, candidateFiles: null, validation: null,
             evidence: requested,
-            status: { isLoading: true, message: 'Contacting Gemini…', log: [] },
+            status: { isLoading: true, message: 'Contacting Gemini…', log: [], fellBack: false, requestedModel: null, servedModel: null },
         }));
 
         /*
@@ -915,7 +1043,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
          * The server reuses an episode still open for the same objective, so a
          * double-tap or a remount joins the attempt in flight rather than forking it.
          */
-        const episodeId = await memoryService.openEpisode(
+        /* Usually already open — the episode now starts at the plan step so the whole
+           build is one sequence. This still opens one for a build resumed straight into
+           generation, where nothing earlier ran. */
+        const episodeId = memoryRef.current.episodeId ?? await memoryService.openEpisode(
             buildId,
             `generate ${builderState.plan?.projectName ?? 'a web application'} — style "${theme.palette}" / ${theme.typography}`,
             builderState.savedBuildId,
@@ -936,16 +1067,28 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         let servingModel = 'Gemini';      // for the user-facing evidence line
         let servedModelId: string | null = null;   // a real catalog id, or nothing
         try {
-            const files = await apiService.generateWebAppCode(builderState.plan, theme, selectedModel === 'auto' ? undefined : selectedModel, (event) => {
+            const generated = await apiService.generateWebAppCode(builderState.plan, theme, selectedModel === 'auto' ? undefined : selectedModel, (event) => {
                 if (event.model) { servingModel = event.model; servedModelId = event.model; }
                 setBuilderState(prev => {
                     let message = prev.status.message;
                     let log = prev.status.log;
-                    if (event.phase === 'thinking') {
+                    if (event.phase === 'planning') {
+                        message = `${event.model ?? 'Gemini'} is deciding what files this needs…`;
+                        log = [];
+                    } else if (event.phase === 'thinking') {
                         message = `${event.model ?? 'Gemini'} is thinking about the architecture…`;
                         log = [];  // a fresh attempt (retry/fallback) restarts the file log
                     } else if (event.phase === 'writing') {
                         message = `${event.model ?? 'Gemini'} is writing code…`;
+                    }
+                    /* The manifest names every file before any of them is written, so
+                       the count is known rather than watched. */
+                    if (event.manifest) message = `Writing ${event.manifest.length} files…`;
+                    /* A repair is worth naming rather than hiding behind "writing":
+                       the build is being corrected, and saying so is the difference
+                       between a slow success and an unexplained pause. */
+                    if (event.phase === 'repairing') {
+                        message = `Fixing ${event.files?.length ?? 0} file${event.files?.length === 1 ? '' : 's'} the compiler rejected…`;
                     }
                     if (event.progress) message = `Writing code… ${(event.progress / 1024).toFixed(1)} KB`;
                     if (event.file && !log.includes(event.file)) log = [...log, event.file];
@@ -954,7 +1097,97 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             }, { buildId, episodeId });
             bumpQuotaTick();
             // The model's word is not evidence: check the files before adopting them.
-            const validation = validateBuild(files, builderState.plan);
+            /**
+             * A truncated generation is an instrument failure, not a verdict.
+             *
+             * The files that arrived are real and worth keeping — but the validators are
+             * about to run over a project that is missing everything after the cut, and
+             * will report exactly what you would expect: unbalanced braces, a missing
+             * entry point. Every one of those is true of the text and false of the model.
+             * `inconclusive` is what stops the lesson ladder learning from it; measured on
+             * a real build, three lessons were proposed and all three were wrong.
+             */
+            const { files, truncated, missing } = generated;
+
+            // Surfaced as soon as it is known, before validation even runs — a
+            // silent downgrade to a weaker model is worth showing regardless of
+            // whether the result it produced later passes or fails.
+            if (generated.fellBack) {
+                setBuilderState(prev => ({
+                    ...prev,
+                    status: { ...prev.status, fellBack: true, requestedModel: generated.requestedModel, servedModel: generated.servedModel },
+                }));
+            }
+
+            const lexical = validateBuild(files, builderState.plan);
+
+            /*
+             * And then a compiler, which is the judge the lexical pass cannot be.
+             * `validateBuild` counts braces and resolves imports by regex; `tsc`
+             * knows whether the code means anything. Both verdicts go into one
+             * `BuildValidation`, so promotion, the evidence line and the single
+             * `verification.completed` event below all see the same thing.
+             *
+             * Never allowed to block the transition. The checker is bounded server
+             * side, and anything short of a completed answer — unreachable, timed
+             * out, cancelled — leaves the lexical verdict standing alone. An
+             * unfinished compile reports zero diagnostics, which is why `completed`
+             * is read rather than the count: a checker that did not run must not be
+             * able to certify a build.
+             */
+            setBuilderState(prev => ({ ...prev, status: { ...prev.status, message: 'Checking types…' } }));
+            const typecheck = await runTypecheck(buildId ?? 'build', files, 0);
+            const typed: BuildValidation = typecheck?.completed
+                ? {
+                    ok: lexical.ok && typecheck.ok,
+                    issues: [...lexical.issues, ...typecheck.issues],
+                    checked: lexical.checked,
+                }
+                : lexical;
+
+            /*
+             * And last, the only judge that does not read the code.
+             *
+             * Everything above can pass over an app that mounts a blank page: braces
+             * balance, types agree, modules resolve, and nothing renders. The preview
+             * bundles the project and runs it in a sandboxed frame, so "it threw" and
+             * "it drew nothing" become verdicts instead of something a person notices
+             * later — the first evidence in this pipeline that comes from behaviour
+             * rather than from text, and impossible to collect before the preview
+             * could execute a build at all.
+             *
+             * Same contract as the typechecker: `null` is no opinion, never a pass.
+             * A judge that did not run must not be able to certify or condemn.
+             */
+            setBuilderState(prev => ({ ...prev, status: { ...prev.status, message: 'Running it…' } }));
+            const behaviour = await previewVerdict(buildId ?? 'build', files);
+            const behaviourValidation: BuildValidation = behaviour
+                ? {
+                    ok: typed.ok && behaviour.length === 0,
+                    issues: [...typed.issues, ...behaviour],
+                    checked: typed.checked,
+                }
+                : typed;
+
+            /*
+             * Last, and the only judge that is not independent — a self-report, not a
+             * verdict. Whether the model that wrote the code believes its own output
+             * satisfies what the plan demanded. Always `severity: 'warning'` server
+             * side, so it can never flip `ok`; skipped when the plan declared no
+             * criteria, and `null` (no opinion) leaves `validation` exactly as the
+             * real judges above left it — never mistaken for "all satisfied".
+             */
+            const acceptance = Array.isArray(builderState.plan?.acceptanceCriteria) && builderState.plan.acceptanceCriteria.length > 0
+                ? await apiService.checkAcceptanceCriteria(builderState.plan, files, servedModelId ?? undefined)
+                : null;
+            const validation: BuildValidation = acceptance && acceptance.length > 0
+                ? {
+                    ok: behaviourValidation.ok,
+                    issues: [...behaviourValidation.issues, ...acceptance],
+                    checked: behaviourValidation.checked,
+                }
+                : behaviourValidation;
+
             const fileCount = Object.keys(files).length;
             const errors = validation.issues.filter(i => i.severity === 'error').length;
 
@@ -975,6 +1208,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                     warnings: validation.issues.length - errors,
                     codes: issueCodes(validation),
                     fileCount,
+                    /* Read by `proposalsFor`, which refuses to propose from it. */
+                    ...(truncated ? { inconclusive: true } : {}),
                 },
                 evidenceKeys: ['validation'],
             }], [{
@@ -998,8 +1233,19 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
                     ...prev,
                     candidateFiles: files,
                     validation,
-                    evidence: withEvidence(prev.evidence, `${servingModel} wrote ${fileCount} files — validation failed with ${errors} error${errors === 1 ? '' : 's'}, held for review`),
-                    status: { ...prev.status, isLoading: false, message: 'Generation finished, but the result did not pass validation.' },
+                    /* A truncated run must not be described as a failed one. The
+                       errors below are real, but they describe a project that was cut
+                       short — not a model that wrote it badly, and saying otherwise
+                       teaches the reader the same false lesson the ladder is now
+                       guarded against. */
+                    evidence: withEvidence(prev.evidence, truncated
+                        ? `${servingModel} was cut off by its output budget — ${fileCount} complete file${fileCount === 1 ? '' : 's'} recovered, held for review`
+                        : missing.length > 0
+                            ? `${servingModel} wrote ${fileCount} of ${fileCount + missing.length} planned files — ${missing.length} never arrived (${missing.slice(0, 3).join(', ')}${missing.length > 3 ? '…' : ''}), held for review`
+                            : `${servingModel} wrote ${fileCount} files — validation failed with ${errors} error${errors === 1 ? '' : 's'}, held for review`),
+                    status: { ...prev.status, isLoading: false, message: truncated
+                        ? `The model ran out of output budget. ${fileCount} complete file${fileCount === 1 ? '' : 's'} were recovered; the rest were never written.`
+                        : 'Generation finished, but the result did not pass validation.' },
                 }));
                 return;
             }
@@ -1018,21 +1264,127 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             }));
         }
     };
+    /**
+     * What a person did with a finished build, recorded before the build id is let go.
+     *
+     * The export step recorded nothing at all, and `resetWebAppBuild` then discarded the
+     * build id — so the one moment that says whether the whole thing was worth anything
+     * left no trace. A build log that ends at "validation passed" cannot distinguish a
+     * result someone kept from one they threw away, and that distinction is the closest
+     * thing to a quality signal this app has without asking anyone to rate something.
+     *
+     * Recorded before the reset, because after it there is no build to attribute to.
+     */
+    const recordBuildKept = (how: 'opened-in-ide' | 'downloaded') => {
+        const { generatedFiles, plan } = builderState;
+        recordMemory([{
+            kind: 'human.decision',
+            domain: 'build',
+            surface: 'builder.export',
+            payload: {
+                decision: 'kept',
+                how,
+                projectName: plan?.projectName ?? null,
+                fileCount: Object.keys(generatedFiles ?? {}).length,
+                pages: plan?.pages?.length ?? 0,
+                components: plan?.components?.length ?? 0,
+            },
+        }]);
+    };
+
     const loadGeneratedProjectIntoIDE = async () => {
         if (!builderState.generatedFiles || !builderState.plan.projectName) return;
         const newProject = await handleCreateProject(builderState.plan.projectName);
         for (const [path, content] of Object.entries(builderState.generatedFiles)) {
             await aiCreateFile(newProject.id, path, content);
         }
+        /* The project remembers what it was for — set before `resetWebAppBuild`,
+           which clears the *wizard's* transient state and has nothing to do with
+           whether the project it just produced knows its own plan. Persisted
+           the same way `dependencySummary` already is: write through storage,
+           then update the in-memory copy so every consumer of `projects` sees
+           it without a reload. */
+        const withOrigin: Project = {
+            ...newProject,
+            origin: {
+                plan: builderState.plan,
+                theme: builderState.theme,
+                acceptanceCriteria: Array.isArray(builderState.plan?.acceptanceCriteria) ? builderState.plan.acceptanceCriteria : [],
+                buildId: builderState.memory.buildId,
+            },
+        };
+        await storageService.updateProject(withOrigin);
+        setProjects(prev => prev.map(p => p.id === newProject.id ? withOrigin : p));
+        recordBuildKept('opened-in-ide');
         resetWebAppBuild();
-        setActiveTab('projects');
-        handleSelectAgent(null); // Ensure no agent is active
-        handleToggleProjectSelection(newProject.id); // Select the new project
+        /* Order matters: deselecting an agent clears the project selection, so the
+           new project has to be selected *after*, not before. */
+        handleSelectAgent(null);
+        handleToggleProjectSelection(newProject.id);
+        /* And then actually open it. This button is named "Open in IDE"; until now
+           it created the project, wrote every file, and left you looking at a list.
+           On a phone that is the difference between the feature existing and the
+           feature being reachable — from `md:` up the IDE is already on screen. */
+        setSurface('code');
+    };
+
+    /**
+     * "Generate again, but with feedback" — the peer-programmer edit
+     * `Step_Generate.tsx` cannot express. See A3's `/api/builder/edit`.
+     *
+     * Diagnostics are computed fresh here, the same deliberate choice
+     * `hooks/useChat.ts`'s `sendMessage` makes for the same reason (A3 item 2)
+     * — this function does not read `IdeView.tsx`'s own live diagnostics
+     * state, which it has no access to and should not be given access to just
+     * for this.
+     *
+     * The verdict is completed client-side rather than trusted from the
+     * server: `/api/builder/edit` can only run `tsc` (server-side, no
+     * browser), so `validateBuild` (lexical, pure) and `previewVerdict`
+     * (needs a real sandboxed frame) both run here — the same three-stage
+     * pattern `generateWebAppCode` already uses, not a second implementation
+     * of it.
+     */
+    const editOpenProject = async (projectId: string, instruction: string): Promise<{ validation: BuildValidation; changedPaths: string[]; summary: string }> => {
+        const project = projects.find(p => p.id === projectId);
+        const files = filesByProject.get(projectId) ?? [];
+        const record: Record<string, string> = {};
+        for (const file of files) record[file.path] = file.content;
+
+        const preEdit = await runTypecheck(projectId, record, 0);
+        const diagnostics: BuildIssue[] = preEdit?.completed ? preEdit.issues : [];
+
+        const result = await apiService.editProject(
+            record,
+            project?.origin?.plan,
+            diagnostics,
+            instruction,
+            selectedModel === 'auto' ? undefined : selectedModel,
+            project?.origin?.buildId ? { buildId: project.origin.buildId, episodeId: null } : undefined,
+        );
+
+        for (const path of result.changedPaths) {
+            const content = result.files[path];
+            if (files.some(f => f.path === path)) await aiUpdateFile(projectId, path, content);
+            else await aiCreateFile(projectId, path, content);
+        }
+
+        const lexical = validateBuild(result.files, project?.origin?.plan);
+        const behaviour = await previewVerdict(projectId, result.files);
+        const validation: BuildValidation = {
+            ok: lexical.ok && result.typecheck.ok && (behaviour === null || behaviour.length === 0),
+            issues: [...lexical.issues, ...(result.typecheck.issues ?? []), ...(behaviour ?? [])],
+            checked: lexical.checked,
+        };
+        return { validation, changedPaths: result.changedPaths, summary: result.summary };
     };
 
     const exportGeneratedProject = async () => {
         if (!builderState.generatedFiles || !builderState.plan.projectName) return;
         await createProjectZip(builderState.generatedFiles, builderState.plan.projectName);
+        /* No reset here — the wizard stays put after a download — but the decision is
+           still worth recording, and for the same reason. */
+        recordBuildKept('downloaded');
     };
 
     // Saved build library
@@ -1090,7 +1442,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             memory,
             status: { isLoading: false, log: [], message: `Loaded "${build.name}"` },
         });
-        setActiveTab('tools');
+        setSurface('build');
     };
 
     const removeSavedBuild = (id: string) => {
@@ -1105,12 +1457,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
 
     const value = {
-        projects, selectedProjectIds, filesByProject, activeProjectView, editingProject, isProjectPanelCollapsed, analyzingProjects,
+        projects, selectedProjectIds, filesByProject, activeProjectView, editingProject, analyzingProjects,
         ensureProjectFiles,
-        activeTab, setActiveTab,
-        handleCreateProject, handleDeleteProject, handleToggleProjectSelection, handleViewProjectFiles, handleAddFile, handleDeleteFile,
+        surface, setSurface,
+        handleCreateProject, handleDeleteProject, projectDeletionCost, handleToggleProjectSelection, handleViewProjectFiles, handleAddFile, handleDeleteFile,
         aiCreateFile, aiUpdateFile, aiDeleteFile,
-        handleSaveFileContent, handleOpenProjectSettings, handleCloseProjectSettings, handleRenameProject, handleToggleProjectPanel,
+        handleSaveFileContent, handleOpenProjectSettings, handleCloseProjectSettings, handleRenameProject,
         setSelectedProjectIds,
         useWebSearch, setUseWebSearch, lowLatencyMode, setLowLatencyMode,
         selectedModel, setSelectedModel, catalog, modelDefaults,
@@ -1119,7 +1471,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         activePersona, setActivePersona,
         agents, activeAgentId, handleAddAgent, handleUpdateAgent, handleDeleteAgent, handleSelectAgent,
         globalError, setGlobalError,
-        builderState, setBuilderState, startWebAppBuild, resetWebAppBuild, generateWebAppPlan, refineWebAppPlan, suggestArtDirections, generateWebAppCode, loadGeneratedProjectIntoIDE, exportGeneratedProject,
+        builderState, setBuilderState, startWebAppBuild, resetWebAppBuild, generateWebAppPlan, refineWebAppPlan, suggestArtDirections, generateWebAppCode, loadGeneratedProjectIntoIDE, editOpenProject, exportGeneratedProject,
         savedBuilds, saveCurrentBuild, loadSavedBuild, removeSavedBuild, exportSavedBuild,
         promoteCandidate, discardCandidate, recordEvidence, noteDirectionSelected, quotaTick, bumpQuotaTick,
     };

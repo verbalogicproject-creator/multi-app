@@ -1,0 +1,97 @@
+{
+  "$schema": "declaration-v1",
+  "note": "Hand-authored, not generated — this describes Claude Code tooling around the repo, not the repo's own source. Split deliberately into 'built for this project' vs 'generic tooling that happens to be connected' — conflating them would misrepresent what's actually multi-app's own.",
+  "personalAgentTeamRouting": {
+    "statement": "A project-agnostic personal subagent team (sprinter, analyst, planner/planner-opus, implementer, main session) is available and routed by task shape — not defined in this repo.",
+    "mechanism": {
+      "file": "/root/.claude/CLAUDE.md",
+      "line": null,
+      "note": "global, user-level instructions; this repo's own .claude/ only has settings.local.json, no agents/skills directory of its own",
+      "verifiedContentHash": "sha256:0242019769097172",
+      "staleness": "verified"
+    },
+    "level": "review",
+    "roles": [
+      {
+        "role": "sprinter",
+        "usedWhen": "target file(s), exact change, and a named validation step are ALL already stated"
+      },
+      {
+        "role": "analyst",
+        "usedWhen": "clear, repeatable, read-heavy, high-volume extraction/classification/comparison/review; no edits"
+      },
+      {
+        "role": "implementer",
+        "usedWhen": "well-specified, moderate-scope implementation; approach and acceptance criteria already decided"
+      },
+      {
+        "role": "planner (Fable) / planner-opus (Opus)",
+        "usedWhen": "ambiguous, high-impact, architectural, security-sensitive, or repeatedly-failing work"
+      },
+      {
+        "role": "main session",
+        "usedWhen": "integrated implementation, multi-file work, tool-heavy execution, coordination, verification — the default"
+      }
+    ]
+  },
+  "planCommands": [
+    {
+      "command": "/plan-solo",
+      "runs": "planner (Fable)",
+      "context": "forked, isolated — no conversation history, states assumptions instead of asking"
+    },
+    {
+      "command": "/plan-opus",
+      "runs": "planner-opus (Opus)",
+      "context": "same as /plan-solo, model pinned to Opus"
+    },
+    {
+      "command": "/plan-with-me",
+      "runs": "interactive planning inline in the current session",
+      "context": "used for THIS task — genuine open forks (doc-consolidation scope, memory boundary, audit depth) needed live AskUserQuestion answers, which a forked subagent cannot do"
+    }
+  ],
+  "mcpServersBuiltForThisProject": [
+    {
+      "name": "multi-memory",
+      "statement": "Exposes the multi-graph-memory engine's read surface as MCP tools: fgm_project_status, fgm_list_episodes, fgm_list_lessons, fgm_query_events, fgm_read_memory_context, fgm_get_lesson.",
+      "mechanism": {
+        "file": "/root/multi-graph-memory/src/mcp",
+        "line": null,
+        "note": "B1 (stdio, ReadOnlyMcpServer) + B2 (Streamable HTTP) — see memory-system-ladder.json",
+        "verifiedContentHash": null,
+        "staleness": "not-applicable — not a single trackable file (a glob or a directory)"
+      },
+      "level": "gate",
+      "knownDefect": "Scoped to workspace \"multi-app\" / project \"builder\", resolving to the shared builder.db — the SAME store multi-app's own memory/bridge.js writes to (since commit 6360b37, corrected 2026-09-06; the .multi-app/.multi-memory/build-*.db files are pre-migration legacy data, not a live parallel store). fgm_project_status returned 0 events/0 episodes/0 lessons because that store is genuinely still empty of real activity, not because the MCP surface is pointed at the wrong file. See gaps-bugs-and-need-to-handle.json#mcp-server-scoped-to-empty-store for the fix applied."
+    }
+  ],
+  "skillsUsedOnThisTask": [
+    {
+      "skill": "frontend-design:frontend-design",
+      "usedFor": "visual-design guidance for architecture/index.html, applied against DESIGN.md's already-locked token system rather than inventing a new palette"
+    }
+  ],
+  "genericToolingConnectedButNotProjectSpecific": {
+    "note": "Found by checking which MCP server names also appear in ~/.cache/claude-cli-nodejs/ for dozens of unrelated project directories on this machine — a project-specific tool would not do that.",
+    "examples": [
+      {
+        "name": "preview-bridge",
+        "seenInOtherProjectsCount": "60+",
+        "realPurpose": "generic CDP-based live-preview inspection tool, not built for multi-app specifically despite the name sounding like it"
+      },
+      {
+        "name": "game_engine / nlke-code / nlke-codio / nlke-full",
+        "realPurpose": "a separate NLKE/SAG knowledge-graph framework's tooling (doc_staleness, doc_ingest_tree, sag_*, pgm_*, crms_* — a whole 'AI card' documentation/governance system from a different project), globally connected, not part of multi-app"
+      },
+      {
+        "name": "gemini-api-docs-mcp, gemini-coder, gemini-stack, anthropicDocs, openaiDeveloperDocs",
+        "realPurpose": "vendor API documentation lookups, generic across any project using those SDKs"
+      },
+      {
+        "name": "stitch, claude_ai_Gmail/Google_Calendar/Google_Drive, context-os-dev",
+        "realPurpose": "general-purpose Claude connectors, unrelated to this repo's own architecture"
+      }
+    ]
+  }
+}

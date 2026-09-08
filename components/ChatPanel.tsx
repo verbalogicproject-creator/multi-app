@@ -1,9 +1,16 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, Suspense, lazy } from 'react';
 import MessageItem from './MessageItem';
 import ModeSelector from './ModeSelector';
-import ImageEditorPane from './ImageEditorPane';
-import VideoGeneratorPane from './VideoGeneratorPane';
-import LiveChatPane from './LiveChatPane';
+/* Each of these three panes exists for a feature that ships disabled
+   (`utils/features.ts`'s `FEATURES`) — the mode picker never offers them, so most
+   sessions never render one. Lazy, same as `CodeEditor` in `IdeView.tsx`, so their
+   code is not paid for on every chat load, only on the visit that actually reaches
+   one. `useLiveChat`'s own `@google/genai` dependency is the load-bearing half of
+   this fix — see that hook's own dynamic import — this half is the smaller,
+   consistency win on top of it. */
+const ImageEditorPane = lazy(() => import('./ImageEditorPane'));
+const VideoGeneratorPane = lazy(() => import('./VideoGeneratorPane'));
+const LiveChatPane = lazy(() => import('./LiveChatPane'));
 import LoadingIndicator from './LoadingIndicator';
 import ModelPicker from './ModelPicker';
 import QuotaBadge from './QuotaBadge';
@@ -12,11 +19,12 @@ import { useTTS } from '../hooks/useTTS';
 import { useLiveChat } from '../hooks/useLiveChat';
 import { useAppContext } from '../context/AppContext';
 import { ChatMode } from '../types/index';
+import { composeBuilderBrief, hasBuilderBrief } from '../utils/builderBrief';
 
 const ChatPanel: React.FC = () => {
     const {
       projects, selectedProjectIds, filesByProject, activePersona, useWebSearch, customAiStyles, lowLatencyMode, activeAgentId, selectedModel,
-      aiCreateFile, aiUpdateFile, aiDeleteFile, bumpQuotaTick
+      aiCreateFile, aiUpdateFile, aiDeleteFile, bumpQuotaTick, startWebAppBuild, setSurface
     } = useAppContext();
     
     const [mode, setMode] = useState<ChatMode>('chat');
@@ -46,7 +54,7 @@ const ChatPanel: React.FC = () => {
         deleteFile: aiDeleteFile,
     };
 
-    const { messages, isLoading, statusText, sendMessage, regenerate, resolvePendingTool } = useChat(selectedProjects, activePersona, useWebSearch, customAiStyles, lowLatencyMode, aiFileOperations, `gemini_messages_${activeAgentId ?? 'general'}`, selectedModel === 'auto' ? undefined : selectedModel);
+    const { messages, isLoading, statusText, sendMessage, regenerate, resolvePendingTool } = useChat(selectedProjects, activePersona, useWebSearch, customAiStyles, lowLatencyMode, aiFileOperations, filesByProject, `gemini_messages_${activeAgentId ?? 'general'}`, selectedModel === 'auto' ? undefined : selectedModel);
     const { speak, cancel, isPlaying, currentlyPlayingId } = useTTS();
     const { isListening, liveTranscription, liveError, startListening, stopListening } = useLiveChat();
 
@@ -67,6 +75,7 @@ const ChatPanel: React.FC = () => {
         
         const promptMap: Record<string, {prompt: string, setPrompt: (p: string) => void}> = {
             'chat': { prompt: codingPrompt, setPrompt: setCodingPrompt },
+            'plan': { prompt: codingPrompt, setPrompt: setCodingPrompt },
             'coding': { prompt: codingPrompt, setPrompt: setCodingPrompt },
             'image-edit': { prompt: imagePrompt, setPrompt: setImagePrompt },
             'video-gen': { prompt: videoPrompt, setPrompt: setVideoPrompt },
@@ -113,16 +122,22 @@ const ChatPanel: React.FC = () => {
             {/* No overflow-x here: setting one axis to `auto` makes the other
                 `auto` too, and it was cropping the mode pill's top edge. The
                 selector scrolls inside itself instead. */}
-            <div className="shrink-0 flex items-center gap-2 px-4 py-2 safe-t md:pt-2
+            {/* The bands run edge to edge so their rules do; the content inside each is
+                capped to a readable measure and centred. Chat is a full-screen
+                destination at every width now, and a 1440px line of prose is not a
+                feature of the extra room, it is what the extra room does if you let it. */}
+            <div className="shrink-0 flex justify-center px-4 py-2 safe-t md:pt-2
                             shadow-[inset_0_-1px_0_rgb(255_255_255/0.06)]">
+              <div className="w-full max-w-3xl flex items-center gap-2">
                 <div className="flex-1 min-w-0">
                     {!activeAgentId && <ModeSelector currentMode={mode} onModeChange={setMode} isAgentActive={!!activeAgentId} />}
                 </div>
                 <QuotaBadge surface="chat" />
                 <ModelPicker compact />
+              </div>
             </div>
             <div className="flex-1 flex flex-col overflow-y-auto px-4 py-3 md:px-5">
-                <div className="flex-1 space-y-4">
+                <div className="flex-1 w-full max-w-3xl mx-auto space-y-4">
                     {messages.map(msg => (
                       <MessageItem 
                           key={msg.id} 
@@ -158,12 +173,38 @@ const ChatPanel: React.FC = () => {
                     <div ref={messagesEndRef} />
                 </div>
             </div>
-            {/* md:pr-32 is not decoration: the Memory trigger is fixed to the
-                bottom-right corner on desktop and was landing on top of the send
-                button. A docked control has to be given its space, not float over
-                someone else's. On a phone the trigger is the tab bar, so no gutter. */}
-            <div className="shrink-0 p-3 md:p-4 md:pr-32 bg-ground shadow-[inset_0_1px_0_rgb(255_255_255/0.06)]">
-                {(mode === 'coding' || mode === 'chat') && (
+            {/* This carried `md:pr-32` — a 128px gutter reserving the bottom-right
+                corner for the Memory panel's own floating trigger, which used to land on
+                top of the send button. That trigger is gone; Memory is a dock item. A
+                gutter held open for a control that no longer exists is just a hole. */}
+            <div className="shrink-0 flex justify-center p-3 md:p-4 bg-ground shadow-[inset_0_1px_0_rgb(255_255_255/0.06)]">
+              <div className="w-full max-w-3xl">
+                {/* The hand-off. Present only in `plan` mode, and only once there is
+                    something to hand over — a button that is always there and usually
+                    does nothing teaches you to ignore it.
+
+                    It seeds and navigates; it does not build. The brief lands in the
+                    wizard's textarea where it can be read and edited before any model
+                    call, because a composer that quietly guessed wrong would otherwise
+                    send a plausible-looking brief nobody checked. */}
+                {mode === 'plan' && hasBuilderBrief(messages) && (
+                    <div className="mb-2 flex items-center justify-between gap-3">
+                        <p className="text-xs text-metal-300 min-w-0 truncate">
+                            Ready to build? You can edit it first.
+                        </p>
+                        <button
+                            type="button"
+                            onClick={() => { startWebAppBuild(composeBuilderBrief(messages)); setSurface('build'); }}
+                            className="tap shrink-0 px-4 rounded-xl bg-metal-700 text-metal-100 text-sm font-medium
+                                       shadow-[inset_0_1px_0_rgb(255_255_255/0.08)]
+                                       transition-[background-color,transform] duration-200 ease-fluid
+                                       md:hover:bg-[#33333a] active:scale-[0.98]"
+                        >
+                            Send to Builder
+                        </button>
+                    </div>
+                )}
+                {(mode === 'coding' || mode === 'chat' || mode === 'plan') && (
                     <form onSubmit={handleSubmit} className="flex items-center gap-2">
                         <input
                             type="text"
@@ -188,13 +229,18 @@ const ChatPanel: React.FC = () => {
                         </button>
                     </form>
                 )}
-                {mode === 'image-edit' && (
-                    <ImageEditorPane prompt={imagePrompt} setPrompt={setImagePrompt} isLoading={isLoading} uploadedFile={uploadedFile} onFileSelect={setUploadedFile} externalPreviewUrl={externalPreviewUrl} onClearExternalPreview={() => setExternalPreviewUrl(null)} onSubmit={handleSubmit} />
+                {(mode === 'image-edit' || mode === 'video-gen' || mode === 'live') && (
+                    <Suspense fallback={<div className="h-11" aria-hidden />}>
+                        {mode === 'image-edit' && (
+                            <ImageEditorPane prompt={imagePrompt} setPrompt={setImagePrompt} isLoading={isLoading} uploadedFile={uploadedFile} onFileSelect={setUploadedFile} externalPreviewUrl={externalPreviewUrl} onClearExternalPreview={() => setExternalPreviewUrl(null)} onSubmit={handleSubmit} />
+                        )}
+                        {mode === 'video-gen' && (
+                            <VideoGeneratorPane prompt={videoPrompt} setPrompt={setVideoPrompt} isLoading={isLoading} uploadedFile={uploadedFile} onFileSelect={setUploadedFile} duration={duration} setDuration={setDuration} aspectRatio={aspectRatio} setAspectRatio={setAspectRatio} directorControls={directorControls} setDirectorControls={setDirectorControls} onSubmit={handleSubmit} />
+                        )}
+                        {mode === 'live' && <LiveChatPane isListening={isListening} startListening={startListening} stopListening={stopListening} />}
+                    </Suspense>
                 )}
-                {mode === 'video-gen' && (
-                    <VideoGeneratorPane prompt={videoPrompt} setPrompt={setVideoPrompt} isLoading={isLoading} uploadedFile={uploadedFile} onFileSelect={setUploadedFile} duration={duration} setDuration={setDuration} aspectRatio={aspectRatio} setAspectRatio={setAspectRatio} directorControls={directorControls} setDirectorControls={setDirectorControls} onSubmit={handleSubmit} />
-                )}
-                 {mode === 'live' && <LiveChatPane isListening={isListening} startListening={startListening} stopListening={stopListening} />}
+              </div>
             </div>
         </main>
     );

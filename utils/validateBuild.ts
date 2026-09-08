@@ -14,16 +14,57 @@ export type BuildIssueCode =
     | 'no-files'
     | 'missing-index-html'
     | 'missing-src-main'
-    | 'missing-preview-html'
     | 'empty-file'
     | 'file-too-short'
     | 'invalid-json'
     | 'placeholder-content'
     | 'unbalanced-braces'
+    /**
+     * A generated file does not parse. Produced server-side by `tsc`, and kept
+     * distinct from `type-error` because the two want opposite advice: this one is
+     * almost always a truncated file or a mis-escaped quote, not a typing mistake.
+     */
+    | 'syntax-error'
+    /**
+     * The project would not bundle for a reason that is not a missing import.
+     * Produced by esbuild, which is a different judge from `tsc`: code can type-check
+     * and still fail to resolve or transform.
+     */
+    | 'bundle-error'
+    /**
+     * The app ran and threw. The first verdict in this list that comes from
+     * *behaviour* rather than from reading the text — impossible to observe before
+     * the preview could actually execute a build.
+     */
+    | 'runtime-error'
+    /**
+     * It built, it ran, it threw nothing, and it mounted nothing. The failure a
+     * reader sees as a blank white pane and every text-reading check calls a pass.
+     */
+    | 'renders-nothing'
     | 'unresolved-import'
     | 'unresolved-html-ref'
     | 'plan-page-missing'
-    | 'plan-component-missing';
+    | 'plan-component-missing'
+    /**
+     * A strict TypeScript check failed.
+     *
+     * Produced server-side, never here: `tsc` is a subprocess and this module stays
+     * pure. It is one code for every TS error number on purpose — `memory/proposals.js`
+     * keys on the code, and a row per TS number would be a table nobody maintains.
+     */
+    | 'type-error'
+    /**
+     * An acceptance criterion the plan declared, which the model that wrote the code
+     * reports its own output does not satisfy.
+     *
+     * Always `severity: 'warning'` — a self-report is not an independent verdict, so
+     * it must never gate promotion the way `type-error` does. Produced server-side by
+     * `/api/builder/check-acceptance`, never here: this module stays model-free.
+     * Excluded from `memory/proposals.js`'s `PROPOSAL_TABLE` on purpose — see its
+     * `NOT_A_LESSON` entry for this code.
+     */
+    | 'acceptance-criterion-unmet';
 
 export interface BuildIssue {
     severity: 'error' | 'warning';
@@ -155,7 +196,6 @@ export const validateBuild = (files: Record<string, string>, plan?: any): BuildV
     // Entry points
     if (!paths.some(p => p === 'index.html')) add('error', 'missing-index-html', 'index.html is missing, so the app has no entry point.');
     if (!paths.some(p => /^src\/main\.(tsx|ts|jsx|js)$/.test(p))) add('warning', 'missing-src-main', 'No src/main entry file was generated.');
-    if (!files['preview.html']) add('warning', 'missing-preview-html', 'preview.html is missing, so the visual preview will be unavailable.');
 
     for (const [path, content] of Object.entries(files)) {
         const trimmed = (content ?? '').trim();
@@ -197,11 +237,25 @@ export const validateBuild = (files: Record<string, string>, plan?: any): BuildV
 
     // Did the build deliver what the approved plan promised?
     const allPaths = paths.join('\n');
+    /*
+     * An error, not a warning.
+     *
+     * The plan is what the user read and approved. A build that silently drops a page
+     * from it has not "passed with a note" — it is a different product from the one
+     * that was agreed to, and a warning let it promote anyway. Observed in the field:
+     * a build accepted while carrying five of these, missing every page it promised.
+     *
+     * Safe to raise now that the manifest is made to cover the plan before generation
+     * (`coverPlan` in providers/generate.js). Before that, a model naming a page
+     * `Home.tsx` instead of `HomePage.tsx` would have failed the build for a naming
+     * choice rather than a missing feature; now the path comes from the plan's own
+     * name, so this check is a statement about a real gap.
+     */
     for (const page of Array.isArray(plan?.pages) ? plan.pages : []) {
-        if (page?.name && !allPaths.includes(page.name)) add('warning', 'plan-page-missing', `The plan included a "${page.name}" page, but no matching file was generated.`);
+        if (page?.name && !allPaths.includes(page.name)) add('error', 'plan-page-missing', `The plan included a "${page.name}" page, but no matching file was generated.`);
     }
     for (const component of Array.isArray(plan?.components) ? plan.components : []) {
-        if (component?.name && !allPaths.includes(component.name)) add('warning', 'plan-component-missing', `The plan included a "${component.name}" component, but no matching file was generated.`);
+        if (component?.name && !allPaths.includes(component.name)) add('error', 'plan-component-missing', `The plan included a "${component.name}" component, but no matching file was generated.`);
     }
 
     return { ok: !issues.some(i => i.severity === 'error'), issues, checked: paths.length };

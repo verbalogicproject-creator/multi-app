@@ -5,7 +5,12 @@ export enum MessageAuthor {
     TOOL = 'tool'
 }
 
-export type ChatMode = 'chat' | 'coding' | 'image-edit' | 'video-gen' | 'live';
+/**
+ * `plan` shapes an idea and hands it to the builder; `coding` is the project-aware
+ * mode the IDE uses and is set for you rather than chosen. The mode now reaches the
+ * server, so it changes what the assistant is *for*, not only what it is given.
+ */
+export type ChatMode = 'chat' | 'plan' | 'coding' | 'image-edit' | 'video-gen' | 'live';
 
 export interface MessagePart {
     text?: string;

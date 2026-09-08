@@ -31,7 +31,18 @@ const ENTRIES = [
     // and 3.1-pro-preview reject MINIMAL, so `none` must clamp up to low there.
     { id: 'gemini-3.5-flash', provider: 'google', label: '3.5 Flash', hint: 'Fast, free tier — default for chat and coding', tools: true, jsonMode: 'native', thinking: true, efforts: ['none', 'low', 'medium', 'high'], priceIn: 0, priceOut: 0, dailyLimit: 250, fallback: ['gemini-3.5-flash-lite'] },
     { id: 'gemini-3.5-flash-lite', provider: 'google', label: '3.5 Flash-Lite', hint: 'Cheapest and fastest Gemini', tools: true, jsonMode: 'native', thinking: true, efforts: ['none', 'low', 'medium', 'high'], priceIn: 0, priceOut: 0, dailyLimit: 1000, fallback: [] },
-    { id: 'gemini-3.7-flash', provider: 'google', label: '3.7 Flash', hint: 'Strong coding and agentic work — low daily quota', tools: true, jsonMode: 'native', thinking: true, efforts: ['low', 'medium', 'high'], priceIn: 0, priceOut: 0, dailyLimit: 20, fallback: ['gemini-3.5-flash'] },
+    // Verified 2026-09-04 with `smoke:providers`: streaming, tool calls and the tool
+    // result round-trip all pass. Its **schema-JSON** path returned 503 on two separate
+    // runs while the same model's other paths answered — consistently, not randomly.
+    // That was recorded as a load signal rather than a proven capability gap, and
+    // re-checked 2026-09-05: first call 503 ("high demand"), second call clean
+    // schema JSON (`{"name":"Willow Creek","population":1420}`) — confirms the
+    // original read. Still kept out of the builder default: the fallback chain
+    // resolves a 503 to 3.6 either way, so there is nothing to gain from switching.
+    { id: 'gemini-3.8-flash', provider: 'google', label: '3.8 Flash', hint: 'Newest flash — structured output confirmed working; occasional 503s under load, same as any model', tools: true, jsonMode: 'native', thinking: true, efforts: ['low', 'medium', 'high'], priceIn: 0, priceOut: 0, dailyLimit: 20, fallback: ['gemini-3.6-flash', 'gemini-3.5-flash'] },
+    // Verified 2026-09-04: all four contract checks pass, schema JSON included.
+    { id: 'gemini-3.6-flash', provider: 'google', label: '3.6 Flash', hint: 'Verified across streaming, tools and structured output', tools: true, jsonMode: 'native', thinking: true, efforts: ['low', 'medium', 'high'], priceIn: 0, priceOut: 0, dailyLimit: 20, fallback: ['gemini-3.5-flash'] },
+    { id: 'gemini-3.7-flash', provider: 'google', label: '3.7 Flash', hint: 'Strong coding and agentic work — low daily quota', tools: true, jsonMode: 'native', thinking: true, efforts: ['low', 'medium', 'high'], priceIn: 0, priceOut: 0, dailyLimit: 20, fallback: ['gemini-3.6-flash', 'gemini-3.5-flash'] },
     { id: 'gemini-3.1-pro-preview', provider: 'google', label: '3.1 Pro (preview)', hint: 'Deepest Gemini reasoning, slowest', tools: true, jsonMode: 'native', thinking: true, efforts: ['low', 'medium', 'high'], priceIn: 0, priceOut: 0, dailyLimit: 25, fallback: ['gemini-3.7-flash', 'gemini-3.5-flash'] },
 
     // ---- Anthropic (paid) ---------------------------------------------------
@@ -59,11 +70,23 @@ const ENTRIES = [
     // deepseek-v4-flash & -pro (timeout >120s), gpt-oss-20b/120b (timeout),
     // gemma-3-4b/12b, nemotron-70b, kimi-k2.6, mistral-* (404), qwen3-coder,
     // phi-4-mini (410 end-of-life).
+    //
+    // Re-verified 2026-09-08 (`npm run smoke:providers`). Two of five ran clean
+    // on all four checks (llama-3.2-11b, nemotron-3.5-lightning). The other
+    // three — reproducibly, run alone with 20s+ between attempts, not a
+    // batch-testing artifact — pass streaming and tool-calling but hit a real
+    // rate ceiling on the round-trip/schema-JSON checks specifically:
+    // nemotron-3-nano-omni returns "Worker local total request limit reached
+    // (16/16)"; minimax-m3 and kimi-k3 both 429 on their 3rd/4th call every
+    // time. Kept in the catalog — the capability that was checked did work —
+    // but this app's own fallback chain is what actually protects a real
+    // request today, not an assumption that these three are as reliable as
+    // the other two under back-to-back load.
     { id: 'meta/llama-3.2-11b-vision-instruct', provider: 'nvidia', label: 'Llama 3.2 11B', hint: 'Free, ~0.6s — fastest option for quick tests', tools: true, jsonMode: 'native', thinking: false, priceIn: 0, priceOut: 0, maxOutput: 16384, fallback: [] },
-    { id: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning', provider: 'nvidia', label: 'Nemotron Nano 3', hint: 'Free reasoning model, ~1.6s', tools: true, jsonMode: 'native', thinking: true, priceIn: 0, priceOut: 0, maxOutput: 16384, fallback: ['meta/llama-3.2-11b-vision-instruct'] },
+    { id: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning', provider: 'nvidia', label: 'Nemotron Nano 3', hint: 'Free reasoning model, ~1.6s — rate-limited under back-to-back load (see above)', tools: true, jsonMode: 'native', thinking: true, priceIn: 0, priceOut: 0, maxOutput: 16384, fallback: ['meta/llama-3.2-11b-vision-instruct'] },
     { id: 'nvidia/nemotron-3.5-lightning-30b-a3b', provider: 'nvidia', label: 'Nemotron Lightning', hint: 'Free reasoning model, ~3.9s', tools: true, jsonMode: 'native', thinking: true, priceIn: 0, priceOut: 0, maxOutput: 16384, fallback: ['meta/llama-3.2-11b-vision-instruct'] },
-    { id: 'minimaxai/minimax-m3', provider: 'nvidia', label: 'MiniMax M3', hint: 'Free, ~6s, JSON and tools', tools: true, jsonMode: 'native', thinking: false, priceIn: 0, priceOut: 0, maxOutput: 32768, fallback: ['meta/llama-3.2-11b-vision-instruct'] },
-    { id: 'moonshotai/kimi-k3', provider: 'nvidia', label: 'Kimi K3', hint: 'Free, large context, reasoning — ~7s', tools: true, jsonMode: 'native', thinking: true, priceIn: 0, priceOut: 0, maxOutput: 32768, fallback: ['minimaxai/minimax-m3'] },
+    { id: 'minimaxai/minimax-m3', provider: 'nvidia', label: 'MiniMax M3', hint: 'Free, ~6s, JSON and tools — rate-limited under back-to-back load (see above)', tools: true, jsonMode: 'native', thinking: false, priceIn: 0, priceOut: 0, maxOutput: 32768, fallback: ['meta/llama-3.2-11b-vision-instruct'] },
+    { id: 'moonshotai/kimi-k3', provider: 'nvidia', label: 'Kimi K3', hint: 'Free, large context, reasoning — ~7s — rate-limited under back-to-back load (see above)', tools: true, jsonMode: 'native', thinking: true, priceIn: 0, priceOut: 0, maxOutput: 32768, fallback: ['minimaxai/minimax-m3'] },
 ];
 
 const PRICE_OVERRIDES = (() => {
@@ -75,7 +98,7 @@ export const PROVIDER_LABELS = { google: 'Google Gemini', anthropic: 'Anthropic 
 
 /** Provider -> env var holding its key. A provider with no key is hidden entirely. */
 export const PROVIDER_KEYS = {
-    google: () => process.env.GEMINI_API_KEY || process.env.API_KEY,
+    google: () => process.env.GEMINI_AI_KEY || process.env.GEMINI_API_KEY || process.env.API_KEY,
     anthropic: () => process.env.ANTHROPIC_API_KEY,
     openai: () => process.env.OPENAI_API_KEY,
     nvidia: () => process.env.NVIDIA_API_KEY,

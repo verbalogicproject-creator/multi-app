@@ -1,0 +1,179 @@
+{
+  "$schema": "declaration-v1",
+  "note": "Action-oriented catalog: every labelled gap this project already admits, plus what this audit newly found, plus doc drift caught along the way. Full evidentiary detail for the generation-pipeline items lives in hetrodox-unconventional-approaches.json / harness-agentic-loop.json / memory-system-ladder.json — this file cross-references rather than re-deriving, and adds a suggestedNextStep to each. Feeds Phase 8's final production-fix doc directly. Ordered by the stated priority: generation pipeline first.",
+  "generationPipeline": [
+    {
+      "id": "repair-loop-no-whole-round-rollback",
+      "severity": "high",
+      "statement": "The post-generation repair loop can finish with more errors than it started with and ships that state as final — confirmed on a real build (47->61/62 errors).",
+      "crossReference": "hetrodox-unconventional-approaches.json#repair-can-end-worse-than-it-started",
+      "suggestedNextStep": "Track the lowest aggregate-error snapshot seen across rounds; if the final round is not the best one, restore the best instead of trusting the last round unconditionally. Add a regression build (or a unit test with synthetic diagnostics) asserting the aggregate never regresses past the pre-repair state."
+    },
+    {
+      "id": "quota-vs-request-count-arithmetic",
+      "severity": "medium",
+      "statement": "A build's request count can exceed its default model's (and first fallback's) daily quota; mitigated by working 429-as-transient fallback, but the fallback's quality-relevant consequences (silent downgrade to a non-coding-tuned model) are invisible to the user.",
+      "crossReference": "hetrodox-unconventional-approaches.json#quota-vs-request-count",
+      "suggestedNextStep": "Surface fellBack/servedModel prominently in the Step_Generate UI (not just as an attribution fact), and/or measure how often it actually fires once more episodes are captured (see memory-blind-spot)."
+    },
+    {
+      "id": "acceptance-criteria-self-report",
+      "severity": "low — already labelled",
+      "statement": "Acceptance-criteria checking is the model grading its own code, explicitly labelled a self-report, never a gate.",
+      "crossReference": "harness-agentic-loop.json#acceptance-self-report",
+      "level": "gap",
+      "mechanism": {
+        "file": "HARNESS.md",
+        "line": 40,
+        "verifiedContentHash": "sha256:6e6bb09cfc10c50d",
+        "staleness": "verified"
+      },
+      "suggestedNextStep": "Deferred by the project's own admission (a real per-criterion gate — e.g. a generated Playwright assertion run against the preview — is 'real, buildable work,' not scheduled to any phase as of HARNESS.md)."
+    },
+    {
+      "id": "aesthetic-directive-match-unverified",
+      "severity": "low — already labelled",
+      "statement": "Whether a generated app matches its chosen aesthetic directive (typography/motion/background) has no mechanism at all.",
+      "level": "gap",
+      "mechanism": {
+        "file": "HARNESS.md",
+        "line": 41,
+        "note": "Step_Theme.tsx's caption states this plainly",
+        "verifiedContentHash": "sha256:fe0154e4b2aaf69b",
+        "staleness": "verified"
+      },
+      "suggestedNextStep": "Project's own conclusion: building an automated mechanism here would be theatre (scoring a subjective quality with a number nobody should believe). Correct move already taken: say so where a person can see it."
+    },
+    {
+      "id": "design-token-usage-unverified",
+      "severity": "low — already labelled",
+      "statement": "Whether the design contract's palette/typography tokens were actually used in generated output (vs. merely declared) has no mechanism beyond the CSS custom-property convention itself.",
+      "level": "gap",
+      "mechanism": {
+        "file": "HARNESS.md",
+        "line": 42,
+        "verifiedContentHash": "sha256:1d563d27210b30ba",
+        "staleness": "verified"
+      },
+      "suggestedNextStep": "Not built this phase, per the project's own record. A cheap gate is plausible: grep generated files for the declared custom-property names and flag zero-usage as a validateBuild.ts issue."
+    },
+    {
+      "id": "on-demand-packages-deferred",
+      "severity": "medium",
+      "statement": "The verification path (tsc/esbuild) only resolves a curated allowlist (providers/allowlist.js), not arbitrary npm packages, unlike the Sandpack preview which already resolves anything via CDN — so the 'verdict' and what a person visually sees can diverge on dependency choice.",
+      "mechanism": {
+        "file": "ON-DEMAND-PACKAGES.md",
+        "line": 1,
+        "verifiedContentHash": "sha256:e6d5301fabe4fa78",
+        "staleness": "verified"
+      },
+      "level": "gap",
+      "suggestedNextStep": "Full plan already written and on hand (ON-DEMAND-PACKAGES.md) — on-demand npm install into a per-project cache directory inside preview/bundle.js's resolution seam. Not built; explicitly a report, not an implementation, as of this audit."
+    },
+    {
+      "id": "whole-app-fallback-effort-frozen",
+      "severity": "medium",
+      "statement": "Effort on the rarely-exercised whole-app fallback path is frozen at 'medium' pending an unrun A4 bench measurement, because raising it risks worsening the truncation it was created to work around.",
+      "crossReference": "hetrodox-unconventional-approaches.json#whole-app-fallback-effort-frozen",
+      "suggestedNextStep": "Run the A4 bench: first measure how often the manifest step actually fails and falls back to this path at all — if it's rare, this is low-priority; if common, it is likely a real quality bottleneck."
+    },
+    {
+      "id": "bounded-repair-heuristic-unmeasured",
+      "severity": "low",
+      "statement": "MAX_ROUNDS=3 is a reasoned but unmeasured heuristic — no data exists yet to say whether 3 rounds is systematically too few, too many, or about right.",
+      "crossReference": "hetrodox-unconventional-approaches.json#bounded-nonlooping-repair-heuristic",
+      "suggestedNextStep": "Cannot be resolved without more captured episodes with repair telemetry — blocked on fixing the memory blind spot below."
+    }
+  ],
+  "memorySystem": [
+    {
+      "id": "memory-blind-to-most-real-usage",
+      "severity": "high",
+      "statement": "Only 6 episodes ever recorded across 570 per-build database files; 23 real API calls recorded by the quota governor on one day vs. 2 episodes recorded in memory that same day.",
+      "crossReference": "hetrodox-unconventional-approaches.json#memory-cannot-see-most-real-usage",
+      "suggestedNextStep": "Instrument the client to find out WHY: does most iteration happen outside the wizard (plain chat/coding-chat, which never opens an episode), do reloads abandon episodes silently, or are open/close calls simply not reached in real interactive use? This is the single highest-leverage next investigation — everything downstream (the lesson ladder, any future RAG-based recall) inherits this blind spot."
+    },
+    {
+      "id": "mcp-server-scoped-to-empty-store",
+      "severity": "high",
+      "statement": "The multi-memory MCP surface reads the same project-scoped builder.db multi-app's own bridge.js already writes to (since commit 6360b37) — and that store still has zero rows. CORRECTED 2026-09-06: no longer believed to be a structural per-build-vs-project-scoped addressing mismatch (a buildId-scoped MCP fix was attempted, then reverted once bridge.js's real current source was read and the premise no longer held).",
+      "crossReference": "memory-system-ladder.json#engineInternals.scopeResolutionAndTheRealDefect",
+      "status": "FIXED (client-side) 2026-09-06: services/memoryService.ts's fire-and-forget POST calls (closeEpisode, record) now set keepalive:true, so a browser navigation/reset/unmount can no longer silently abort the request before it reaches the server. Server-side, multi-graph-memory's write path was independently confirmed fully synchronous and WAL-safe even on an unclean process exit, ruling out process-restart timing as the cause. Also added: server.js now eagerly probes memory at boot and logs engine availability on the first line of output, so a load failure (e.g. an unbuilt dist/) is loud immediately rather than discoverable only by auditing SQLite files later.",
+      "suggestedNextStep": "Watch builder.db over the next real usage session to confirm the keepalive fix actually closes the gap (no historical server logs exist to retroactively prove which exact mechanism caused the Sep 5 emptiness — the honest state is 'plausible cause fixed, not proven against historical data'). If it's still empty after real use, the boot-time engine-availability log is the next diagnostic signal to check."
+    },
+    {
+      "id": "lesson-ladder-never-climbed",
+      "severity": "informational",
+      "statement": "All 6 real lessons are still status=proposed; none have reached qualified/approved — an expected consequence of the memory blind spot above, not a defect in the ladder mechanism itself.",
+      "crossReference": "hetrodox-unconventional-approaches.json#lesson-ladder-never-climbed",
+      "suggestedNextStep": "Will resolve itself once the blind spot above is fixed and enough real episodes accumulate — no separate fix needed."
+    },
+    {
+      "id": "local-rag-stack-not-wired",
+      "severity": "low",
+      "statement": "The planned on-device semantic-recall upgrade has no code calling it yet in either repo.",
+      "crossReference": "memory-system-ladder.json#plannedUpgrade_localRagStack",
+      "suggestedNextStep": "Sequence after the memory-blind-spot fix, not before — a smarter recall mechanism over a store missing ~99% of real activity inherits the same blind spot."
+    }
+  ],
+  "documentationDriftFoundDuringThisAudit": [
+    {
+      "id": "readme-model-table-stale",
+      "statement": "README.md's Gemini model table (3.5 Flash, 3.5 Flash-Lite, 3.7 Flash, 3.1 Pro) was missing gemini-3.6-flash and gemini-3.8-flash, both live in providers/catalog.js.",
+      "suggestedNextStep": "Fixed structurally by this audit: architecture/models-adapters.json is now generated directly from catalog.js (architecture/generate/models.mjs) rather than hand-transcribed. README.md itself is unchanged per the 'separation, not absorption' decision — consider replacing its static table with a link to the generated doc."
+    },
+    {
+      "id": "plan-progress-memory-note-stale",
+      "statement": "The session memory file multi-app-plan-progress.md said 'Next: A3' when A3 (the peer-programmer loop, commit 53311d5) had already shipped, three commits earlier.",
+      "suggestedNextStep": "Update that memory file directly (outside this repo, in the assistant's memory store) — not an /architecture concern, noted here only as another concrete instance of the drift problem this whole task exists to prevent."
+    },
+    {
+      "id": "consolidated-path-stale",
+      "statement": "~/.claude/plans/CONSOLIDATED-PATH.md (last updated 2026-09-03, 'Stage 1 complete') predates evidence that Stage 2 (typecheck/ + CodeMirror diagnostics), Stage 3 (type-error wired into memory/proposals.js), and Stage 4 (auth/, commit ee18fd7) have all since shipped.",
+      "suggestedNextStep": "Reconcile in Phase 8's final doc — mark Stages 2-4 done with evidence, rather than editing CONSOLIDATED-PATH.md itself (out of this audit's scope per the 'separation' decision, but the final doc should say plainly what's now stale in it)."
+    }
+  ],
+  "openRisksFromConsolidatedPath": [
+    {
+      "id": "android-chrome-unexercised",
+      "statement": "All touch behavior (both editors, both documents) is synthetic — measured via CDP under desktop Chromium, never a real Android Chrome session. adb is installed and Playwright 1.62.1 has _android.devices(); wireless debugging has not been paired.",
+      "mechanism": {
+        "file": "~/.claude/plans/CONSOLIDATED-PATH.md",
+        "line": 247,
+        "verifiedContentHash": "sha256:1b247411357c6d9f",
+        "staleness": "verified"
+      },
+      "level": "gap"
+    },
+    {
+      "id": "cross-file-type-resolution-unmeasured",
+      "statement": "Stage 2's tsc-diagnostics work was prototyped single-file; generated projects import each other, and the node_modules resolution behavior across files is reasoned about, not measured.",
+      "mechanism": {
+        "file": "~/.claude/plans/CONSOLIDATED-PATH.md",
+        "line": 251,
+        "verifiedContentHash": "sha256:b553af25cfb6d0e0",
+        "staleness": "verified"
+      },
+      "level": "gap"
+    },
+    {
+      "id": "concurrent-tsc-under-memory-pressure-untested",
+      "statement": "One tsc run per project is enforced as policy, not proven safe under real memory pressure on a phone.",
+      "mechanism": {
+        "file": "~/.claude/plans/CONSOLIDATED-PATH.md",
+        "line": 253,
+        "verifiedContentHash": "sha256:1a99be75a9a5a245",
+        "staleness": "verified"
+      },
+      "level": "gap"
+    }
+  ],
+  "miscFoundNotBlocking": [
+    {
+      "id": "harness-generated-auth-docs-hold-a-live-looking-secret",
+      "statement": "multi-app-auth-integration.md and multi-app-how-to-integrate-auth.md are gitignored scratch output from an external auth-harness tool, written one day before the real auth commit, containing what looks like a plaintext OAuth client secret on disk.",
+      "level": "gap",
+      "suggestedNextStep": "Not a repo/git risk (gitignored, never committed), but worth deleting or rotating the credential locally if it's still valid, since they predate and are now superseded by the real auth/ implementation."
+    }
+  ]
+}

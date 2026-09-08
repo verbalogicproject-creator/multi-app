@@ -13,6 +13,10 @@ Builder-specific modules worth knowing before changing that flow:
 - `services/memoryService.ts` — the client's only route to memory. Every function answers `null` rather than throwing.
 - `memory/bridge.js` / `memory/routes.js` — the server's side: one `GraphMemory` per build, and the `/api/memory/*` surface.
 - `memory/proposals.js` — the declared table mapping validator issue codes to lessons. **Adding a validator check means adding a row here or to `NOT_A_LESSON`**; a code in neither is logged as an open question, which is the whole point of the table being data.
+- `typecheck/` — the server's `tsc` runner (`runner.js`), its output parser (`parse.js`), and the `/api/typecheck` surface. The scratch tree it writes lives at `.preview-work/` **inside the repo**, deliberately: TypeScript walks up looking for `node_modules`, so a generated project compiles against the real `@types/react` and the diagnostics are the ones the project's own `npm run typecheck` would print. From `/tmp` every `react` import is `TS2307` instead.
+- `providers/generate.js` — the builder's generation strategy: ask for a **manifest** first (paths + one-line purposes, no code), then one request per file against it. That is what puts the 65,536-token output ceiling out of reach rather than recovering from it, and it makes a stopped build resumable — what is missing is a set difference against the manifest, not a guess. Every dependency is injected (model chain, fallback runner, provider lookup, emit sink) so `test/generate.test.mjs` (`npm test`) can drive the whole path, including the branches that matter most and occur least, without a model.
+- `providers/salvage.js` — recovers the whole files from a response the model was cut off mid-way through, and normalises every provider's word for "I ran out of room" (`MAX_TOKENS`, `max_tokens`, `length`). Pure and dependency-free on purpose: it is the piece that decides whether a run counts as evidence, so it must be checkable without the instrument whose failure it detects.
+- `preview/` — the server's bundler: `bundle.js` (esbuild over a virtual filesystem), `css.js` (Tailwind v4 compiled in-process), `document.js` (the one self-contained document), and the `/api/preview` surface. Nothing is written to disk and nothing is fetched from a network. **The document runs at an opaque origin**, where `history.pushState`, `localStorage` and `document.cookie` all throw — `document.js` shims them and `bundle.js` swaps `BrowserRouter` for `MemoryRouter`, without which the first click on a generated app's nav link blanks the pane.
 
 Provider layer (`providers/`): `server.js` routes every model call through one interface — `streamChat`, `streamJson`, `generateJson`, `generateText`, each yielding normalized `{text, thinking, toolCalls, usage}` events. **Adding a model is one entry in `providers/catalog.js`**; adding a provider is one adapter plus a line in `providers/index.js`. Capability flags in the catalog (`efforts`, `thinkingStyle`, `maxOutput`, `tools`, `jsonMode`) exist because provider behaviour is genuinely not uniform — an unsupported thinking level, an over-large `max_tokens`, or the wrong reasoning parameter is a hard 400, not a graceful degrade. Verify a new model with `npm run smoke:providers -- <model-id>` before adding it; do not infer capabilities from a sibling model.
 
@@ -24,6 +28,8 @@ Invariants to preserve:
 - **`builderState.memory.episodeId` is non-null only while an episode is open.** Every close path clears it, which is what makes an id still present at startup unambiguously an episode a reload cut short.
 - **Read the memory link from `memoryRef.current`, never from `builderState.memory`, and write it only through `setMemory`.** A handler closes over the state of the render that created it, and a generation opens its episode *during* that handler — so a handler reading state sees the episode id from before it existed. That is not theoretical: it made a verified build fail to close its own episode, which the next reload then recorded as `abandoned`. The same hazard applies to `evidence`, which is why `promoteFiles` takes an `evidenceBase` from the generation that called it.
 - **An event's `domain` must come from the engine's declared vocabulary** (`MemoryDomain` in `services/memoryService.ts`, mirroring the engine's `LESSON_DOMAINS`). An undeclared domain fails schema validation and the whole event is refused — the bridge can only report that as a count, so the union is the thing that catches it.
+- **An instrument failure is not a verdict.** A generation cut off by its output budget is reported with `inconclusive: true`, and `proposalsFor` refuses to propose from it. The validators will happily report unbalanced braces and a missing `index.html` over the wreckage — all true of the text, all false of the model, which was stopped before it got there. Measured on a real build: three lessons proposed, three wrong, including "always emit index.html" for a run whose own streamed log shows `index.html` was emitted. One passing build afterwards would have promoted that to `qualified` and injected it into every later prompt.
+- **A `tsc` diagnostic's code is decided by its error range, not by the fact that `tsc` produced it.** TS1xxx and TS17xxx are grammar; 2xxx and up are types. Calling a wall of `TS1002` "type errors" proposed *"annotate props and state"* for a file that had been cut in half. See `typecheck/parse.js`.
 - **A verdict is recorded by stable issue `code`, never by message.** Events are immutable; rewording a check must not read downstream as a new kind of failure. The codes are also what `memory/proposals.js` keys on and what scopes the trial block, so changing one silently retires a lesson.
 - **Unproven lessons go in their own block, never the governed one.** The engine deliberately excludes `proposed` lessons from its recall; the trial channel in `bridge.trialBlock` is the host choosing to try one anyway, and it is only legitimate because it is bounded, labelled as unproven in the prompt, scoped to the failure that just happened, and recorded via `recordAppliedLesson`. Widening it without keeping all four is how a note nobody verified becomes doctrine.
 
@@ -46,15 +52,53 @@ Follow the existing TypeScript/React style: four-space indentation, semicolons, 
 
 ## Testing Guidelines
 
-There is no test runner wired into `package.json` yet, but two memory checks are real and should stay green. `npm run check:memory-loop` drives the whole learning ladder against the bridge in one process; `npm run smoke:memory` drives it through a real server process and adds what only exists when there is one — the engine's dist being importable from plain JavaScript, the routes, recall actually reaching an outgoing prompt, the art-direction bar, survival across a restart, and the CLI reading the same databases. Both spend nothing. Before submitting changes, run `npx tsc --noEmit` and `npm run build`, then exercise the affected chat, upload, streaming or builder flows with both processes running.
+`npm test` runs Vitest over every pure check: `test/generate.test.mjs` (the generation pipeline — manifest, repair, scaffold, bundle-failure attribution, entities, effort levels, prompt ordering, the acceptance-criteria self-check), `test/memory-loop.test.mjs` (the whole learning ladder against the bridge, one linear scenario captured in a `beforeAll` since later steps depend on episode/lesson ids earlier steps created), `auth/index.test.js` (the OAuth `state` nonce, in-process against a throwaway Express app), and colocated `utils/patchFile.test.ts` / `utils/toolSequence.test.ts`. All of it is pure — no model, no network, no server — and runs in a few seconds. `npm run smoke:memory` drives the same memory lifecycle through a real server process instead, and adds what only exists when there is one — the engine's dist being importable from plain JavaScript, the routes, recall actually reaching an outgoing prompt, the art-direction bar, survival across a restart, and the CLI reading the same databases. Both spend nothing. Before submitting changes, run `npx tsc --noEmit`, `npm test`, and `npm run build`, then exercise the affected chat, upload, streaming or builder flows with both processes running.
 
-The pure modules (`utils/validateBuild.ts`, `utils/palettes.ts`, `utils/designContract.ts`, `services/buildStorage.ts`) are deliberately dependency-free and have been verified by bundling them with the local `esbuild` binary and running assertions under Node with a `localStorage` shim — a practical pattern on this device, where a browser test runner is impractical. If you add a runner, prefer colocated `*.test.ts` files and add the command here.
+The pure modules (`utils/validateBuild.ts`, `utils/palettes.ts`, `utils/designContract.ts`, `services/buildStorage.ts`) are deliberately dependency-free; add a Vitest file colocated next to any of them if you add a real assertion rather than hand-verifying by eye. Vitest was picked over Node's own `node --test` (which the sibling `multi-graph-memory` repo uses) because this repo already depends on Vite for the frontend build, so `vitest.config.ts` reuses that toolchain rather than adding a second one.
+
+`test/generate.test.mjs` (`npm test`) guards the line between "the model wrote bad code" and "the instrument ran out of room". It follows this file's own rule about absence: it first proves a verdict **does** propose lessons, then that the same verdict marked `inconclusive` proposes none, because "the guard works" and "the table is empty" are otherwise indistinguishable.
+
+`npm run check:preview` drives the real `/api/preview/build` route with generated-shaped projects and puts each answer in a real sandboxed iframe. It exists because the three ways a preview fails — the bundle failed, the app threw, the app rendered nothing — all look like the same blank white rectangle, and it asserts they stay three distinguishable answers. It then drives the client seam through the real app — the wizard's export step and the IDE's Preview tab — because a reachable tab is not a running app, and a host stuck on "Building…" forever would pass a visual audit. It builds first and needs the backend running; no key. **Its sandbox assertions are the load-bearing ones**: an assertion that only renders the home page never navigates, and navigating is what calls the API that throws.
 
 When touching generation, verify against the live API rather than trusting types: check that acceptance criteria and theme tokens actually appear in generated output, and that the validator does not fire on real (good) model output.
 
 The memory lifecycle needs **no model and no key** to verify: `/api/memory/*` calls no provider, and `npm run smoke:memory` already automates the whole sequence. To poke at it by hand, start the backend on a spare port with a scratch database directory (`PORT=8177 MEMORY_DB_DIR=/tmp/scratch npm start`), replay the open → events → close sequence over HTTP, then read it back with `multi-memory --build <id> episode list`.
 
 Two traps the smoke encodes, because both produce a green result for the wrong reason. Give the server a **deliberately invalid** provider key rather than a real one: a builder call is supposed to fail at the model, since recall runs before it and leaves its receipt either way, and that failure is what proves memory sits upstream of the provider. And never assert that something was *absent* from a recall without first proving it would otherwise have been *present* — a packet with no items leaves no receipt at all, so "the taste lesson was barred" and "nothing was recalled" look identical. The direction-bar check runs the same task twice, differing only in the flag, for exactly that reason.
+
+### Two habits that let a whole class of bug through, and what replaced them
+
+Both came out of one adversarial review, and both are the same mistake: **asserting the
+weaker property and naming it the stronger one.**
+
+**A filter is a blind spot. Say what it hides.** `audit:ui`'s duplicate check excluded
+the dock's `inert` clones as correct, so it could not fail on them — and the dock shipped
+with fourteen visible buttons that ignored every click against seven that worked, while
+the gate reported *34 surfaces, 0 findings*. The exclusion was added for a good reason
+(98 false positives) and nobody asked what it had just made invisible. When a check
+narrows its scope, either state in a comment what the narrowed version can no longer see,
+or pair it with one that covers the excluded set. The pairing here is
+"visible ⇒ operable", asserted page-side against the viewport.
+
+**Presence is not validity: resolve an id, do not trust it.** `ideProjectId` was checked
+for non-null and used as a lookup key without ever being looked up, so a deleted project
+kept Code and Preview enabled and rendering against nothing. Sweeping the class found two
+more instances the same afternoon — agents left bound to a deleted persona, and an
+`if (found) setActivePersona(found)` that updated on a hit and silently kept the deleted
+persona on a miss, so its instructions went on reaching the model. **Every id that
+crosses a collection boundary is resolved at the point of use, and a miss is handled
+explicitly.**
+
+**And the general rule the two share:** when a bug is found, fix the class, not the
+instance. Grep for every other place the same shape occurs *before* writing the fix. Two
+of the four faults above were found that way rather than by being reported.
+
+**Measurement has a blind spot too.** This repo's habit is to measure rather than assume,
+and it is a good one — but you only measure what you thought to point an instrument at.
+The dock fault was found by reasoning about CSS widths, not by a probe. Run
+`/codex:adversarial-review` on a clean tree before calling a phase done; it is not a
+formality, and it is worth more than another gate written by the same hands that wrote
+the code.
 
 Read the two boot lines before trusting a run. A second server on an occupied port dies with `EADDRINUSE` while the one already there keeps answering — writing to whatever database *it* was started with — so the server prints `Memory databases: <dir>` alongside its port, and `/api/memory/state` reports the same `databaseDir`. A refused event comes back with the engine's own reason in `rejected[].reason`, naming the field it rejected and the vocabulary it wanted; the bridge's last failure is also on `/api/memory/state`.
 

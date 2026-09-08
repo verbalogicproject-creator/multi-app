@@ -1,3 +1,10 @@
+import { getSkill } from './skillSource.js';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const SKILLS_DIR = path.join(__dirname, '..', 'skills');
+
 // System prompts are assembled from neutral content, then rendered in each
 // provider's documented house style. A single lowest-common-denominator prompt
 // would waste what each model family is actually tuned for:
@@ -33,6 +40,39 @@ const personaBlock = (persona, customStyles) => {
     return out.trim();
 };
 
+/**
+ * The persona's model-tuned foundation prompt (`kind: 'model-prompt'`, at most
+ * one — the model the persona names) plus its selected additive skills
+ * (`kind: 'skill'`, zero or more), resolved from the filesystem skill catalog
+ * (`providers/skillSource.js`) and rendered in the same per-provider dialect
+ * `personaBlock`/`buildAestheticDirective` already use. A persona with neither
+ * `modelId` nor `skillIds` renders nothing — purely additive, never required,
+ * so every persona saved before this existed keeps behaving exactly as before.
+ */
+const skillsBlock = (persona, provider) => {
+    const sections = [];
+    if (persona?.modelId) {
+        const foundation = getSkill(SKILLS_DIR, persona.modelId);
+        if (foundation?.kind === 'model-prompt') sections.push(foundation.body);
+    }
+    for (const id of persona?.skillIds ?? []) {
+        const skill = getSkill(SKILLS_DIR, id);
+        if (skill?.kind === 'skill') sections.push(skill.body);
+    }
+    if (sections.length === 0) return '';
+
+    if (provider === 'anthropic') {
+        return '\n\n' + sections.map((s) => `<skill>\n${s}\n</skill>`).join('\n');
+    }
+    if (provider === 'openai') {
+        return '\n\n' + sections.map((s) => `### Skill\n${s}`).join('\n\n');
+    }
+    if (provider === 'nvidia') {
+        return '\n\nAdditional skills:\n' + sections.map((s, i) => `${i + 1}. ${s}`).join('\n');
+    }
+    return '\n\n--- Skills ---\n' + sections.join('\n\n');
+};
+
 const toolLines = (hasProjects) => {
     const shared = [
         '`searchNpm(packageName)`: find information about npm packages.',
@@ -44,6 +84,7 @@ const toolLines = (hasProjects) => {
         '`readFile(path)`: read a file\'s content.',
         '`createFile(path, content)`: create a new file.',
         '`updateFile(path, newContent)`: overwrite a file\'s content.',
+        '`patchFile(path, find, replace)`: replace one exact occurrence of `find` with `replace` in a file. Prefer this over `updateFile` for a small change — it fails by name if `find` is missing or not unique, rather than silently rewriting more than intended.',
         '`deleteFile(path)`: delete a file from the project.',
         ...shared,
     ];
@@ -153,31 +194,120 @@ ${hasProjects ? projectContexts : 'No project is loaded.'}`;
 const RENDERERS = { google: renderGoogle, anthropic: renderAnthropic, openai: renderOpenAI, nvidia: renderOpen };
 
 /**
- * Builds the chat/coding system prompt for a provider from neutral inputs.
- * @param {{provider: string, persona: object, projects: object[], customStyles: object[]}} input
+ * What `plan` mode adds, appended to whichever renderer the provider uses.
+ *
+ * Chat and the builder were two islands: you could talk an idea through and then had to
+ * retype it into the wizard from memory. `plan` is the bridge, and it is a **server**
+ * mode rather than a client one on purpose — a client-only mode would show a
+ * "Send to Builder" button while the assistant had no idea it was supposed to be
+ * producing anything sendable, and the quality of the hand-off would depend entirely on
+ * how the user happened to phrase things.
+ *
+ * The brief is asked for in one block at the end of each turn, because that is what the
+ * hand-off takes: `composeBuilderBrief` reads the last assistant message. The user sees
+ * it in an editable textarea before a single builder call is made, so this shapes the
+ * starting point rather than deciding anything.
  */
-export const buildSystemPrompt = ({ provider, persona, projects, customStyles }) => {
+const PLAN_MODE = `
+# You are helping shape an app before it is built
+The person is working an idea out loud. Help them make it concrete: ask about the pages
+it needs, who uses it, and what it must do — one or two questions at a time, not a
+questionnaire.
+
+End every reply with a block in exactly this shape, revised to match everything agreed
+so far:
+
+BRIEF
+<a single paragraph describing the app: what it is, who it is for, and what it does>
+Pages: <comma-separated list>
+Must have: <comma-separated list of the things it cannot ship without>
+
+Keep the brief current rather than appending to it. It is a draft the person will edit,
+not a contract — do not pad it, and do not claim anything has been built.`;
+
+/**
+ * What a project was built to be, rendered only when the project actually carries
+ * it (`types/project.ts`'s `ProjectOrigin` — set once, by `loadGeneratedProjectIntoIDE`).
+ * A project opened by any other path (created by hand, or predating A3) has no
+ * origin, and this renders nothing rather than a section full of "unknown".
+ */
+const originContext = (origin) => {
+    if (!origin?.plan) return '';
+    const lines = [`\nThis project was built from a plan: ${origin.plan.projectDescription ?? origin.plan.projectName ?? ''}`.trim()];
+    if (Array.isArray(origin.acceptanceCriteria) && origin.acceptanceCriteria.length > 0) {
+        lines.push(`Acceptance criteria it was meant to satisfy:\n${origin.acceptanceCriteria.map((c, i) => `${i + 1}. ${c}`).join('\n')}`);
+    }
+    return lines.join('\n');
+};
+
+/**
+ * File tree, diagnostics and the preview's verdict — computed fresh by
+ * `useChat`'s `sendMessage` for a coding-mode turn (see A3 item 2) and attached
+ * to the `Project` object the request carries. Never persisted, so most turns
+ * that are not actively editing this project will not have them; each renders
+ * independently of the others.
+ */
+const liveContext = (p) => {
+    const lines = [];
+    if (Array.isArray(p.fileTree) && p.fileTree.length > 0) {
+        lines.push(`Files in this project:\n${p.fileTree.join('\n')}`);
+    }
+    if (typeof p.diagnosticsSummary === 'string' && p.diagnosticsSummary.trim() !== '') {
+        lines.push(`Current type-check diagnostics:\n${p.diagnosticsSummary}`);
+    }
+    if (typeof p.previewSummary === 'string' && p.previewSummary.trim() !== '') {
+        lines.push(`Current preview verdict:\n${p.previewSummary}`);
+    }
+    return lines.length > 0 ? `\n${lines.join('\n\n')}` : '';
+};
+
+/**
+ * Builds the chat/coding system prompt for a provider from neutral inputs.
+ * @param {{provider: string, persona: object, projects: object[], customStyles: object[], mode?: string, recalled?: string}} input
+ */
+export const buildSystemPrompt = ({ provider, persona, projects, customStyles, mode, recalled }) => {
     const projectContexts = (projects ?? []).map(p => {
         let context = `Project: ${p.name}`;
         if (p.dependencySummary && p.dependencySummary !== 'No files to analyze.' && p.dependencySummary !== 'No major dependencies identified') {
             context += `\nDependencies: ${p.dependencySummary}`;
         }
+        context += originContext(p.origin);
+        context += liveContext(p);
         return context;
     }).join('\n\n');
 
     const render = RENDERERS[provider] ?? renderGoogle;
-    return render({
-        persona: personaBlock(persona ?? {}, customStyles ?? []),
+    const base = render({
+        persona: personaBlock(persona ?? {}, customStyles ?? []) + skillsBlock(persona ?? {}, provider),
         projectContexts,
         hasProjects: projectContexts.trim() !== '',
     });
+    /* Same `liveContext` shape (computed fresh, advisory, appended) as the
+       per-project file-tree/diagnostics/preview sections above — just not
+       scoped per-project, since recall today covers the first attached
+       project only (see memory/bridge.js's recallBlock; multi-project fan-out
+       is deferred until it's shown to matter). Never overrides `persona` or
+       `projectContexts` — appended after both, same as `PLAN_MODE` below. */
+    const withRecall = recalled ? `${base}${recalled}` : base;
+    /* Appended rather than replacing the renderer, so a plan-mode turn keeps the
+       persona and the house style it would otherwise have had. */
+    return mode === 'plan' ? `${withRecall}\n${PLAN_MODE}` : withRecall;
 };
+
+/** The marker `composeBuilderBrief` looks for. Declared once so the two cannot drift. */
+export const BRIEF_MARKER = 'BRIEF';
 
 /**
  * Builder prompts are content-identical across providers (the schema does the
  * structural work); only this short preamble adapts to the house style.
  */
 export const builderPreamble = (provider) => ({
+    // Previously absent — silently fell through to the generic default below even
+    // though Google is the builder's daily-driver provider. Gemini 3.x's own
+    // prompting guidance says it responds best to direct, concise instructions and
+    // over-analyzes verbose scaffolding, so this stays as short as the others
+    // rather than elaborating just because it finally has its own entry.
+    google: 'You are a senior product engineer and product designer, working in React and Tailwind. Return only the requested JSON object — no commentary before or after it.',
     anthropic: 'Claude is a senior product engineer and designer. Claude returns only the requested JSON object, with no commentary before or after it.',
     openai: 'You are a senior product engineer and designer. Return only the requested JSON object. No preamble, no commentary.',
     nvidia: 'You are a senior product engineer and designer. Output only the JSON object described below. Do not write any text before or after the JSON.',

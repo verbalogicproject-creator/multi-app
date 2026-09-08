@@ -1,0 +1,49 @@
+%% The memory/lesson lifecycle, and the real write-loss defect (corrected
+%% 2026-09-06 — this diagram originally showed a per-build-vs-project-scoped
+%% storage SPLIT that does not exist; multi-app and the MCP server already
+%% share one store). See memory-system-ladder.json for citations.
+flowchart TD
+    OPEN["POST /api/memory/episodes/open<br/>the one client call that IS awaited"] --> EP["Episode open<br/>episodeId travels with the build"]
+    EP --> EVENTS["POST /api/memory/events<br/>planning.answer, candidate.created,<br/>verification.completed, repair.attempted ..."]
+    EVENTS --> CLOSE{"POST /api/memory/episodes/close"}
+    CLOSE -->|"validator passed"| VERIFIED["verified"]
+    CLOSE -->|"validator failed / threw"| FAILED["failed"]
+    CLOSE -->|"reload / reset cut it short"| ABANDONED["abandoned"]
+
+    FAILED --> PROPTABLE["memory/proposals.js<br/>PROPOSAL_TABLE: issue code -> lesson<br/>no model in this decision"]
+    PROPTABLE --> PROPOSED["Lesson: proposed"]
+    PROPOSED -->|"tried in a LATER, DIFFERENT<br/>episode that then closes verified"| QUALIFIED["Lesson: qualified"]
+    QUALIFIED -->|"human only,<br/>POST /lessons/:id/approve"| APPROVED["Lesson: approved"]
+
+    subgraph CLIENTRISK["Client-side (services/memoryService.ts)"]
+        CLOSECALL["closeEpisode() / record()<br/>fire-and-forget by design"]
+        FIXED["fetch(..., {keepalive: true})<br/>FIXED 2026-09-06"]
+        CLOSECALL --> FIXED
+    end
+    EVENTS -.-> CLOSECALL
+    CLOSE -.-> CLOSECALL
+
+    subgraph STORAGE["The one shared store — multi-app writes here, MCP reads here"]
+        SHAREDDB[(".multi-memory/builder.db<br/>project-scoped, since commit 6360b37<br/>(migrated FROM one-per-build)")]
+    end
+    FIXED --> SHAREDDB
+
+    subgraph MCPSIDE["multi-memory MCP server (multi-graph-memory)"]
+        CONFIG[".multi-memory.json<br/>{projectId: 'builder', workspace: 'multi-app'}"]
+        TOOLS["fgm_project_status, fgm_list_episodes,<br/>fgm_list_lessons, fgm_query_events ..."]
+        CONFIG --> SHAREDDB
+        TOOLS --> SHAREDDB
+    end
+
+    subgraph REAL["Measured real state, original audit"]
+        R1["6 episodes ever recorded, ALL in the<br/>pre-migration per-build files —<br/>LEGACY, no longer written to"]
+        R2["6 lessons ever proposed<br/>ALL still status=proposed<br/>ZERO qualified, ZERO approved"]
+        R3["builder.db (the CURRENT, correct,<br/>sole target) confirmed EMPTY<br/>despite being written to since Sep 5"]
+    end
+    SHAREDDB -.-> R3
+    PROPOSED -.-> R2
+
+    classDef gap fill:#2A2A2E,stroke:#EA580C,stroke-width:2px,color:#F4F4F5;
+    classDef fixed fill:#2A2A2E,stroke:#9A9AA2,stroke-width:1px,color:#F4F4F5;
+    class R1,R2,R3 gap;
+    class FIXED fixed;

@@ -1,0 +1,151 @@
+{
+  "$schema": "declaration-v1",
+  "note": "This is the file the audit was actually commissioned for: is the pain of getting Gemini to generate properly caused by something this project chose to do differently, and if so, which choice. No assumption going in that 'unconventional' means 'at fault' — every entry below carries a verdict earned from real code and, where it exists, real measured data (see the real-data pull cited throughout), not from how unusual the choice sounds. Verdicts: `confirmed` (code + real data both show it), `plausible-suspect` (sound reasoning, not yet measured against a real failure), `needs-measurement` (the project's own admitted open question), `ruled-out` (checked and it isn't the cause), `deliberate-tradeoff` (working as designed, cost is real and now visible). Generation-pipeline choices are covered in depth per the stated priority; everything else in this repo gets a lighter pass, kept out of this file, in gaps-bugs-and-need-to-handle.json instead.",
+  "realDataCaveat": {
+    "statement": "Real generation history is almost nonexistent: across 570 SQLite files (.multi-memory/ + .multi-memory.v0/), only 6 episodes were ever recorded, and only 5 files contain any rows at all. This is itself the top finding (see 'memory-cannot-see-most-real-usage' below) and it means every verdict below that leans on real data is honest about resting on an n of 1-6, not a statistical claim.",
+    "level": "gap"
+  },
+  "findings": [
+    {
+      "id": "repair-can-end-worse-than-it-started",
+      "verdict": "confirmed",
+      "statement": "The post-generation repair loop (harness-agentic-loop.json#post-generation-repair-loop) can — and, in the one real build with full telemetry, did — finish with MORE errors than it started with, and ships that worse state as the final candidate anyway.",
+      "evidence": [
+        "server.js:766-870 (repairIfNeeded): the per-round revert check compares each repaired file's OWN error count before/after that round (wasBroken/nowBroken by path) — it explicitly does not check the project's aggregate error count when deciding what to keep. The code's own comment admits why: 'Attribution is imperfect (repairing A can change B)'.",
+        "The loop's stop condition (`if (settled.diagnostics.length >= current.diagnostics.length) { current = settled; break; }`) detects that a round did not help in aggregate and stops further rounds — but it does not roll the project back to the state before that non-helping round, or to the best round seen. Whatever `current` holds when the loop exits is what ships.",
+        "Real measured example: build-mtoemkqa-ffy5sk24 (2026-09-05 13:22 UTC, gemini-3.6-flash, a photographer-portfolio idea, 20 files). candidate.created payload: preRepairErrors:47, postRepairErrors:61, repairRounds:2, repairedFiles: 4 named files, repairReverted:false. The immediately following verification.completed event: ok:false, errors:62 (61 type-error + 1 unbalanced-braces), checked:20 — confirming the worse, post-repair state is what was actually verified and presented as the candidate."
+      ],
+      "whyThisMatters": "The pipeline's own stated principle is 'a build that was going to fail should fail as the model wrote it, not as a failed repair left it' (server.js:765). The one real build with enough telemetry to check shows that principle did not hold: the model's original 47-error output would have been the better artifact to show, and the automated repair mechanism — built specifically to reduce how much fighting a generation needs — made this specific build measurably harder to fix by hand instead of easier.",
+      "relatedMechanism": [
+        "post-generation-repair-loop",
+        "in-generation-repair"
+      ],
+      "confidence": "This is one real example, not a rate. What is confirmed is that the code path allows it and that it happened at least once; what is not established is how often. A fix to consider: track the best-seen (lowest aggregate error) snapshot across rounds and restore it if the final round is not the best one, instead of trusting the last round unconditionally."
+    },
+    {
+      "id": "quota-vs-request-count",
+      "verdict": "plausible-suspect",
+      "statement": "A build's real request count can exceed the daily quota of the very model the builder defaults to, and of its first fallback — but the retry/fallback engineering is real and functioning, so the likely failure mode is a silent mid-build model downgrade, not an outright crash.",
+      "evidence": [
+        "MODELS.builder defaults to gemini-3.7-flash (server.js:163); DEFAULT_QUOTA_LIMITS treats both gemini-3.7-flash AND its own first declared fallback, gemini-3.6-flash, as 20-requests/day models (server.js:176-181; providers/catalog.js:44-45).",
+        "The one real build with full telemetry needed 20 initial per-file requests plus a manifest request (21) before any repair — already at the edge of a 20/day ceiling in generation alone (see harness-agentic-loop.json#requestCountArithmetic). Worst-case repair adds up to 30 more (10 files x 3 rounds).",
+        "logs/quota.json shows 23 real requests already recorded against gemini-3.6-flash on 2026-09-05 — past the app's own 20/day assumption for that model, on the same day the one detailed real build ran on that exact model.",
+        "Mitigation that is real, not hoped-for: withModelFallback treats HTTP 429 as transient (server.js:484-513) and falls through the model's declared chain (gemini-3.7-flash -> gemini-3.6-flash -> gemini-3.5-flash -> MODELS.coding) — and gemini-3.5-flash has a 250/day limit, so the chain does have real headroom at its far end."
+      ],
+      "whyThisMatters": "gemini-3.5-flash's catalog hint is 'Fast, free tier — default for chat and coding', not the coding/agentic-work framing gemini-3.7-flash and 3.6-flash carry. If a build's requests silently fall through two rate-limited models to the generic chat default partway through, the code quality shift would look exactly like 'the model got worse at generating' with no visible cause — because `fellBack`/`servedModel` are recorded but nothing surfaces them as a quality-relevant event, only an attribution fact.",
+      "relatedMechanism": [
+        "transient-retry-fallback",
+        "quota-governor-advisory"
+      ],
+      "confidence": "The arithmetic and the mitigation are both confirmed by reading the code. What's NOT confirmed: whether a real build has actually fallen through to gemini-3.5-flash under quota pressure. The one real build with telemetry shows requestedModel==servedModel==gemini-3.6-flash, fellBack:false — no fallback fired in that case. Measuring this needs either more captured episodes (see the memory-blind-spot finding) or a live test that deliberately exhausts a model's quota mid-build."
+    },
+    {
+      "id": "memory-cannot-see-most-real-usage",
+      "verdict": "confirmed",
+      "statement": "The fire-and-forget, never-block, 2-second-timeout, null-on-any-failure design of every memory tap (a deliberate choice, stated explicitly in AGENTS.md: 'No memory tap may gate a builder transition') has a real, measured cost: almost none of the app's actual generation activity is ever recorded.",
+      "evidence": [
+        "Across 570 per-build SQLite files, only 6 episodes were ever recorded, ever, ending 2 open/never-closed, 2 failed, 1 verified, 1 abandoned.",
+        "logs/quota.json records 23 real gemini-3.6-flash API calls on 2026-09-05 alone; the memory store recorded only 2 episodes that entire day. Real usage substantially outpaces what memory captured.",
+        "services/memoryService.ts answers null rather than throwing on any failure (AGENTS.md's own stated design), and every server-side tap is fire-and-forget appended after the response is already sent (server.js, e.g. line ~963-990) — neither path retries or surfaces a dropped event anywhere a person would see it."
+      ],
+      "whyThisMatters": "This was a correct tradeoff for the stated goal ('memory must never make the builder slower or less reliable'), but it has a side effect nobody appears to have measured until now: the system built specifically to learn from what goes wrong in generation has almost nothing to learn from. If the actual friction of 'fighting to get Gemini to generate properly' happens mostly outside the small set of attempts that manage to open-and-close a full episode (plausible, given 23 real calls vs. 2 recorded episodes the same day), the lesson ladder structurally cannot see the failures that matter most.",
+      "relatedMechanism": [],
+      "confidence": "The counts (6 episodes, 570 files, 23 vs 2) are direct SQL/CLI measurements, not estimates. What's inferred, not measured, is WHY so few attempts produce a recorded episode — candidates include: most iteration happening through plain chat/coding-chat rather than the wizard (which wouldn't open an episode at all), reloads/resets abandoning episodes before close, or open/close calls simply not being reached during real interactive use. Distinguishing these needs client-side instrumentation this audit did not add."
+    },
+    {
+      "id": "lesson-ladder-never-climbed",
+      "verdict": "confirmed",
+      "statement": "Every one of the 6 lessons ever proposed is still status=proposed. Zero have ever reached qualified or approved.",
+      "evidence": [
+        "Direct SQL over the 5 non-empty databases: 6 lessons total (unbalanced-braces x3, type-error x2, missing-index-html x1), all proposed, none qualified/approved.",
+        "Promotion requires a lesson to be tried in a LATER, DIFFERENT episode that then closes verified (README.md's 'How memory works', memory/bridge.js). With only 6 episodes ever recorded and no evidence any of them reused a prior episode's lesson, the ladder has mathematically never had the chance to climb."
+      ],
+      "whyThisMatters": "This is not a defect in the ladder mechanism itself — it is doing exactly what it was built to do (refuse to promote on insufficient evidence). It is a direct, expected consequence of 'memory-cannot-see-most-real-usage' above: a promotion ladder with 6 rungs of data has never climbed because it has never had enough rungs to climb.",
+      "relatedMechanism": [],
+      "confidence": "Directly measured, not inferred."
+    },
+    {
+      "id": "mcp-surface-blind-to-real-data",
+      "verdict": "confirmed",
+      "statement": "The 'governed', externally-queryable multi-memory MCP surface (fgm_project_status, fgm_list_episodes, fgm_list_lessons, etc.) is scoped to the SAME shared builder.db multi-app itself writes to (memory/bridge.js, since commit 6360b37) — and that store has zero rows anyway. CORRECTED 2026-09-06: originally attributed to a structural per-build-vs-project-scoped addressing mismatch; that premise was wrong (see memory-system-ladder.json's serverSide.correction) — bridge.js already writes project-scoped, matching the MCP's own resolution. The real cause is the SAME write-loss bug as 'memory-cannot-see-most-real-usage' below, not a second, separate defect.",
+      "evidence": [
+        "fgm_project_status called live during this audit: {events:0, episodes:0, lessons:0, evidence:0}.",
+        "Direct SQL against builder.db independently confirms 0/0/0/0, despite builder.db being bridge.js's correct, sole write target since 2026-09-05 (mtime 16:32:32 UTC that day).",
+        "The 6 real episodes found during the original audit live in per-build .multi-memory/build-<id>.db files — confirmed to be pre-migration legacy data (all older than builder.db's mtime), not live parallel storage.",
+        "multi-graph-memory's own write path was independently confirmed fully synchronous end-to-end (node:sqlite DatabaseSync, non-async GraphMemory methods, real transactions) by a read-only investigation — the engine itself cannot silently drop a write, which rules out the engine as the cause and points at multi-app's own call sites instead."
+      ],
+      "whyThisMatters": "An external agent (a terminal AI, a future automated reviewer) asking this MCP surface 'what has generation actually learned' still gets a confident, well-formed, wrong answer: nothing — just not for the reason originally diagnosed. Anyone using this surface to reason about the pipeline's health would incorrectly conclude the memory system has never been used, rather than that its writes are being lost client- and server-side (see below).",
+      "relatedMechanism": [],
+      "confidence": "Directly measured, and re-verified against a live implementation attempt that surfaced the correction. See workflows-skills-mcp-agents.json for the same finding from the tooling side (also needs the same correction applied)."
+    },
+    {
+      "id": "bounded-nonlooping-repair-heuristic",
+      "verdict": "needs-measurement",
+      "statement": "Repair is deliberately bounded (MAX_ROUNDS=3) rather than looped, on the stated reasoning 'a model that cannot fix a file will not fix it on the fourth attempt either' — plausible, but never checked against real outcomes because there isn't enough real data to check it against.",
+      "evidence": [
+        "server.js:945-949 and providers/generate.js:505-509 both state this reasoning verbatim.",
+        "The bound is progress-based, not a flat count (HARNESS.md, server.js comment: 'a single round took 32 errors to 1 and then stopped by rule' — a documented case where the OLD flat-count bound cut off a working repair; the current progress-based bound is itself a fix for a previously-confirmed problem)."
+      ],
+      "whyThisMatters": "This is a reasonable, evidence-informed heuristic, not an arbitrary guess — but it is still a heuristic standing in for a mechanism, exactly the pattern HARNESS.md itself warns about ('a hardcoded cap is what gets written when there's no mechanism yet to reason about the risk with'). With only 6 real episodes ever recorded, there isn't enough data in this repo to know whether 3 rounds is systematically too few, too many, or about right for the failure sizes this pipeline actually produces (the one real example needed 2 rounds and still got worse — see 'repair-can-end-worse-than-it-started').",
+      "relatedMechanism": [
+        "post-generation-repair-loop",
+        "in-generation-repair"
+      ],
+      "confidence": "Not measurable with current data; would need many more captured episodes with repair telemetry."
+    },
+    {
+      "id": "whole-app-fallback-effort-frozen",
+      "verdict": "needs-measurement",
+      "statement": "Effort on the whole-app fallback path (used when the manifest step itself fails) is deliberately left at 'medium', unraised, because it shares its 65,536-token budget with thinking and HARNESS.md names it as 'the documented original cause of truncation' — raising it is explicitly deferred to an unrun 'A4 bench measurement' that has not happened as of this audit.",
+      "evidence": [
+        "HARNESS.md's effort-levels table, row 'Whole-app fallback effort (server.js)': Was medium, Now unchanged, Why: 'Raising effort here could make truncation worse. Needs an A4 bench measurement before it is touched, not a guess.'"
+      ],
+      "whyThisMatters": "This is the project correctly refusing to guess — flagged as exactly that in its own docs. It remains open specifically because nobody has yet measured how often the whole-app fallback path is even hit in practice (if the manifest step reliably succeeds, this is a cold path and low-priority; if it's a common escape hatch, its frozen effort could be a real quality bottleneck).",
+      "relatedMechanism": [
+        "effort-levels"
+      ],
+      "confidence": "This is a project-admitted open question, not a new finding — restated here because it directly bears on generation quality and has not been picked up since HARNESS.md was written."
+    },
+    {
+      "id": "manifest-first-strategy",
+      "verdict": "ruled-out",
+      "statement": "Splitting generation into a manifest request plus one request per file, instead of one whole-app request, is not a cause of generation pain — it is a fix for a specific, previously-confirmed one (output-ceiling truncation at ~54k of a 65,536-token budget) and multiple commits (b7b96d5, b48060c, 0fa87fb) show it working as intended.",
+      "evidence": [
+        "git log: the manifest-first buildout (commits f34aa08 through 58102c1) exists specifically because the old single-shot shape 'routinely hit [truncation] at ~54k' (providers/generate.js header)."
+      ],
+      "whyThisMatters": "Ruled out as a suspect for the current pain — it solved the problem it targeted. The problems that remain (repair-loop rollback, quota arithmetic, memory blind spot) are downstream of this design, not caused by it.",
+      "relatedMechanism": [
+        "manifest-first"
+      ],
+      "confidence": "Well-evidenced by the reasoning stated in the code and the commit history, though this audit did not itself reproduce the pre-manifest truncation to confirm the fix's magnitude independently."
+    },
+    {
+      "id": "entities-frozen-pre-a2-data-only",
+      "verdict": "needs-measurement",
+      "statement": "The one real build showing severe type-error volume (47->61/62 errors) predates A2 (the entities[]-frozen-into-types.ts fix) by about 2 hours, so it is very likely the exact motivating case for that fix, not evidence the fix failed. No post-A2 build with comparable detailed telemetry exists yet to confirm the fix actually reduced type-error volume in practice.",
+      "evidence": [
+        "Commit 5471606 (A2, 'a shape is decided once, not guessed by every file that needs it'): 2026-09-05T15:35:30+03:00 = 12:35:30 UTC.",
+        "build-mtoemkqa-ffy5sk24's candidate.created/verification.completed events: 2026-09-05T13:22Z, i.e. before A2 landed.",
+        "The only other populated build (build-mtodshpw-b6ptnqej) recorded a single no-files error, no type-error data."
+      ],
+      "whyThisMatters": "Important to state precisely so this audit doesn't accidentally manufacture a false 'A2 didn't work' claim from a timestamp it didn't check. The honest state: A2's premise (measured pre-fix: ~50 of ~57 errors from shape disagreement) is corroborated by this real build's own numbers (61 of 62 errors were type-error), but its effectiveness is unverified against real post-fix data because the memory blind spot (see above) means almost no builds since have left a detailed trace.",
+      "relatedMechanism": [
+        "entities-frozen"
+      ],
+      "confidence": "Timestamps directly compared; confirmed as a matter of sequencing. The causal claim ('A2 will likely help') is reasoning, not measurement."
+    },
+    {
+      "id": "acceptance-self-report-already-labelled",
+      "verdict": "ruled-out",
+      "statement": "The model grading its own acceptance criteria is an unconventional-sounding choice, but it is not a hidden mistake — it is explicitly labelled a self-report, excluded from the lesson ladder by name in memory/proposals.js's NOT_A_LESSON, and the UI caption says so plainly.",
+      "evidence": [
+        "HARNESS.md line 40-59; memory/proposals.js's NOT_A_LESSON entry for acceptance-criterion-unmet."
+      ],
+      "whyThisMatters": "Ruled out as something this audit needed to surface — the project already found and disclosed this one. Listed here only so the audit demonstrably looked, per the no-assumptions brief.",
+      "relatedMechanism": [
+        "acceptance-self-report"
+      ],
+      "confidence": "High — this is a documentation cross-check, not new analysis."
+    }
+  ]
+}

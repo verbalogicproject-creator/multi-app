@@ -13,3 +13,24 @@ logs/
 
 # Design review scratch — served by vite, never shipped
 public/memory-preview.html
+
+# Typecheck/preview scratch. Inside the repo on purpose: tsc's upward node_modules
+# walk finds the real @types from here, which /tmp cannot reach.
+.preview-work/
+
+# Auth integration packs. These carry a live OAuth client secret in plaintext and
+# this repo is public — the values belong in .env (ignored above) and nowhere else.
+# Never committed; keep it that way.
+multi-app-auth-integration.md
+multi-app-how-to-integrate-auth.md
+.multi-memory.v0/
+
+# Reference material pulled in for the harness-upgrade analysis (Gemini API docs) —
+# research input, not this project's own documentation.
+docs/
+
+# Per-session read receipts written by the vouch tooling. Machine output about a
+# session, not about this project — it accumulates one file per session and has no
+# meaning to anyone who wasn't in that session.
+.vouch/
+architecture/.vouch/

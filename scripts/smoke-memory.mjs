@@ -1,7 +1,7 @@
 /**
  * The memory loop end to end, over HTTP, against a real server process.
  *
- * `check:memory-loop` proves the ladder against the bridge in one process. This
+ * `test/memory-loop.test.mjs` (`npm test`) proves the ladder against the bridge in one process. This
  * proves the parts that only exist when there IS a process: the engine's dist
  * build being importable by plain JavaScript, the routes, recall actually reaching
  * an outgoing prompt, the direction bar, survival across a restart, and the CLI
@@ -50,10 +50,18 @@ async function startServer(port) {
             ...process.env,
             PORT: String(port),
             MEMORY_DB_DIR: scratch,
-            // Present so the server boots, invalid so nothing can be spent. dotenv
-            // does not override an env var that is already set, so .env.local
-            // cannot quietly put a real key back.
+            // Present so the server boots, invalid so nothing can be spent. The server
+            // treats the caller's environment as outranking every env file, so nothing
+            // on disk can put a real key back.
+            //
+            // **Every name that can satisfy the Gemini credential must be listed here.**
+            // `GEMINI_AI_KEY` was added after this check failed for real: a working key
+            // arrived in `.env.auth` under a name this block did not blank, the builder
+            // call succeeded, and the assertion reported it — "a real key leaked into
+            // the smoke". A new key name is a new line here, or this proof quietly
+            // becomes a real spend against a real quota.
             GEMINI_API_KEY: 'smoke-memory-deliberately-invalid',
+            GEMINI_AI_KEY: '', API_KEY: '',
             ANTHROPIC_API_KEY: '', OPENAI_API_KEY: '', NVIDIA_API_KEY: '',
         },
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -220,9 +228,19 @@ try {
     check('events survive', after?.eventCount === before?.eventCount, `${after?.eventCount}`);
     check('lessons survive', after?.lessons?.length === before?.lessons?.length, `${after?.lessons?.length}`);
 
-    // ---- 8. the CLI reads the very same databases -----------------------------
+    // ---- 8. the CLI reads the very same database ------------------------------
+    /* `--build` is really `--store`: the CLI addresses a database by its filename stem.
+       That used to be the build id, because there was a file per build. There is one
+       shared store now, so the stem is the project the builder writes under — and the CLI
+       uses that name as the project id too, which is why `bridge.js` derives the filename
+       from it rather than letting the two be written separately.
+
+       The seam the CLI upgrade still has to close: its vocabulary says *build* where the
+       store now means *workspace*. The parity that matters holds either way — a person
+       reading the CLI sees exactly what the server just recorded. */
+    const STORE = 'builder';
     console.log('\n=== cli parity ===');
-    const cli = (args) => JSON.parse(execFileSync('node', [join(ENGINE, 'dist/bin/multi-memory.js'), '--build', BUILD, ...args], {
+    const cli = (args) => JSON.parse(execFileSync('node', [join(ENGINE, 'dist/bin/multi-memory.js'), '--build', STORE, ...args], {
         env: { ...process.env, MULTI_MEMORY_BUILDS: scratch },
         encoding: 'utf8',
     }));

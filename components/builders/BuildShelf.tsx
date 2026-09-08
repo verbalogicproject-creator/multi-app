@@ -21,7 +21,7 @@ const chip =
 const BuildShelf: React.FC = () => {
     const {
         startWebAppBuild, savedBuilds, loadSavedBuild, removeSavedBuild, exportSavedBuild,
-        projects, setActiveTab,
+        projects, setSurface,
     } = useAppContext();
 
     return (
@@ -34,7 +34,10 @@ const BuildShelf: React.FC = () => {
             </h2>
             <p className="mt-2 text-sm text-metal-300">Go from an idea to a complete, downloadable React project.</p>
             <button
-                onClick={startWebAppBuild}
+                /* Wrapped, not passed. `startWebAppBuild` takes an optional idea now, so
+                   handing it straight to `onClick` would seed the wizard with a React
+                   synthetic mouse event. `tsc` caught it; it would have been a quiet one. */
+                onClick={() => startWebAppBuild()}
                 className="tap mt-6 w-full sm:w-auto px-8 rounded-xl bg-metal-700 text-metal-100 font-medium
                            shadow-[inset_0_1px_0_rgb(255_255_255/0.08)]
                            transition-[background-color,transform] duration-200 ease-fluid
@@ -97,7 +100,10 @@ const BuildShelf: React.FC = () => {
                     <p className="text-xs text-metal-300">
                         You also have {projects.length} project{projects.length === 1 ? '' : 's'} in the IDE.
                     </p>
-                    <button onClick={() => setActiveTab('projects')}
+                    {/* Sends you to the Projects destination. It used to set a rail tab,
+                        which after the dock landed meant the one control on this screen
+                        that promised to take you somewhere took you nowhere. */}
+                    <button onClick={() => setSurface('projects')}
                         className="tap px-2 -mx-1 rounded-lg text-xs text-metal-200 underline underline-offset-2
                                    transition-colors duration-200 ease-fluid md:hover:text-metal-100 md:hover:bg-metal-700">
                         Open projects

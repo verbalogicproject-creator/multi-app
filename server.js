@@ -1,4 +1,33 @@
-import 'dotenv/config';
+import { config as loadEnv } from 'dotenv';
+
+/**
+ * A second env file, for credentials kept apart from the rest.
+ *
+ * `.env.auth` holds the Google AI key on its own so it can be rotated without
+ * touching everything else. It is already ignored by `.gitignore`'s `.env.*`, and
+ * this repository is public — that separation is the point, not a preference.
+ *
+ * `override: true` because the whole reason for a newer key in a separate file is
+ * that it should win over the older one in `.env`. Without it dotenv keeps the
+ * first value it saw and the new key would load, sit there, and change nothing.
+ */
+/* Anything the caller put in the actual environment, captured before any file is
+   read. It outranks every file, and that is not a preference — `smoke:memory` boots
+   the server with a deliberately invalid key so a builder call is *supposed* to fail
+   at the model, and a file that overrode it would turn that proof into a real spend.
+   The gate caught exactly that: "it succeeded — a real key leaked into the smoke". */
+const fromShell = new Set(Object.keys(process.env));
+
+loadEnv();
+
+/* `.env.auth` holds the Google AI key on its own so it can be rotated without touching
+   anything else; `.gitignore`'s `.env.*` already covers it, and this repo is public.
+   It replaces values from `.env` — a newer key in a separate file exists to win — but
+   never a value the caller set. Precedence: shell > .env.auth > .env. */
+const authFile = loadEnv({ path: '.env.auth', processEnv: {} }).parsed ?? {};
+for (const [name, value] of Object.entries(authFile)) {
+    if (!fromShell.has(name)) process.env[name] = value;
+}
 import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
@@ -10,22 +39,103 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { providerForModel, usableModels, isModelUsable } from './providers/index.js';
 import { getModel, modelChain, pickModel } from './providers/catalog.js';
+import { listSkills, getSkill, updateSkillBody } from './providers/skillSource.js';
 import { toolsForRequest } from './providers/tools.js';
-import { PLAN_SCHEMA, DIRECTIONS_SCHEMA, GENERATE_SCHEMA, filesArrayToRecord } from './providers/schemas.js';
+import { PLAN_SCHEMA, DIRECTIONS_SCHEMA, GENERATE_SCHEMA, MANIFEST_SCHEMA, FILE_SCHEMA, ACCEPTANCE_CHECK_SCHEMA, EDIT_SCHEMA, filesArrayToRecord } from './providers/schemas.js';
+import { salvageFiles, isTruncation } from './providers/salvage.js';
+import { generateFromManifest, repairRound, acceptanceIssuesFrom, generatePromptFor } from './providers/generate.js';
+import { createBestTracker } from './providers/repairGate.js';
+import { scaffoldFor, packageJsonFor } from './providers/scaffold.js';
+import { buildAestheticDirective, ANTI_SLOP_DIRECTIVE } from './providers/aesthetic.js';
 import { buildSystemPrompt, builderPreamble } from './providers/prompts.js';
 import { memoryRouter } from './memory/routes.js';
 import * as memory from './memory/bridge.js';
+import typecheckRouter from './typecheck/routes.js';
+import previewRouter from './preview/routes.js';
+import { typecheck, clean as cleanTypecheckScratch, killAll as killTypecheckRuns } from './typecheck/runner.js';
+import { createAuthRouter, authConfigProblems, bootPosture } from './auth/index.js';
 
 const app = express();
 const port = process.env.PORT || 8050;
+/**
+ * Loopback by default. This was `app.listen(port)`, which binds every interface — on a
+ * phone that means every device on the Wi-Fi could reach four live provider keys, a
+ * filesystem-writing model, and a Python runner. Opening it up is now a deliberate act
+ * (`HOST=0.0.0.0`) and, per `bootPosture`, one the process refuses unless authentication
+ * is actually configured.
+ */
+const host = process.env.HOST || '127.0.0.1';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Middleware
-app.use(cors());
+/**
+ * Whether every `/api` route demands a signed-in, allowlisted user.
+ *
+ * Not a switch anyone can flip: it is true exactly when the configuration is complete
+ * enough for authentication to mean something — real client credentials, a real signing
+ * secret, and a non-empty allowlist. `authConfigProblems` names each missing piece, and
+ * `bootPosture` below turns "reachable but unauthenticated" into a refusal to start
+ * rather than a warning nobody reads.
+ */
+const authProblems = authConfigProblems();
+const enforceAuth = authProblems.length === 0;
+
+const posture = bootPosture({ host });
+if (!posture.ok) {
+    console.error(posture.reason);
+    process.exit(1);
+}
+
+/**
+ * CORS, with an allowlist rather than `cors()`.
+ *
+ * Bare `cors()` answers every origin with `Access-Control-Allow-Origin: *`, which meant
+ * any page on the internet could call these routes from a visitor's browser. It stayed
+ * invisible because the app calls itself same-origin and never needed CORS at all —
+ * only the Vite dev server on another port does.
+ *
+ * `credentials: true` is why the allowlist has to be exact: a wildcard origin and
+ * cookies cannot be combined, so the reflected origin must be one we chose.
+ */
+const allowedOrigins = new Set(
+    (process.env.ALLOWED_ORIGINS || `http://localhost:5173,http://127.0.0.1:5173,http://localhost:${port},http://127.0.0.1:${port}`)
+        .split(',').map(o => o.trim()).filter(Boolean),
+);
+app.use(cors({
+    origin(origin, callback) {
+        /* No `Origin` header at all is a same-origin or non-browser request — curl, the
+           gates, the app's own fetches. Those are not what CORS governs. */
+        if (!origin || allowedOrigins.has(origin)) return callback(null, true);
+        callback(null, false);
+    },
+    credentials: true,
+}));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.static(path.join(__dirname, 'dist')));
+
+/**
+ * The door, and then the lock.
+ *
+ * Mounted ahead of every `/api` router below, because a gate placed after the thing it
+ * guards is decoration. `/api/auth/*` is exempt for the obvious reason, and `/healthz`
+ * sits outside `/api` so a liveness probe never needs a session.
+ */
+const auth = createAuthRouter();
+app.use(auth.router);
+
+if (enforceAuth) {
+    app.use('/api', (req, res, next) => {
+        if (req.path.startsWith('/auth/')) return next();
+        return auth.requireAuth(req, res, next);
+    });
+} else {
+    /* Loopback-only by the check above, so this is a development posture rather than an
+       exposure — but it is still said out loud at boot, because the difference between
+       "authenticated" and "unreachable from anywhere else" is one the operator has to
+       be holding in mind. */
+    console.warn(`[auth] Not enforced. Reachable from ${host} only. Missing: ${authProblems.join('; ')}`);
+}
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -33,8 +143,18 @@ const upload = multer({ storage: multer.memoryStorage() });
 // UI can read, never something a builder request has to discover by failing.
 app.use('/api/memory', memoryRouter);
 
+// The typechecker, mounted for the same reason and with the same shape. Both must
+// sit ahead of the `app.get('*')` SPA fallback at the bottom of this file.
+app.use('/api/typecheck', typecheckRouter);
+app.use('/api/preview', previewRouter);
+
 // Initialize Google GenAI
-const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+/* `GEMINI_AI_KEY` first: it is the name the current Google AI Studio console hands
+   out, and the newer credential is the one to prefer when both are present.
+   Adding a name here means adding it to `scripts/smoke-memory.mjs`'s env block too —
+   that check proves a builder call fails at the model, and a name it does not blank
+   turns the proof into a real spend. */
+const apiKey = process.env.GEMINI_AI_KEY || process.env.GEMINI_API_KEY || process.env.API_KEY;
 if (!apiKey) {
     throw new Error("GEMINI_API_KEY environment variable is not set.");
 }
@@ -107,6 +227,40 @@ app.get('/api/models', (req, res) => {
     res.json({ models: usableModels(), defaults: MODELS });
 });
 
+// The skill/model-prompt catalog — the filesystem-backed `SkillSource`
+// (providers/skillSource.js). Computed fresh on every request rather than a
+// cached/generated file: eleven small files is cheap to re-read, and a stale
+// on-disk catalog is a whole class of bug this avoids having at all.
+const SKILLS_DIR = path.join(__dirname, 'skills');
+
+app.get('/api/skills', (req, res) => {
+    const { skills, failed } = listSkills(SKILLS_DIR);
+    if (failed.length > 0) console.warn('Skill catalog: malformed skill(s) skipped:', failed.map(f => f.error));
+    res.json({ skills });
+});
+
+app.get('/api/skills/:id', (req, res) => {
+    const skill = getSkill(SKILLS_DIR, req.params.id);
+    if (!skill) return res.status(404).json({ message: `No skill "${req.params.id}".` });
+    // `path` is an internal filesystem detail (readSkillFile's own error-message
+    // context) -- not part of the public shape.
+    const { id, name, description, kind, body } = skill;
+    res.json({ id, name, description, kind, body });
+});
+
+// Prompt Engineering Studio's write path. Restricted to kind: 'model-prompt'
+// inside updateSkillBody itself, not re-checked here — one place decides that
+// rule, not two that could disagree.
+app.put('/api/skills/:id', (req, res) => {
+    if (!getSkill(SKILLS_DIR, req.params.id)) return res.status(404).json({ message: `No skill "${req.params.id}".` });
+    const { body } = req.body ?? {};
+    if (typeof body !== 'string') return res.status(400).json({ message: 'A string "body" is required.' });
+    const result = updateSkillBody(SKILLS_DIR, req.params.id, body);
+    if (!result.ok) return res.status(400).json({ message: result.error });
+    const { id, name, description, kind, body: savedBody } = result.skill;
+    res.json({ id, name, description, kind, body: savedBody });
+});
+
 
 // =========================================================================================
 // Backend Logic for Coding Assistant (moved from frontend)
@@ -131,7 +285,7 @@ const geminiService = {
      * Streams a coding turn from whichever provider serves the chosen model.
      * Returns { model, stream } where stream yields normalized events.
      */
-    generateCodingContentStream: function(history, projects, persona, useWebSearch, customStyles, lowLatencyMode, model) {
+    generateCodingContentStream: function(history, projects, persona, useWebSearch, customStyles, lowLatencyMode, model, mode, recalled) {
         const codingModel = pickModel(model, MODELS.coding);
         const entry = getModel(codingModel);
         const provider = providerForModel(codingModel);
@@ -141,6 +295,11 @@ const geminiService = {
             persona,
             projects,
             customStyles,
+            /* The chat mode reaches the prompt. It used to stop at the client, where it
+               decided one thing — whether projects were forwarded — so a mode could
+               change what the assistant was *given* but never what it was *for*. */
+            mode,
+            recalled,
         });
 
         // Google's built-in web search replaces function tools; other providers
@@ -291,12 +450,41 @@ app.get('/api/video-status', async (req, res) => {
     }
 });
 
+/**
+ * A `Project.id` used as a memory key. Same fix, same reasoning, as
+ * `services/memoryService.ts`'s `memoryKeyFor` — `Project.id` comes from
+ * `generateUniqueId()`, which contains a `.` that `VALID_BUILD_ID` rejects.
+ * Duplicated rather than shared: two runtimes (browser, Node), one regex
+ * neither side is likely to change without the other noticing.
+ */
+const memoryKeyForProject = (projectId) => (projectId ? String(projectId).replace(/[^A-Za-z0-9_-]/g, '-') : null);
+
+/** The most recent thing the user actually said — what recall should be about,
+ *  not the whole transcript. */
+const lastUserMessageText = (history) => {
+    for (let i = (history?.length ?? 0) - 1; i >= 0; i -= 1) {
+        const msg = history[i];
+        if (msg?.author === 'user') return (msg.parts ?? []).map((p) => p.text ?? '').join(' ').trim();
+    }
+    return '';
+};
+
 // Coding Assistant Streaming
 app.post('/api/coding-chat-stream', async (req, res) => {
      try {
-        const { history, projects, persona, useWebSearch, customStyles, lowLatencyMode, model } = req.body;
+        const { history, projects, persona, useWebSearch, customStyles, lowLatencyMode, model, mode } = req.body;
 
-        const { model: servingModel, stream } = geminiService.generateCodingContentStream(history, projects, persona, useWebSearch, customStyles, lowLatencyMode, model);
+        // Advisory recall, the same shape every builder route already uses —
+        // scoped to the first attached project (see the plan: multi-project
+        // fan-out is deferred until it's shown to matter). No `domain` filter:
+        // chat isn't one domain the way builder generation is.
+        const recalled = await memory.recallBlock({
+            buildId: memoryKeyForProject(projects?.[0]?.id),
+            task: lastUserMessageText(history),
+            surface: 'chat',
+        });
+
+        const { model: servingModel, stream } = geminiService.generateCodingContentStream(history, projects, persona, useWebSearch, customStyles, lowLatencyMode, model, mode, recalled);
 
         res.setHeader('Content-Type', 'application/x-ndjson');
 
@@ -436,11 +624,11 @@ ${JSON.stringify(previousPlan, null, 2)}
 The user asks for these changes:
 "${feedback.trim()}"
 
-Apply the requested changes to the plan. Keep everything the feedback does not touch exactly as it is — same project name, same page names, paths, descriptions, components and acceptance criteria — so the user can see precisely what changed. Add, remove or reword only what the feedback calls for, and keep the plan coherent (for example, if a page is removed, remove components only used by it).`
-            : `You are a senior web architect. A user wants to build a web application.
+Apply the requested changes to the plan. Keep everything the feedback does not touch exactly as it is — same project name, same page names, paths, descriptions, components, design direction and acceptance criteria — so the user can see precisely what changed. Add, remove or reword only what the feedback calls for, and keep the plan coherent (for example, if a page is removed, remove components only used by it).`
+            : `You are a senior web architect and product designer. A user wants to build a web application.
 User's Idea: "${idea}"
 
-Analyze the user's idea and create a logical project plan for a standard React (Vite) + TailwindCSS application. The plan should include a project name, description, a list of pages, a list of reusable components, and acceptance criteria that state what the finished app must do.`;
+Analyze the user's idea and create a logical project plan for a standard React (Vite) + TailwindCSS application: a project name, description, pages, reusable components, and acceptance criteria that state what the finished app must do. Also commit to a specific design direction for this idea — the later design and generation steps will build on the one you name here, so make it a real decision, not a placeholder.`;
 
         // Recall is appended to the user prompt, not to the system prompt: one
         // wording then reaches all four providers and providers/prompts.js stays
@@ -500,12 +688,27 @@ const TYPOGRAPHY_NAMES = ['Sans-serif & Friendly', 'Serif & Professional', 'Mono
 app.post('/api/builder/directions', async (req, res) => {
     try {
         const { idea, plan, model: requestedModel, buildId, episodeId } = req.body;
+        /* The three examples this prompt used to give — "restrained and editorial;
+           warm and human; high-contrast and technical" — were meant as illustrations
+           of what "genuinely different" could mean. Measured against real output,
+           the model anchored on them almost verbatim instead: two named examples
+           ("Cybernetic Terminal", "Research Paper") landed close enough to two of
+           the three sample phrases to be the same failure every time, not a
+           coincidence. Removed. Variety now has to come from reading THIS idea, not
+           from picking off a fixed menu — the actual, evidence-backed fix for
+           "it's always the same bland design," not a guess at one. */
+        const designRead = plan?.designDirection
+            ? `\nThe plan already committed to a design direction: "${plan.designDirection}". One of the three should develop that direction faithfully and specifically. The other two must be genuinely different, equally defensible alternative readings of the same idea — not softer variations of the first.`
+            : '';
         const prompt = `You are an art director proposing visual directions for a web product.
 
 Product idea: "${idea ?? ''}"
 ${plan ? `Plan:\n${JSON.stringify({ projectName: plan.projectName, projectDescription: plan.projectDescription, pages: (plan.pages || []).map(p => p.name) }, null, 2)}` : ''}
+${designRead}
 
-Propose exactly three art directions that are genuinely different from one another — not three variations of the same hue. Each should take a defensible position on mood and audience (for example: restrained and editorial; warm and human; high-contrast and technical). At least one should be light and at least one dark.
+Before naming directions, read what this specific product actually is, who it is for, and what it needs to communicate — a children's storytelling app and a compliance dashboard for auditors do not share a design space, and neither should default to one.
+
+Propose exactly three art directions that are genuinely different from one another as readings of THIS idea — not three variations of the same hue, and not a restatement of a common template. At least one should be light and at least one dark. ${ANTI_SLOP_DIRECTIVE}
 
 For each direction give hex values for all six roles. Requirements:
 - Primary text on the page background must be clearly readable (strong contrast), and so must text on surfaces.
@@ -600,36 +803,7 @@ app.post('/api/builder/generate', async (req, res) => {
         const { plan, theme, model: requestedModel, buildId, episodeId } = req.body;
         const paletteSpec = describePalette(theme);
         const typeSpec = BUILDER_TYPE_TOKENS[theme?.typography] || BUILDER_TYPE_TOKENS['Sans-serif & Friendly'];
-        const prompt = `You are a senior product engineer and designer. Generate the complete, production-quality code for a web application from the plan and theme below. The result must look like a designed product, not a template.
-
-**Project Plan:**
-${JSON.stringify(plan, null, 2)}
-${Array.isArray(plan?.acceptanceCriteria) && plan.acceptanceCriteria.length > 0
-    ? `\n**Acceptance criteria — the generated app MUST satisfy every one of these:**\n${plan.acceptanceCriteria.map((c, i) => `${i + 1}. ${c}`).join('\n')}\n`
-    : ''}
-**Design contract (mandatory):**
-- Palette: ${paletteSpec}
-- Typography: ${typeSpec}
-- Type scale: one hero-size heading per page (text-4xl/5xl), section headings text-2xl, body text-base, captions text-sm. Never more than three sizes on one screen.
-- Spacing rhythm: sections py-16 to py-24, cards p-6, consistent gap-4/gap-6 grids. Align everything to one max-w-6xl mx-auto px-4 container.
-- Components must have hover and focus-visible states, and disabled states where relevant.
-- Realistic, domain-specific content everywhere: real-sounding names, numbers, dates and copy that fit the project's purpose. NEVER use "Lorem ipsum", "TODO", "placeholder", or empty stub components.
-- No external images. Where an image would go, use a styled div with a gradient or an inline SVG.
-
-**Stack rules:**
-1. Vite + React 18 + TypeScript, standard layout: index.html, src/main.tsx, src/App.tsx, src/index.css, src/pages/*, src/components/*.
-2. Routing with react-router-dom v6 (Routes in src/App.tsx, shared layout with nav + footer).
-3. Styling with Tailwind CSS v4: src/index.css starts with '@import "tailwindcss";' and vite.config.ts uses the @tailwindcss/vite plugin. Do NOT emit tailwind.config.js or postcss.config.js.
-4. package.json with correct dependencies and pinned major versions (react ^18, react-router-dom ^6, tailwindcss ^4, @tailwindcss/vite ^4, vite ^5, @vitejs/plugin-react ^4, typescript ^5) and scripts: "dev": "vite", "build": "vite build", "typecheck": "tsc --noEmit", "preview": "vite preview".
-5. tsconfig.json compilerOptions must be exactly: { "target": "ES2020", "lib": ["ES2020", "DOM", "DOM.Iterable"], "module": "ESNext", "moduleResolution": "bundler", "jsx": "react-jsx", "strict": true, "esModuleInterop": true, "skipLibCheck": true, "noEmit": true } with "include": ["src"].
-6. Code must compile under strict TypeScript: every function parameter, callback parameter and prop is explicitly typed — no implicit any. With jsx react-jsx, do not import React just for JSX; import only the hooks you use.
-7. Every file must be complete and syntactically valid. State lives in React hooks; interactive features (forms, filters, toggles) must actually work with local state.
-
-**Additionally generate "preview.html"**: a single fully self-contained static HTML snapshot of the app's home page for an instant visual preview. Inline ALL of its CSS in a <style> tag (hand-written CSS reproducing the theme — do not reference Tailwind or any external resource, no JavaScript). It must faithfully show the real layout, colors, typography and content.
-
-**Before you finish**, verify every relative import you wrote resolves to a file you also emitted, and that every package you imported appears in package.json. Escape quotes inside JSX text (setQuote("I can't do this"), never setQuote('I can't do this')) — unescaped quotes are a build failure.
-
-**Response format:** a single JSON object of the form {"files":[{"path":"...","content":"..."}, ...]} listing every file. No markdown, no commentary.`;
+        const prompt = generatePromptFor({ plan, paletteSpec, typeSpec });
 
         res.setHeader('Content-Type', 'application/x-ndjson');
 
@@ -658,25 +832,295 @@ ${Array.isArray(plan?.acceptanceCriteria) && plan.acceptanceCriteria.length > 0
         const trialled = await memory.trialBlock({ buildId, episodeId });
 
         let servingModel = null;
+        const onServed = (model) => { servingModel = model; };
+
+        /**
+         * Let the compiler correct what it just rejected.
+         *
+         * Shared by both generation paths. The whole-app fallback is the one that most
+         * needs it — it runs when the manifest step failed, so its output has had the
+         * least structure imposed on it — and for a while it was the one path that did
+         * not get it.
+         *
+         * Snapshot, repair, measure, and put the originals back if the error count did
+         * not fall. A build that was going to fail should fail as the model wrote it,
+         * not as a failed repair left it.
+         */
+        const repairIfNeeded = async (record, manifest, skip) => {
+            const none = { preRepairErrors: 0, postRepairErrors: 0, repairedFiles: [], repairRounds: 0, repairReverted: false };
+            if (skip) return none;
+
+            const first = await typecheck({ projectId: `${buildId ?? 'build'}-pre`, files: record });
+            if (!first.completed || first.ok) return none;
+            const preRepairErrors = first.diagnostics.length;
+
+            const countByFile = (diagnostics) => {
+                const counts = new Map();
+                for (const d of diagnostics) counts.set(d.path, (counts.get(d.path) ?? 0) + 1);
+                return counts;
+            };
+
+            /**
+             * Repair while it is working, and stop the moment it is not.
+             *
+             * One round was reasoning ahead of evidence. On a real four-page build a
+             * single round took 32 errors to 1 and then stopped by rule, leaving a
+             * named, located, obviously fixable error on the table. "A model that
+             * cannot fix a file will not fix it on the fourth attempt" is true and is
+             * not an argument against a second attempt that the first one earned.
+             *
+             * So the bound is progress, not a count: another round only happens if the
+             * previous one strictly reduced the error total, and the cap exists only to
+             * stop a pathological oscillation. A round that does not improve things is
+             * the last one either way.
+             */
+            const MAX_ROUNDS = 3;
+            let current = first;
+            let rounds = 0;
+            const kept = [];
+            let anyReverted = false;
+            /* The outer net: the per-file revert above only judges one file at a
+               time and never rolls the whole loop back to its best-ever aggregate
+               state. See providers/repairGate.js -- the pre-repair state is itself
+               always a valid candidate, hence seeding it with `preRepairErrors`. */
+            const bestTracker = createBestTracker({ errors: preRepairErrors, files: record, keptFiles: [] });
+
+            while (rounds < MAX_ROUNDS && !current.ok && current.diagnostics.length > 0) {
+                const snapshot = { ...record };
+                const round = await repairRound({
+                    models: builderModelChain(requestedModel),
+                    run: withModelFallback,
+                    getProvider: providerForModel,
+                    systemFor: (model) => builderPreamble(getModel(model).provider),
+                    basePrompt: prompt,
+                    manifest,
+                    record,
+                    diagnostics: current.diagnostics,
+                    emit: (event) => res.write(JSON.stringify(event) + '\n'),
+                    schemas: { file: FILE_SCHEMA },
+                    onServed,
+                });
+                if (round.repaired.length === 0) break;
+
+                const after = await typecheck({ projectId: `${buildId ?? 'build'}-r${rounds}`, files: record });
+                if (!after.completed) {
+                    /* The instrument did not answer. Undo the round rather than keep
+                       changes nothing has judged. */
+                    for (const path of round.repaired) record[path] = snapshot[path];
+                    break;
+                }
+
+                /* Judged per file, not in aggregate. All-or-nothing threw away every
+                   good repair because one file got worse — observed on a real build
+                   where a data file went 7 -> 64 and took three sound fixes with it.
+                   Attribution is imperfect (repairing A can change B), so this asks
+                   only what it can answer: did *this file* get better? */
+                const wasBroken = countByFile(current.diagnostics);
+                const nowBroken = countByFile(after.diagnostics);
+                const reverted = [];
+                for (const path of round.repaired) {
+                    if ((nowBroken.get(path) ?? 0) < (wasBroken.get(path) ?? 0)) kept.push(path);
+                    else { record[path] = snapshot[path]; reverted.push(path); }
+                }
+                if (reverted.length > 0) {
+                    anyReverted = true;
+                    res.write(JSON.stringify({ repairReverted: reverted }) + '\n');
+                }
+
+                /* Some files went back, so the count from a moment ago describes a
+                   project that no longer exists. Ask again rather than report a number
+                   that was true of something else. */
+                const settled = reverted.length > 0
+                    ? await typecheck({ projectId: `${buildId ?? 'build'}-s${rounds}`, files: record })
+                    : after;
+                if (!settled.completed) break;
+
+                rounds += 1;
+                res.write(JSON.stringify({
+                    repairRound: rounds, errors: settled.diagnostics.length, from: current.diagnostics.length,
+                }) + '\n');
+                bestTracker.consider(settled.diagnostics.length, record, kept);
+
+                /* The bound: no strict improvement, no further round. */
+                if (settled.diagnostics.length >= current.diagnostics.length) { current = settled; break; }
+                current = settled;
+            }
+
+            const finalErrors = current.completed ? current.diagnostics.length : preRepairErrors;
+            const outcome = bestTracker.resolve(record, finalErrors);
+            if (outcome.reverted) anyReverted = true;
+
+            return {
+                preRepairErrors,
+                postRepairErrors: outcome.postRepairErrors,
+                repairedFiles: [...new Set(outcome.repairedFiles ?? kept)],
+                repairRounds: rounds,
+                repairReverted: anyReverted,
+            };
+        };
+
+        /* ---- The manifest, and then one request per file --------------------
+         *
+         * This is what moves the output ceiling out of reach rather than
+         * recovering from it. A manifest is a couple of thousand tokens whatever
+         * the app's size; each file after it is bounded by that one file. Neither
+         * request can approach the 65,536 budget the single-shot shape routinely
+         * hit at ~54k.
+         *
+         * If the manifest step itself fails, the old whole-app path below still
+         * runs — it salvages now, so the fallback is a worse answer rather than
+         * no answer. */
+        /* ---- The manifest, and then one request per file --------------------
+         *
+         * This is what moves the output ceiling out of reach rather than recovering
+         * from it. A manifest is a couple of thousand tokens whatever the app's size;
+         * each file after it is bounded by that one file. Neither request can approach
+         * the 65,536 budget the single-shot shape routinely hit at ~54k.
+         *
+         * Every dependency is passed in so the whole path is drivable by a stub in
+         * `test/generate.test.mjs` (`npm test`) — the branches that matter most here are the ones that occur
+         * least, and they were unverifiable while this lived inline.
+         *
+         * If the manifest step fails, the whole-app path below still runs. It salvages
+         * now, so the fallback is a worse answer rather than no answer. */
+        const run = await generateFromManifest({
+            models: builderModelChain(requestedModel),
+            run: withModelFallback,
+            getProvider: providerForModel,
+            systemFor: (model) => builderPreamble(getModel(model).provider),
+            /* Dialect-matched per attempted model, not baked in once — a mid-request
+               fallback to a different provider must not keep reading another
+               provider's XML tags or headers as if they were content. */
+            basePromptFor: (model) => prompt + buildAestheticDirective(theme?.aesthetic, getModel(model).provider, plan?.designDirection),
+            recalled,
+            trialled,
+            emit: (event) => res.write(JSON.stringify(event) + '\n'),
+            schemas: { manifest: MANIFEST_SCHEMA, file: FILE_SCHEMA },
+            onServed,
+            /* Written, not requested. See providers/scaffold.js — these files (five
+               when the plan declares entities, four when it does not) are dictated
+               verbatim by the prompt above, so asking a model for them costs a
+               request each and adds a way to be wrong. */
+            prefill: scaffoldFor({ plan, theme }),
+            /* So a manifest that dropped an approved page can have it put back. */
+            plan,
+            /* package.json is derived from the finished imports below, so it is never
+               a gap. src/types.ts is scaffolded above whenever the plan has entities —
+               same reason. */
+            provided: [
+                'package.json',
+                ...(Array.isArray(plan?.entities) && plan.entities.length > 0 ? ['src/types.ts'] : []),
+            ],
+        });
+
+        if (run.unusable) {
+            console.warn(`Builder generate: manifest unusable (${run.unusable}) — falling back to the whole-app path`);
+        } else if (Object.keys(run.record).length > 0) {
+            const cut = run.truncatedFiles.length > 0;
+
+            /* `package.json` last, and derived rather than declared: its dependencies
+               are read out of the imports the generated files actually contain. A list
+               a model writes can disagree with the code it wrote; a list read from the
+               code cannot. */
+            run.record['package.json'] = packageJsonFor({ plan, record: run.record });
+
+            /* ---- The repair pass -------------------------------------------
+             *
+             * `tsc` is a separate process with no stake in the generation being
+             * right, and it has just said exactly which files are wrong and why.
+             * Re-requesting only those, with their diagnostics and the real source
+             * of what they import, is the cheapest correction available: a project
+             * with two bad files pays for two requests, not sixteen.
+             *
+             * It exists because the export contract fixed the failures it targeted
+             * and revealed the next layer — files agreeing on names and disagreeing
+             * on *shapes*. No manifest can carry that without carrying the code.
+             *
+             * One round, deliberately. A model that cannot fix a file will not fix
+             * it on the fourth attempt either, and an unbounded loop burns quota to
+             * reach the same answer more slowly.
+             */
+            const fix = await repairIfNeeded(run.record, run.manifest, cut);
+            const { preRepairErrors, postRepairErrors, repairedFiles, repairRounds, repairReverted } = fix;
+            res.write(JSON.stringify({
+                files: run.record,
+                manifest: run.manifest.map(f => f.path),
+                missing: run.missing,
+                /* Recorded in the memory event below all along — this is the same
+                   attribution finally reaching the client that asked, so a silent
+                   downgrade (quota/overload fallback) can be shown rather than read
+                   as unexplained inconsistent quality. */
+                ...servedPayload(requestedModel, servingModel),
+                ...(repairedFiles.length > 0
+                    ? { repaired: repairedFiles, repairRounds, preRepairErrors, postRepairErrors }
+                    : {}),
+                ...(repairReverted ? { repairReverted: true, preRepairErrors, postRepairErrors } : {}),
+                ...(cut ? { truncated: true, salvagedCount: Object.keys(run.record).length } : {}),
+            }) + '\n');
+
+            memory.appendEventSafe({
+                buildId,
+                episodeId,
+                /* A file the budget cut short is an instrument failure; a file the model
+                   simply did not produce is a real gap in a real answer. Only the first
+                   is barred from the lesson ladder. */
+                /* `candidate.truncated` is not in the engine's declared vocabulary and
+                   every such event was silently refused — the same invariant AGENTS.md
+                   states for `domain`, violated on the adjacent field. `repair.attempted`
+                   is the declared kind for a run that did not deliver cleanly. */
+                kind: cut ? 'repair.attempted' : 'candidate.created',
+                surface: 'builder.generate',
+                ...attributionFor(servingModel),
+                payload: {
+                    ...servedPayload(requestedModel, servingModel),
+                    fileCount: Object.keys(run.record).length,
+                    manifestCount: run.manifest.length,
+                    missingCount: run.missing.length,
+                    bytes: run.bytes,
+                    memoryInjected: recalled !== '',
+                    /* Kept even though nothing consumes it yet. A build that needed
+                       rescuing must not read as one that never did — recording only
+                       the final state would let the ladder learn "this always works"
+                       from an attempt that did not. */
+                    ...(preRepairErrors > 0
+                        ? { preRepairErrors, postRepairErrors, repairRounds, repairedFiles, repairReverted }
+                        : {}),
+                    ...(cut ? { inconclusive: true, truncatedFiles: run.truncatedFiles } : {}),
+                },
+            });
+            res.end();
+            return;
+        }
+
         const accumulated = await withModelFallback(builderModelChain(requestedModel), async (model) => {
             res.write(JSON.stringify({ phase: 'thinking', model }) + '\n');
             const provider = providerForModel(model);
             let acc = '';
             let usage = null;
+            let finishReason = null;
+            /* How far the path scanner has already looked. Without it the regex re-ran
+               over the entire accumulator on every chunk — O(n²) across ~200 KB. */
+            let scanned = 0;
             const seenFiles = new Set();
             for await (const event of provider.streamJson({
                 model,
                 system: builderPreamble(getModel(model).provider),
-                prompt: prompt + recalled + trialled,
+                prompt: prompt + recalled + trialled + buildAestheticDirective(theme?.aesthetic, getModel(model).provider, plan?.designDirection),
                 schema: GENERATE_SCHEMA,
                 effort: 'medium',
                 maxOutputTokens: 65536,
             })) {
                 if (event.usage) usage = event.usage;
+                /* The reason the model stopped. Kept because "it ran out of room" and
+                   "it wrote nonsense" need opposite responses, and until now both
+                   arrived as the same sentence. */
+                if (event.finishReason) finishReason = event.finishReason;
                 if (event.text) {
                     if (acc === '') res.write(JSON.stringify({ phase: 'writing', model }) + '\n');
                     acc += event.text;
-                    FILE_PATH_RE.lastIndex = 0;
+                    /* Overlap by a path's worth so one split across a chunk boundary is
+                       still seen; `seenFiles` makes the re-match harmless. */
+                    FILE_PATH_RE.lastIndex = Math.max(0, scanned - 200);
                     let match;
                     while ((match = FILE_PATH_RE.exec(acc)) !== null) {
                         if (!seenFiles.has(match[1])) {
@@ -684,18 +1128,34 @@ ${Array.isArray(plan?.acceptanceCriteria) && plan.acceptanceCriteria.length > 0
                             res.write(JSON.stringify({ file: match[1] }) + '\n');
                         }
                     }
+                    scanned = acc.length;
                     res.write(JSON.stringify({ progress: acc.length }) + '\n');
                 }
             }
-            return { text: acc, usage };
-        }, (model) => { servingModel = model; });
+            return { text: acc, usage, finishReason };
+        }, onServed);
 
         try {
             // The client protocol is unchanged: the files array becomes the
             // { path: content } map it has always consumed.
             const files = filesArrayToRecord(JSON.parse(accumulated.text).files);
             if (Object.keys(files).length === 0) throw new Error('no files in response');
-            res.write(JSON.stringify({ files }) + '\n');
+
+            /* The fallback gets the repair pass too. It runs precisely when the
+               manifest step failed, so its output has had the least structure imposed
+               on it — it is the path that needs correcting most, and for a while it
+               was the only one that never got it. There is no manifest here, so the
+               repair works from the compiler's diagnostics alone. */
+            const fix = await repairIfNeeded(files, [], false);
+
+            res.write(JSON.stringify({
+                files,
+                ...servedPayload(requestedModel, servingModel),
+                ...(fix.repairedFiles.length > 0
+                    ? { repaired: fix.repairedFiles, repairRounds: fix.repairRounds, preRepairErrors: fix.preRepairErrors, postRepairErrors: fix.postRepairErrors }
+                    : {}),
+                ...(fix.repairReverted ? { repairReverted: true, preRepairErrors: fix.preRepairErrors, postRepairErrors: fix.postRepairErrors } : {}),
+            }) + '\n');
 
             // A candidate exists. Whether it is any GOOD is the validator's
             // verdict, which the client reports separately as
@@ -711,11 +1171,64 @@ ${Array.isArray(plan?.acceptanceCriteria) && plan.acceptanceCriteria.length > 0
                     fileCount: Object.keys(files).length,
                     bytes: accumulated.text.length,
                     memoryInjected: recalled !== '',
+                    ...(fix.preRepairErrors > 0
+                        ? { preRepairErrors: fix.preRepairErrors, postRepairErrors: fix.postRepairErrors, repairRounds: fix.repairRounds, repairedFiles: fix.repairedFiles, repairReverted: fix.repairReverted }
+                        : {}),
                 },
             });
         } catch (parseError) {
-            console.error('Builder generate: model returned malformed JSON', parseError.message);
-            res.write(JSON.stringify({ error: 'The model returned malformed JSON. Please try again.' }) + '\n');
+            /**
+             * The response did not parse whole. That is two different situations
+             * wearing one error message, and they need opposite handling.
+             *
+             * If the model was cut off by its output budget, everything before the cut
+             * is intact — measured: eleven complete files thrown away because the
+             * twelfth was half-written. Keep them, and say plainly that this is an
+             * instrument failure rather than a verdict on the code, so the lesson
+             * ladder does not learn "you forgot index.html" from a model that was
+             * stopped before it got there.
+             */
+            const { files: recovered, salvaged } = salvageFiles(accumulated.text);
+            const truncated = isTruncation(accumulated.finishReason) || salvaged;
+
+            if (salvaged) {
+                const files = filesArrayToRecord(recovered);
+                console.warn(`Builder generate: truncated (${accumulated.finishReason ?? 'no finish reason'}) — salvaged ${recovered.length} file(s) from ${accumulated.text.length} bytes`);
+                res.write(JSON.stringify({
+                    files,
+                    /* The client must not treat this as a candidate to judge. */
+                    truncated: true,
+                    salvagedCount: recovered.length,
+                    finishReason: accumulated.finishReason ?? null,
+                    ...servedPayload(requestedModel, servingModel),
+                }) + '\n');
+
+                memory.appendEventSafe({
+                    buildId,
+                    episodeId,
+                    kind: 'repair.attempted',
+                    surface: 'builder.generate',
+                    ...attributionFor(servingModel),
+                    payload: {
+                        ...servedPayload(requestedModel, servingModel),
+                        fileCount: recovered.length,
+                        bytes: accumulated.text.length,
+                        finishReason: accumulated.finishReason ?? null,
+                        /* Recorded so the journal shows an instrument failure, not a
+                           quality failure. Nothing downstream may promote this. */
+                        inconclusive: true,
+                    },
+                });
+            } else {
+                console.error('Builder generate: unparseable response', parseError.message);
+                res.write(JSON.stringify({
+                    error: truncated
+                        ? 'The model ran out of output budget before finishing, and nothing complete could be recovered.'
+                        : 'The model returned malformed JSON. Please try again.',
+                    truncated,
+                    finishReason: accumulated.finishReason ?? null,
+                }) + '\n');
+            }
         }
         res.end();
 
@@ -731,10 +1244,159 @@ ${Array.isArray(plan?.acceptanceCriteria) && plan.acceptanceCriteria.length > 0
     }
 });
 
+/**
+ * The acceptance-criteria self-check — a labelled gap, not a gate.
+ *
+ * `PLAN_SCHEMA.acceptanceCriteria` is fed to the generate prompt as "MUST satisfy",
+ * and nothing has ever checked it: the exact failure the declarations-correction
+ * document names — a claim that reads as a guarantee and behaves as nothing, because
+ * a human sees "acceptance criteria" as a real requirements list right next to
+ * pages and components, which *do* have real mechanisms behind them.
+ *
+ * A model judging whether its own code satisfies a criterion is not an independent
+ * observer, so this can never decide whether a build passes — that would let a
+ * lesson qualify itself, the exact thing the ladder's independence property forbids.
+ * What this closes is the *silence*: a person now sees an actual answer, honestly
+ * labelled as a self-report, instead of a claim nothing ever followed up on.
+ *
+ * Only *unsatisfied* criteria become an issue, matching every other validator here
+ * (`plan-page-missing` fires on a missing page, never a confirmation of a present
+ * one) — a build with nothing to report reports nothing, not N green checkmarks.
+ *
+ * `null` on any failure, never `{ issues: [] }` — that would read as "checked, all
+ * satisfied" when nothing was checked at all. Same contract as `previewVerdict` and
+ * `runTypecheck`: an instrument that did not run must not be mistaken for a pass.
+ */
+app.post('/api/builder/check-acceptance', async (req, res) => {
+    try {
+        const { plan, files, model: requestedModel } = req.body;
+        const criteria = Array.isArray(plan?.acceptanceCriteria)
+            ? plan.acceptanceCriteria.filter((c) => typeof c === 'string' && c.trim() !== '')
+            : [];
+        if (criteria.length === 0) { res.json({ issues: [] }); return; }
+
+        const prompt = `A web application was generated from the plan below. Judge honestly whether the code actually satisfies each acceptance criterion — do not assume it does merely because it was asked for.
+
+**Acceptance criteria:**
+${criteria.map((c, i) => `${i + 1}. ${c}`).join('\n')}
+
+**The generated files:**
+${Object.entries(files ?? {}).map(([path, content]) => `### ${path}\n${content}`).join('\n\n')}`;
+
+        const { object } = await withModelFallback(
+            builderModelChain(requestedModel),
+            (model) => providerForModel(model).generateJson({
+                model,
+                system: builderPreamble(getModel(model).provider),
+                prompt,
+                schema: ACCEPTANCE_CHECK_SCHEMA,
+                effort: 'low',
+                maxOutputTokens: 4096,
+            }),
+            () => {},
+        );
+
+        res.json({ issues: acceptanceIssuesFrom(object?.results) });
+    } catch (error) {
+        console.error('Builder check-acceptance error:', error);
+        res.status(500).json({ message: friendlyProviderError(error, 'Error checking acceptance criteria.') });
+    }
+});
+
+/**
+ * "Generate again, but with feedback" — the peer-programmer edit
+ * `Step_Generate.tsx` cannot express, per A3 in the plan.
+ *
+ * Not a call into `/api/builder/generate`'s `repairIfNeeded` — that closure is
+ * shaped for compiler-diagnostic-driven repair of a *fresh* manifest and has
+ * no manifest to work from here. This is diagnosed by a person's instruction
+ * instead: one structured-output request sees every current file and returns
+ * only the ones that need to change, merged over the current set.
+ *
+ * Only runs `typecheck` here — the second half of a real verdict,
+ * `previewVerdict`, executes a bundle inside a browser iframe and has no
+ * server-side equivalent; the client completes the verdict the same way
+ * `AppContext.tsx`'s own generation pipeline already does (lexical, then
+ * `tsc`, then the preview), not a second implementation of that staging here.
+ */
+app.post('/api/builder/edit', async (req, res) => {
+    try {
+        const { files, plan, diagnostics, instruction, model: requestedModel, buildId, episodeId } = req.body;
+        const currentFiles = files && typeof files === 'object' ? files : {};
+        if (typeof instruction !== 'string' || instruction.trim() === '') {
+            return res.status(400).json({ message: 'An instruction is required.' });
+        }
+
+        const prompt = `You are a senior product engineer working on an existing project. Apply the requested change; do not regenerate anything that was not asked for.
+
+**The change requested:**
+${instruction.trim()}
+${plan?.projectName ? `\n**The project:** ${plan.projectName}${plan.projectDescription ? ` — ${plan.projectDescription}` : ''}\n` : ''}
+${Array.isArray(diagnostics) && diagnostics.length > 0
+    ? `\n**Current diagnostics — fix these too if the change touches the same file:**\n${diagnostics.map((d) => `${d.file ?? ''} ${d.message ?? ''}`.trim()).join('\n')}\n`
+    : ''}
+**Every current file:**
+${Object.entries(currentFiles).map(([path, content]) => `### ${path}\n${content}`).join('\n\n')}
+
+Return only the files whose content actually changes. Do not include a file you did not touch.`;
+
+        const recalled = await memory.recallBlock({
+            buildId, episodeId,
+            task: `edit an existing application: ${instruction.trim().slice(0, 200)}`,
+            domain: 'build',
+            surface: 'builder.edit',
+        });
+
+        let servingModel = null;
+        const { object } = await withModelFallback(
+            builderModelChain(requestedModel),
+            (model) => providerForModel(model).generateJson({
+                model,
+                system: builderPreamble(getModel(model).provider),
+                prompt: prompt + recalled,
+                schema: EDIT_SCHEMA,
+                effort: 'high',
+                maxOutputTokens: 32768,
+            }),
+            (model) => { servingModel = model; },
+        );
+
+        const changed = filesArrayToRecord(object?.files);
+        const mergedFiles = { ...currentFiles, ...changed };
+        const result = await typecheck({ projectId: `${buildId ?? 'edit'}-edit`, files: mergedFiles });
+
+        res.json({
+            files: mergedFiles,
+            changedPaths: Object.keys(changed),
+            summary: typeof object?.summary === 'string' ? object.summary : '',
+            typecheck: { completed: result.completed, ok: result.ok, issues: result.issues },
+        });
+
+        memory.appendEventSafe({
+            buildId, episodeId,
+            kind: 'candidate.created',
+            surface: 'builder.edit',
+            ...attributionFor(servingModel),
+            payload: {
+                ...servedPayload(requestedModel, servingModel),
+                instruction: instruction.trim().slice(0, 500),
+                changedFiles: Object.keys(changed).length,
+                memoryInjected: recalled !== '',
+            },
+        });
+    } catch (error) {
+        console.error('Builder edit error:', error);
+        res.status(500).json({ message: friendlyProviderError(error, 'Error applying the requested change.') });
+    }
+});
 
 // Health check
 app.get('/healthz', (req, res) => {
-    res.json({ ok: true, models: MODELS });
+    /* `auth` is here for the gates. They drive this server unauthenticated, so a
+       backend that has started enforcing — the moment ALLOWED_EMAILS is filled in —
+       answers every /api call with 401 and the browser gates fail as blank panels and
+       timeouts. Reporting the posture lets `assertBackend` say which it is. */
+    res.json({ ok: true, models: MODELS, auth: enforceAuth ? 'enforced' : 'open' });
 });
 
 // Fallback to serving index.html for any unhandled routes (for SPA routing)
@@ -752,15 +1414,37 @@ app.get('*', (req, res) => {
 for (const signal of ['SIGINT', 'SIGTERM']) {
     process.on(signal, () => {
         try { memory.closeAll(); } catch { /* shutting down anyway */ }
+        // A tsc child outlives its parent unless told otherwise, and it holds real
+        // memory on a phone.
+        try { killTypecheckRuns(); } catch { /* shutting down anyway */ }
         process.exit(0);
     });
 }
 
-app.listen(port, () => {
-    console.log(`Server listening at http://localhost:${port}`);
+// Anything left in the scratch tree is from a run that did not get to clean up
+// after itself. Start from empty rather than inheriting it.
+await cleanTypecheckScratch();
+
+app.listen(port, host, async () => {
+    console.log(`Server listening at http://${host}:${port} (auth ${enforceAuth ? 'enforced' : 'not enforced'})`);
     // Which databases this process will write to, said out loud at boot.
     // A second server on an occupied port dies with EADDRINUSE, so requests keep
     // being answered -- by the one already there, writing wherever IT was told to.
     // That cost a whole verification run before the two lines below existed.
-    console.log(`Memory databases: ${memory.health().databaseDir}`);
+    //
+    // `probe()` forces the lazy engine load right now, at boot, instead of on
+    // whatever request happens to touch memory first. Without this, `health()`
+    // reports `available: null` ("not yet asked") for the server's entire
+    // lifetime unless something calls /api/memory/state -- which nothing does by
+    // default -- so a broken or unbuilt engine (multi-graph-memory's dist/
+    // missing, per this file's own header comment) would silently no-op every
+    // write for the life of the process, with the only symptom being an empty
+    // database discovered much later. An architecture audit found exactly that:
+    // builder.db confirmed empty despite real generation activity, with no boot
+    // log that would have said why. This line exists so that failure is loud on
+    // the first line of output, not found by auditing SQLite files days later.
+    const health = await memory.probe();
+    console.log(
+        `Memory databases: ${health.databaseDir} (engine ${health.available ? 'available' : `UNAVAILABLE — ${health.reason}`})`,
+    );
 });
