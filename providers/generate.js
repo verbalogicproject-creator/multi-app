@@ -544,6 +544,14 @@ export const repairRound = async ({
                    HARNESS.md. */
                 effort: 'high',
                 maxOutputTokens: 16384,
+                /* A repair round only ever runs because the PREVIOUS round's typecheck
+                   said so -- exactly the "call N+1 depends on call N" shape Google's
+                   own docs recommend the flex service tier for (50% cost discount,
+                   sheddable). Standard tier stays on the initial per-file generation
+                   above, which is latency-sensitive and independent per file; a
+                   pre-emption there would be felt as a person waiting, not as one more
+                   background retry. Non-Google adapters silently ignore this field. */
+                flex: true,
             })) {
                 if (event.usage) usage = event.usage;
                 if (event.text) acc += event.text;

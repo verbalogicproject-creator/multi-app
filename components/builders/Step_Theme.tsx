@@ -284,6 +284,11 @@ const Step_Theme: React.FC = () => {
                     <div className="flex-1 min-w-[12rem]">
                         <h3 className="text-xs font-medium uppercase tracking-[0.12em] text-metal-300">AI art directions</h3>
                         <p className="text-xs text-metal-400 mt-2">Three distinct directions tailored to your plan. Costs one model request.</p>
+                        {plan?.designDirection && (
+                            <p className="text-xs text-metal-300 mt-2">
+                                Plan's design direction: <span className="text-metal-100">{plan.designDirection}</span>
+                            </p>
+                        )}
                     </div>
                     <button onClick={suggestArtDirections} disabled={isBusy}
                         className="tap px-5 rounded-lg bg-metal-700 text-metal-100 text-sm font-medium

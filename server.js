@@ -39,13 +39,14 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { providerForModel, usableModels, isModelUsable } from './providers/index.js';
 import { getModel, modelChain, pickModel } from './providers/catalog.js';
+import { listSkills, getSkill } from './providers/skillSource.js';
 import { toolsForRequest } from './providers/tools.js';
 import { PLAN_SCHEMA, DIRECTIONS_SCHEMA, GENERATE_SCHEMA, MANIFEST_SCHEMA, FILE_SCHEMA, ACCEPTANCE_CHECK_SCHEMA, EDIT_SCHEMA, filesArrayToRecord } from './providers/schemas.js';
 import { salvageFiles, isTruncation } from './providers/salvage.js';
 import { generateFromManifest, repairRound, acceptanceIssuesFrom, generatePromptFor } from './providers/generate.js';
 import { createBestTracker } from './providers/repairGate.js';
 import { scaffoldFor, packageJsonFor } from './providers/scaffold.js';
-import { buildAestheticDirective } from './providers/aesthetic.js';
+import { buildAestheticDirective, ANTI_SLOP_DIRECTIVE } from './providers/aesthetic.js';
 import { buildSystemPrompt, builderPreamble } from './providers/prompts.js';
 import { memoryRouter } from './memory/routes.js';
 import * as memory from './memory/bridge.js';
@@ -224,6 +225,27 @@ app.get('/api/quota', (req, res) => {
 // catalog; a provider with no API key configured is absent from it entirely.
 app.get('/api/models', (req, res) => {
     res.json({ models: usableModels(), defaults: MODELS });
+});
+
+// Read-only skill/model-prompt catalog — the filesystem-backed `SkillSource`
+// (providers/skillSource.js). Computed fresh on every request rather than a
+// cached/generated file: eleven small files is cheap to re-read, and a stale
+// on-disk catalog is a whole class of bug this avoids having at all.
+const SKILLS_DIR = path.join(__dirname, 'skills');
+
+app.get('/api/skills', (req, res) => {
+    const { skills, failed } = listSkills(SKILLS_DIR);
+    if (failed.length > 0) console.warn('Skill catalog: malformed skill(s) skipped:', failed.map(f => f.error));
+    res.json({ skills });
+});
+
+app.get('/api/skills/:id', (req, res) => {
+    const skill = getSkill(SKILLS_DIR, req.params.id);
+    if (!skill) return res.status(404).json({ message: `No skill "${req.params.id}".` });
+    // `path` is an internal filesystem detail (readSkillFile's own error-message
+    // context) -- not part of the public shape.
+    const { id, name, description, kind, body } = skill;
+    res.json({ id, name, description, kind, body });
 });
 
 
@@ -559,11 +581,11 @@ ${JSON.stringify(previousPlan, null, 2)}
 The user asks for these changes:
 "${feedback.trim()}"
 
-Apply the requested changes to the plan. Keep everything the feedback does not touch exactly as it is — same project name, same page names, paths, descriptions, components and acceptance criteria — so the user can see precisely what changed. Add, remove or reword only what the feedback calls for, and keep the plan coherent (for example, if a page is removed, remove components only used by it).`
-            : `You are a senior web architect. A user wants to build a web application.
+Apply the requested changes to the plan. Keep everything the feedback does not touch exactly as it is — same project name, same page names, paths, descriptions, components, design direction and acceptance criteria — so the user can see precisely what changed. Add, remove or reword only what the feedback calls for, and keep the plan coherent (for example, if a page is removed, remove components only used by it).`
+            : `You are a senior web architect and product designer. A user wants to build a web application.
 User's Idea: "${idea}"
 
-Analyze the user's idea and create a logical project plan for a standard React (Vite) + TailwindCSS application. The plan should include a project name, description, a list of pages, a list of reusable components, and acceptance criteria that state what the finished app must do.`;
+Analyze the user's idea and create a logical project plan for a standard React (Vite) + TailwindCSS application: a project name, description, pages, reusable components, and acceptance criteria that state what the finished app must do. Also commit to a specific design direction for this idea — the later design and generation steps will build on the one you name here, so make it a real decision, not a placeholder.`;
 
         // Recall is appended to the user prompt, not to the system prompt: one
         // wording then reaches all four providers and providers/prompts.js stays
@@ -623,12 +645,27 @@ const TYPOGRAPHY_NAMES = ['Sans-serif & Friendly', 'Serif & Professional', 'Mono
 app.post('/api/builder/directions', async (req, res) => {
     try {
         const { idea, plan, model: requestedModel, buildId, episodeId } = req.body;
+        /* The three examples this prompt used to give — "restrained and editorial;
+           warm and human; high-contrast and technical" — were meant as illustrations
+           of what "genuinely different" could mean. Measured against real output,
+           the model anchored on them almost verbatim instead: two named examples
+           ("Cybernetic Terminal", "Research Paper") landed close enough to two of
+           the three sample phrases to be the same failure every time, not a
+           coincidence. Removed. Variety now has to come from reading THIS idea, not
+           from picking off a fixed menu — the actual, evidence-backed fix for
+           "it's always the same bland design," not a guess at one. */
+        const designRead = plan?.designDirection
+            ? `\nThe plan already committed to a design direction: "${plan.designDirection}". One of the three should develop that direction faithfully and specifically. The other two must be genuinely different, equally defensible alternative readings of the same idea — not softer variations of the first.`
+            : '';
         const prompt = `You are an art director proposing visual directions for a web product.
 
 Product idea: "${idea ?? ''}"
 ${plan ? `Plan:\n${JSON.stringify({ projectName: plan.projectName, projectDescription: plan.projectDescription, pages: (plan.pages || []).map(p => p.name) }, null, 2)}` : ''}
+${designRead}
 
-Propose exactly three art directions that are genuinely different from one another — not three variations of the same hue. Each should take a defensible position on mood and audience (for example: restrained and editorial; warm and human; high-contrast and technical). At least one should be light and at least one dark.
+Before naming directions, read what this specific product actually is, who it is for, and what it needs to communicate — a children's storytelling app and a compliance dashboard for auditors do not share a design space, and neither should default to one.
+
+Propose exactly three art directions that are genuinely different from one another as readings of THIS idea — not three variations of the same hue, and not a restatement of a common template. At least one should be light and at least one dark. ${ANTI_SLOP_DIRECTIVE}
 
 For each direction give hex values for all six roles. Requirements:
 - Primary text on the page background must be clearly readable (strong contrast), and so must text on surfaces.
@@ -911,7 +948,7 @@ app.post('/api/builder/generate', async (req, res) => {
             /* Dialect-matched per attempted model, not baked in once — a mid-request
                fallback to a different provider must not keep reading another
                provider's XML tags or headers as if they were content. */
-            basePromptFor: (model) => prompt + buildAestheticDirective(theme?.aesthetic, getModel(model).provider),
+            basePromptFor: (model) => prompt + buildAestheticDirective(theme?.aesthetic, getModel(model).provider, plan?.designDirection),
             recalled,
             trialled,
             emit: (event) => res.write(JSON.stringify(event) + '\n'),
@@ -1025,7 +1062,7 @@ app.post('/api/builder/generate', async (req, res) => {
             for await (const event of provider.streamJson({
                 model,
                 system: builderPreamble(getModel(model).provider),
-                prompt: prompt + recalled + trialled + buildAestheticDirective(theme?.aesthetic, getModel(model).provider),
+                prompt: prompt + recalled + trialled + buildAestheticDirective(theme?.aesthetic, getModel(model).provider, plan?.designDirection),
                 schema: GENERATE_SCHEMA,
                 effort: 'medium',
                 maxOutputTokens: 65536,

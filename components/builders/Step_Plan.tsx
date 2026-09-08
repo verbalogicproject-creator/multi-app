@@ -8,16 +8,21 @@ interface PlanEntity { name: string; fields: PlanEntityField[]; }
 interface DraftPlan {
     projectName: string;
     projectDescription: string;
+    designDirection: string;
     pages: PlanPage[];
     components: PlanComponent[];
     entities: PlanEntity[];
     acceptanceCriteria: string[];
 }
 
-/** Normalizes a model-produced plan (or an older saved one) into an editable shape. */
+/** Normalizes a model-produced plan (or an older saved one) into an editable shape.
+ *  `designDirection` is absent on a plan saved before this field existed — an empty
+ *  string there means "say nothing extra," exactly like an unset aesthetic dimension
+ *  in `providers/aesthetic.js`, not an error. */
 const toDraft = (plan: any): DraftPlan => ({
     projectName: plan?.projectName ?? '',
     projectDescription: plan?.projectDescription ?? '',
+    designDirection: plan?.designDirection ?? '',
     pages: Array.isArray(plan?.pages)
         ? plan.pages.map((p: any) => ({ name: p?.name ?? '', path: p?.path ?? '', description: p?.description ?? '' }))
         : [],
@@ -120,6 +125,15 @@ const Step_Plan: React.FC = () => {
                     <label className="block text-xs text-metal-300 mb-2">Description</label>
                     <textarea value={draft.projectDescription} disabled={isBusy} rows={2}
                         onChange={e => update({ projectDescription: e.target.value })} className={inputClass} />
+                </div>
+                <div>
+                    <label className="block text-xs text-metal-300 mb-2">Design direction</label>
+                    <input type="text" value={draft.designDirection} disabled={isBusy}
+                        placeholder="e.g. dense technical dashboard, dark mono"
+                        onChange={e => update({ designDirection: e.target.value })} className={inputClass} />
+                    <p className="mt-1.5 text-[11px] text-metal-400">
+                        Feeds the Style step's suggestions and the generator's own prompt. Change it here if it doesn't fit.
+                    </p>
                 </div>
             </div>
 

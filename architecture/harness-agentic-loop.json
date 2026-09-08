@@ -6,7 +6,7 @@
     "mechanism": {
       "file": "server.js",
       "line": 720,
-      "verifiedContentHash": "sha256:e3b0c44298fc1c14",
+      "verifiedContentHash": "sha256:d10b36aa74a59bcf",
       "staleness": "verified"
     },
     "level": "review",
@@ -64,9 +64,9 @@
       "statement": "After generation, repairIfNeeded runs up to MAX_ROUNDS=3 compiler-repair rounds, but only while the previous round strictly reduced the total error count; a round that does not improve things is the last one either way. Per FILE (not per round), a repaired file whose own error count did not fall is individually reverted to its pre-round content; the aggregate result of the last round is kept as final regardless of whether reverting brought the project's overall error count above where the round started.",
       "mechanism": {
         "file": "server.js",
-        "line": 766,
-        "note": "repairIfNeeded()",
-        "verifiedContentHash": "sha256:8539841314fbe4be",
+        "line": 806,
+        "note": "repairIfNeeded() — line shifted 766→806 2026-09-08 by unrelated additions earlier in the file (Gemini cost/efficiency + plan-design-direction work); logic itself unchanged, re-verified by reading it",
+        "verifiedContentHash": "sha256:005965653ed34beb",
         "staleness": "verified"
       },
       "level": "gate"
@@ -87,9 +87,9 @@
       "statement": "Every builder model call goes through withModelFallback: 2 tries per model with 2s/4s backoff on a transient failure (HTTP 429 or 503, or an NVIDIA-specific 'resource exhausted' message with no status field), then falls to the next model in the chain — the requested model's own declared `fallback` array, then MODELS.coding, deduped and filtered to configured providers.",
       "mechanism": {
         "file": "server.js",
-        "line": 484,
-        "note": "TRANSIENT_STATUSES, isTransient(), withModelFallback()",
-        "verifiedContentHash": "sha256:3d162b45f74a3a81",
+        "line": 507,
+        "note": "TRANSIENT_STATUSES, isTransient(), withModelFallback() — line shifted 484→507 2026-09-08 by unrelated additions earlier in the file; logic itself unchanged, re-verified by reading it",
+        "verifiedContentHash": "sha256:841ef263fd871629",
         "staleness": "verified"
       },
       "level": "review",
@@ -102,7 +102,7 @@
         "file": "server.js",
         "line": 172,
         "note": "recordModelCall(); see misc-other.json for the full declaration",
-        "verifiedContentHash": "sha256:e3b0c44298fc1c14",
+        "verifiedContentHash": "sha256:df3982fd61017359",
         "staleness": "verified"
       },
       "level": "gap"
