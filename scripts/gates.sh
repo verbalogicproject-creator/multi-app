@@ -34,7 +34,13 @@ while [ $# -gt 0 ]; do
 done
 
 # Fast tier: pure logic + gates that spawn their own short-lived server.
-FAST_GATES="typecheck test check:css check:auth smoke:memory"
+# NOT check:css — it reads dist/assets, so it needs a build and belongs after one.
+# It passed here for months only because a stale dist/ happened to be lying around;
+# on a clean checkout it exits 1 every time. The detector it wraps is covered in
+# this tier anyway, as pure Vitest cases in test/check-css.test.mjs.
+FAST_GATES="typecheck test check:auth smoke:memory"
+# Needs dist/, nothing more — runs in the full tier straight after the build.
+POST_BUILD_GATES="check:css"
 # Full tier adds the CDP gates. Each npm script is `npm run build && node scripts/X.mjs`;
 # we build ONCE and invoke the second half directly, so a full run does one build, not five.
 # CDP_GATES maps gate name -> the script it runs. verify_cdp_mapping() below proves the
@@ -44,6 +50,7 @@ CDP_GATES="audit:ui:audit-ui check:editor:check-editor check:preview:check-previ
 if [ "$LIST" = 1 ]; then
     printf 'fast tier:\n'; for g in $FAST_GATES; do printf '  npm run %s\n' "$g"; done
     printf 'full tier adds (after one npm run build):\n'
+    for g in $POST_BUILD_GATES; do printf '  npm run %s\n' "$g"; done
     for pair in $CDP_GATES; do printf '  node scripts/%s.mjs\n' "${pair##*:}"; done
     printf 'never run automatically:\n  npm run smoke:providers  (spends real quota)\n'
     exit 0
@@ -55,6 +62,29 @@ PASS=0; FAIL=0; FAILED_GATES=""
 ok() { # ok <name> <exit-code>
     if [ "$2" -eq 0 ]; then printf 'ok    %s\n' "$1"; PASS=$((PASS+1))
     else printf 'FAIL  %s  (exit %s)\n' "$1" "$2"; FAIL=$((FAIL+1)); FAILED_GATES="$FAILED_GATES $1"; fi
+}
+
+# run_gate <label> <command...>
+#
+# Captures the gate's output and prints it ONLY when the gate fails. A clean run
+# stays a one-line-per-gate summary; a failing one carries its own evidence.
+#
+# The first CI run of this script reported `FAIL npm run test (exit 1)` and nothing
+# else, because every gate was invoked as `>/dev/null 2>&1`. That is tolerable on a
+# machine where you can just re-run the command, and worthless on a runner, which is
+# the one place this script exists to be read.
+run_gate() {
+    label="$1"; shift
+    log="$(mktemp)"
+    "$@" >"$log" 2>&1
+    code=$?
+    ok "$label" "$code"
+    if [ "$code" -ne 0 ]; then
+        printf '      ---- %s output (last 40 lines) ----\n' "$label"
+        tail -40 "$log" | sed 's/^/      /'
+        printf '      ---- end %s ----\n\n' "$label"
+    fi
+    rm -f "$log"
 }
 
 # Proves the build-once shortcut is still equivalent to the documented npm scripts.
@@ -86,15 +116,14 @@ trap stop_server EXIT INT TERM
 printf '=== multi-app gates (tier: %s) ===\n\n' "$TIER"
 
 for g in $FAST_GATES; do
-    npm run --silent "$g" >/dev/null 2>&1; ok "npm run $g" $?
+    run_gate "npm run $g" npm run "$g"
 done
 
 if [ "$TIER" = full ]; then
     printf '\n--- full tier ---\n'
     verify_cdp_mapping || { printf 'FAIL  cdp-mapping-guard\n'; FAIL=$((FAIL+1)); FAILED_GATES="$FAILED_GATES cdp-mapping-guard"; }
 
-    node -e 'import("./scripts/ui-harness.mjs").then(m=>m.findChrome())' >/dev/null 2>&1
-    ok "chrome present" $?
+    run_gate "chrome present" node -e 'import("./scripts/ui-harness.mjs").then(m=>m.findChrome())'
 
     if [ "$START_SERVER" = 1 ]; then
         node server.js >/dev/null 2>&1 &
@@ -107,11 +136,15 @@ if [ "$TIER" = full ]; then
     curl -sf "http://localhost:${PORT}/healthz" >/dev/null 2>&1
     ok "backend on :${PORT}" $?
 
-    npm run --silent build >/dev/null 2>&1; ok "npm run build" $?
+    run_gate "npm run build" npm run build
+
+    for g in $POST_BUILD_GATES; do
+        run_gate "npm run $g" npm run "$g"
+    done
 
     for pair in $CDP_GATES; do
         gate="${pair%:*}"; file="${pair##*:}"
-        node "scripts/${file}.mjs" >/dev/null 2>&1; ok "$gate" $?
+        run_gate "$gate" node "scripts/${file}.mjs"
     done
 fi
 
