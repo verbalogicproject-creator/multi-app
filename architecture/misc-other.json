@@ -7,7 +7,7 @@
       "file": "server.js",
       "line": 172,
       "note": "recordModelCall(), QUOTA_FILE = logs/quota.json",
-      "verifiedContentHash": "sha256:e3b0c44298fc1c14",
+      "verifiedContentHash": "sha256:df3982fd61017359",
       "staleness": "verified"
     },
     "level": "review",
@@ -56,7 +56,7 @@
       "file": "server.js",
       "line": null,
       "note": "PORT env var overrides; API_TARGET must move with it for the Vite proxy",
-      "verifiedContentHash": "sha256:58ee2302788874cd",
+      "verifiedContentHash": "sha256:599362da41d09612",
       "staleness": "verified"
     },
     "level": "review",

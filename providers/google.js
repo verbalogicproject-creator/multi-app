@@ -54,15 +54,27 @@ export const createGoogleProvider = ({ apiKey }) => {
         return config;
     };
 
+    /**
+     * `serviceTier: 'FLEX'` is a real field on the same GenerateContentConfig this
+     * adapter already sends (confirmed against the installed @google/genai types,
+     * not assumed) -- a 50% cost discount for sheddable, non-interactive traffic.
+     * Google's own guidance targets it at "multi-step agentic workflows where call
+     * N+1 depends on the output of call N" -- the repair loop, not the initial
+     * per-file generation (those calls are independent and latency-sensitive: a
+     * person is waiting on them). Callers opt in per call; nothing defaults to it.
+     */
+    const FLEX_TIER = 'FLEX';
+
     return {
         id: 'google',
 
         /** Streams a chat turn, yielding normalized events. */
-        async *streamChat({ model, system, messages, tools, webSearch, effort, maxOutputTokens }) {
+        async *streamChat({ model, system, messages, tools, webSearch, effort, maxOutputTokens, cachedContent }) {
             const contents = toContents(messages);
             const config = configFor(model, effort, maxOutputTokens, {
                 ...(system ? { systemInstruction: system } : {}),
                 ...(toGeminiTools(tools, webSearch) ? { tools: toGeminiTools(tools, webSearch) } : {}),
+                ...(cachedContent ? { cachedContent } : {}),
                 thinkingConfig: { includeThoughts: true },
             });
 
@@ -88,11 +100,13 @@ export const createGoogleProvider = ({ apiKey }) => {
         },
 
         /** Streams a schema-constrained JSON generation as raw text deltas. */
-        async *streamJson({ model, system, prompt, schema, effort, maxOutputTokens }) {
+        async *streamJson({ model, system, prompt, schema, effort, maxOutputTokens, flex, cachedContent }) {
             const config = configFor(model, effort, maxOutputTokens, {
                 ...(system ? { systemInstruction: system } : {}),
                 responseMimeType: 'application/json',
                 ...(schema ? { responseJsonSchema: schema } : {}),
+                ...(flex ? { serviceTier: FLEX_TIER } : {}),
+                ...(cachedContent ? { cachedContent } : {}),
             });
             const stream = await ai.models.generateContentStream({ model, contents: prompt, config });
             for await (const chunk of stream) {
@@ -111,11 +125,13 @@ export const createGoogleProvider = ({ apiKey }) => {
         },
 
         /** One-shot schema-constrained JSON. */
-        async generateJson({ model, system, prompt, schema, effort, maxOutputTokens }) {
+        async generateJson({ model, system, prompt, schema, effort, maxOutputTokens, flex, cachedContent }) {
             const config = configFor(model, effort, maxOutputTokens, {
                 ...(system ? { systemInstruction: system } : {}),
                 responseMimeType: 'application/json',
                 ...(schema ? { responseJsonSchema: schema } : {}),
+                ...(flex ? { serviceTier: FLEX_TIER } : {}),
+                ...(cachedContent ? { cachedContent } : {}),
             });
             const response = await ai.models.generateContent({ model, contents: prompt, config });
             return { object: JSON.parse(response.text), usage: usageOf(response.usageMetadata) };

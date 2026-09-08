@@ -91,9 +91,16 @@ export const ANTI_SLOP_DIRECTIVE = "Treat these as failures, not suggestions: a 
 export const SELF_REFLECTION_RUBRIC = 'Before finishing, score your own output 1-5 on: visual distinctiveness (does this look custom-designed, or could it be any app?), completeness (does every interactive element actually work?), and responsiveness (does it hold up narrower than 400px?). If anything scores below 3, fix that file before moving on — do not mention the scores anywhere in your output.';
 
 /** The directive text for every section a config turns on, in a fixed order. */
-const sectionsFor = (config) => {
-    if (!config) return [];
+const sectionsFor = (config, designDirection) => {
     const sections = [];
+    /* First, not last: everything below is a specific technique (typography,
+       motion, background); this is the reason those techniques should point
+       somewhere in particular. Without it, ANTI_SLOP_DIRECTIVE's own claim that
+       "every choice must trace back to a decision this project's plan actually
+       made" had nothing to point at — the plan never made a design decision
+       until `providers/schemas.js`'s `designDirection` field existed. */
+    if (designDirection) sections.push(`This project's plan committed to a specific design direction: "${designDirection}". Every choice below should read as a specific execution of that direction, not a generic default it happens to sit next to.`);
+    if (!config) return sections;
     for (const [dimension, spec] of Object.entries(AESTHETIC_DIMENSIONS)) {
         const option = spec.options[config[dimension]];
         if (option) sections.push(option.directive);
@@ -113,8 +120,8 @@ const sectionsFor = (config) => {
  * open (NVIDIA-hosted) models take plain text, and the open models get it numbered
  * rather than proseline because they follow literal, enumerated rules best.
  */
-export const buildAestheticDirective = (config, provider) => {
-    const sections = sectionsFor(config);
+export const buildAestheticDirective = (config, provider, designDirection) => {
+    const sections = sectionsFor(config, designDirection);
     if (sections.length === 0) return '';
 
     if (provider === 'anthropic') {

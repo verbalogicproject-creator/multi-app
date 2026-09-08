@@ -49,6 +49,15 @@ export const PLAN_SCHEMA = obj({
             type: str('The TypeScript type: string, number, boolean, or a union of string literals like "square" | "portrait" | "landscape".'),
         }), "Every field this shape has — every field any page or component will need from it. Omitting one here is the mistake this section exists to prevent."),
     }), 'The shared data shapes referenced by more than one page or component — a photo, a review, a booking. Leave empty for an app with no shared data model.'),
+    /**
+     * The plan's own creative read, decided once instead of left for Style to invent
+     * from nothing. Nothing before this fed a design decision forward — `Step_Theme`
+     * generates three directions from the idea alone, unaware the plan ever formed an
+     * opinion. Hyper-specific and intent-grounded by design (Nano Banana's own
+     * best-practice framing: "a logo for a high-end, minimalist skincare brand" beats
+     * "a logo") — a vague adjective here defeats the point as surely as no field at all.
+     */
+    designDirection: str('A concrete visual direction for THIS idea in one phrase, grounded in its actual purpose and audience — e.g. "dense technical dashboard, dark mono, data-first" or "editorial serif, warm paper tones, unhurried". Never a generic adjective like "modern" or "clean" alone — name the specific tradition, mood, or reference point.'),
 });
 
 const COLOR_ROLES = {

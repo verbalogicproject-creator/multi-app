@@ -255,6 +255,12 @@ export const BRIEF_MARKER = 'BRIEF';
  * structural work); only this short preamble adapts to the house style.
  */
 export const builderPreamble = (provider) => ({
+    // Previously absent — silently fell through to the generic default below even
+    // though Google is the builder's daily-driver provider. Gemini 3.x's own
+    // prompting guidance says it responds best to direct, concise instructions and
+    // over-analyzes verbose scaffolding, so this stays as short as the others
+    // rather than elaborating just because it finally has its own entry.
+    google: 'You are a senior product engineer and product designer, working in React and Tailwind. Return only the requested JSON object — no commentary before or after it.',
     anthropic: 'Claude is a senior product engineer and designer. Claude returns only the requested JSON object, with no commentary before or after it.',
     openai: 'You are a senior product engineer and designer. Return only the requested JSON object. No preamble, no commentary.',
     nvidia: 'You are a senior product engineer and designer. Output only the JSON object described below. Do not write any text before or after the JSON.',
