@@ -70,11 +70,23 @@ const ENTRIES = [
     // deepseek-v4-flash & -pro (timeout >120s), gpt-oss-20b/120b (timeout),
     // gemma-3-4b/12b, nemotron-70b, kimi-k2.6, mistral-* (404), qwen3-coder,
     // phi-4-mini (410 end-of-life).
+    //
+    // Re-verified 2026-09-08 (`npm run smoke:providers`). Two of five ran clean
+    // on all four checks (llama-3.2-11b, nemotron-3.5-lightning). The other
+    // three — reproducibly, run alone with 20s+ between attempts, not a
+    // batch-testing artifact — pass streaming and tool-calling but hit a real
+    // rate ceiling on the round-trip/schema-JSON checks specifically:
+    // nemotron-3-nano-omni returns "Worker local total request limit reached
+    // (16/16)"; minimax-m3 and kimi-k3 both 429 on their 3rd/4th call every
+    // time. Kept in the catalog — the capability that was checked did work —
+    // but this app's own fallback chain is what actually protects a real
+    // request today, not an assumption that these three are as reliable as
+    // the other two under back-to-back load.
     { id: 'meta/llama-3.2-11b-vision-instruct', provider: 'nvidia', label: 'Llama 3.2 11B', hint: 'Free, ~0.6s — fastest option for quick tests', tools: true, jsonMode: 'native', thinking: false, priceIn: 0, priceOut: 0, maxOutput: 16384, fallback: [] },
-    { id: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning', provider: 'nvidia', label: 'Nemotron Nano 3', hint: 'Free reasoning model, ~1.6s', tools: true, jsonMode: 'native', thinking: true, priceIn: 0, priceOut: 0, maxOutput: 16384, fallback: ['meta/llama-3.2-11b-vision-instruct'] },
+    { id: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning', provider: 'nvidia', label: 'Nemotron Nano 3', hint: 'Free reasoning model, ~1.6s — rate-limited under back-to-back load (see above)', tools: true, jsonMode: 'native', thinking: true, priceIn: 0, priceOut: 0, maxOutput: 16384, fallback: ['meta/llama-3.2-11b-vision-instruct'] },
     { id: 'nvidia/nemotron-3.5-lightning-30b-a3b', provider: 'nvidia', label: 'Nemotron Lightning', hint: 'Free reasoning model, ~3.9s', tools: true, jsonMode: 'native', thinking: true, priceIn: 0, priceOut: 0, maxOutput: 16384, fallback: ['meta/llama-3.2-11b-vision-instruct'] },
-    { id: 'minimaxai/minimax-m3', provider: 'nvidia', label: 'MiniMax M3', hint: 'Free, ~6s, JSON and tools', tools: true, jsonMode: 'native', thinking: false, priceIn: 0, priceOut: 0, maxOutput: 32768, fallback: ['meta/llama-3.2-11b-vision-instruct'] },
-    { id: 'moonshotai/kimi-k3', provider: 'nvidia', label: 'Kimi K3', hint: 'Free, large context, reasoning — ~7s', tools: true, jsonMode: 'native', thinking: true, priceIn: 0, priceOut: 0, maxOutput: 32768, fallback: ['minimaxai/minimax-m3'] },
+    { id: 'minimaxai/minimax-m3', provider: 'nvidia', label: 'MiniMax M3', hint: 'Free, ~6s, JSON and tools — rate-limited under back-to-back load (see above)', tools: true, jsonMode: 'native', thinking: false, priceIn: 0, priceOut: 0, maxOutput: 32768, fallback: ['meta/llama-3.2-11b-vision-instruct'] },
+    { id: 'moonshotai/kimi-k3', provider: 'nvidia', label: 'Kimi K3', hint: 'Free, large context, reasoning — ~7s — rate-limited under back-to-back load (see above)', tools: true, jsonMode: 'native', thinking: true, priceIn: 0, priceOut: 0, maxOutput: 32768, fallback: ['minimaxai/minimax-m3'] },
 ];
 
 const PRICE_OVERRIDES = (() => {

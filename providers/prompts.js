@@ -1,3 +1,10 @@
+import { getSkill } from './skillSource.js';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const SKILLS_DIR = path.join(__dirname, '..', 'skills');
+
 // System prompts are assembled from neutral content, then rendered in each
 // provider's documented house style. A single lowest-common-denominator prompt
 // would waste what each model family is actually tuned for:
@@ -31,6 +38,39 @@ const personaBlock = (persona, customStyles) => {
         out += styleText('The Pragmatist');
     }
     return out.trim();
+};
+
+/**
+ * The persona's model-tuned foundation prompt (`kind: 'model-prompt'`, at most
+ * one — the model the persona names) plus its selected additive skills
+ * (`kind: 'skill'`, zero or more), resolved from the filesystem skill catalog
+ * (`providers/skillSource.js`) and rendered in the same per-provider dialect
+ * `personaBlock`/`buildAestheticDirective` already use. A persona with neither
+ * `modelId` nor `skillIds` renders nothing — purely additive, never required,
+ * so every persona saved before this existed keeps behaving exactly as before.
+ */
+const skillsBlock = (persona, provider) => {
+    const sections = [];
+    if (persona?.modelId) {
+        const foundation = getSkill(SKILLS_DIR, persona.modelId);
+        if (foundation?.kind === 'model-prompt') sections.push(foundation.body);
+    }
+    for (const id of persona?.skillIds ?? []) {
+        const skill = getSkill(SKILLS_DIR, id);
+        if (skill?.kind === 'skill') sections.push(skill.body);
+    }
+    if (sections.length === 0) return '';
+
+    if (provider === 'anthropic') {
+        return '\n\n' + sections.map((s) => `<skill>\n${s}\n</skill>`).join('\n');
+    }
+    if (provider === 'openai') {
+        return '\n\n' + sections.map((s) => `### Skill\n${s}`).join('\n\n');
+    }
+    if (provider === 'nvidia') {
+        return '\n\nAdditional skills:\n' + sections.map((s, i) => `${i + 1}. ${s}`).join('\n');
+    }
+    return '\n\n--- Skills ---\n' + sections.join('\n\n');
 };
 
 const toolLines = (hasProjects) => {
@@ -223,9 +263,9 @@ const liveContext = (p) => {
 
 /**
  * Builds the chat/coding system prompt for a provider from neutral inputs.
- * @param {{provider: string, persona: object, projects: object[], customStyles: object[], mode?: string}} input
+ * @param {{provider: string, persona: object, projects: object[], customStyles: object[], mode?: string, recalled?: string}} input
  */
-export const buildSystemPrompt = ({ provider, persona, projects, customStyles, mode }) => {
+export const buildSystemPrompt = ({ provider, persona, projects, customStyles, mode, recalled }) => {
     const projectContexts = (projects ?? []).map(p => {
         let context = `Project: ${p.name}`;
         if (p.dependencySummary && p.dependencySummary !== 'No files to analyze.' && p.dependencySummary !== 'No major dependencies identified') {
@@ -238,13 +278,20 @@ export const buildSystemPrompt = ({ provider, persona, projects, customStyles, m
 
     const render = RENDERERS[provider] ?? renderGoogle;
     const base = render({
-        persona: personaBlock(persona ?? {}, customStyles ?? []),
+        persona: personaBlock(persona ?? {}, customStyles ?? []) + skillsBlock(persona ?? {}, provider),
         projectContexts,
         hasProjects: projectContexts.trim() !== '',
     });
+    /* Same `liveContext` shape (computed fresh, advisory, appended) as the
+       per-project file-tree/diagnostics/preview sections above — just not
+       scoped per-project, since recall today covers the first attached
+       project only (see memory/bridge.js's recallBlock; multi-project fan-out
+       is deferred until it's shown to matter). Never overrides `persona` or
+       `projectContexts` — appended after both, same as `PLAN_MODE` below. */
+    const withRecall = recalled ? `${base}${recalled}` : base;
     /* Appended rather than replacing the renderer, so a plan-mode turn keeps the
        persona and the house style it would otherwise have had. */
-    return mode === 'plan' ? `${base}\n${PLAN_MODE}` : base;
+    return mode === 'plan' ? `${withRecall}\n${PLAN_MODE}` : withRecall;
 };
 
 /** The marker `composeBuilderBrief` looks for. Declared once so the two cannot drift. */

@@ -39,7 +39,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { providerForModel, usableModels, isModelUsable } from './providers/index.js';
 import { getModel, modelChain, pickModel } from './providers/catalog.js';
-import { listSkills, getSkill } from './providers/skillSource.js';
+import { listSkills, getSkill, updateSkillBody } from './providers/skillSource.js';
 import { toolsForRequest } from './providers/tools.js';
 import { PLAN_SCHEMA, DIRECTIONS_SCHEMA, GENERATE_SCHEMA, MANIFEST_SCHEMA, FILE_SCHEMA, ACCEPTANCE_CHECK_SCHEMA, EDIT_SCHEMA, filesArrayToRecord } from './providers/schemas.js';
 import { salvageFiles, isTruncation } from './providers/salvage.js';
@@ -227,7 +227,7 @@ app.get('/api/models', (req, res) => {
     res.json({ models: usableModels(), defaults: MODELS });
 });
 
-// Read-only skill/model-prompt catalog — the filesystem-backed `SkillSource`
+// The skill/model-prompt catalog — the filesystem-backed `SkillSource`
 // (providers/skillSource.js). Computed fresh on every request rather than a
 // cached/generated file: eleven small files is cheap to re-read, and a stale
 // on-disk catalog is a whole class of bug this avoids having at all.
@@ -246,6 +246,19 @@ app.get('/api/skills/:id', (req, res) => {
     // context) -- not part of the public shape.
     const { id, name, description, kind, body } = skill;
     res.json({ id, name, description, kind, body });
+});
+
+// Prompt Engineering Studio's write path. Restricted to kind: 'model-prompt'
+// inside updateSkillBody itself, not re-checked here — one place decides that
+// rule, not two that could disagree.
+app.put('/api/skills/:id', (req, res) => {
+    if (!getSkill(SKILLS_DIR, req.params.id)) return res.status(404).json({ message: `No skill "${req.params.id}".` });
+    const { body } = req.body ?? {};
+    if (typeof body !== 'string') return res.status(400).json({ message: 'A string "body" is required.' });
+    const result = updateSkillBody(SKILLS_DIR, req.params.id, body);
+    if (!result.ok) return res.status(400).json({ message: result.error });
+    const { id, name, description, kind, body: savedBody } = result.skill;
+    res.json({ id, name, description, kind, body: savedBody });
 });
 
 
@@ -272,7 +285,7 @@ const geminiService = {
      * Streams a coding turn from whichever provider serves the chosen model.
      * Returns { model, stream } where stream yields normalized events.
      */
-    generateCodingContentStream: function(history, projects, persona, useWebSearch, customStyles, lowLatencyMode, model, mode) {
+    generateCodingContentStream: function(history, projects, persona, useWebSearch, customStyles, lowLatencyMode, model, mode, recalled) {
         const codingModel = pickModel(model, MODELS.coding);
         const entry = getModel(codingModel);
         const provider = providerForModel(codingModel);
@@ -286,6 +299,7 @@ const geminiService = {
                decided one thing — whether projects were forwarded — so a mode could
                change what the assistant was *given* but never what it was *for*. */
             mode,
+            recalled,
         });
 
         // Google's built-in web search replaces function tools; other providers
@@ -436,12 +450,41 @@ app.get('/api/video-status', async (req, res) => {
     }
 });
 
+/**
+ * A `Project.id` used as a memory key. Same fix, same reasoning, as
+ * `services/memoryService.ts`'s `memoryKeyFor` — `Project.id` comes from
+ * `generateUniqueId()`, which contains a `.` that `VALID_BUILD_ID` rejects.
+ * Duplicated rather than shared: two runtimes (browser, Node), one regex
+ * neither side is likely to change without the other noticing.
+ */
+const memoryKeyForProject = (projectId) => (projectId ? String(projectId).replace(/[^A-Za-z0-9_-]/g, '-') : null);
+
+/** The most recent thing the user actually said — what recall should be about,
+ *  not the whole transcript. */
+const lastUserMessageText = (history) => {
+    for (let i = (history?.length ?? 0) - 1; i >= 0; i -= 1) {
+        const msg = history[i];
+        if (msg?.author === 'user') return (msg.parts ?? []).map((p) => p.text ?? '').join(' ').trim();
+    }
+    return '';
+};
+
 // Coding Assistant Streaming
 app.post('/api/coding-chat-stream', async (req, res) => {
      try {
         const { history, projects, persona, useWebSearch, customStyles, lowLatencyMode, model, mode } = req.body;
 
-        const { model: servingModel, stream } = geminiService.generateCodingContentStream(history, projects, persona, useWebSearch, customStyles, lowLatencyMode, model, mode);
+        // Advisory recall, the same shape every builder route already uses —
+        // scoped to the first attached project (see the plan: multi-project
+        // fan-out is deferred until it's shown to matter). No `domain` filter:
+        // chat isn't one domain the way builder generation is.
+        const recalled = await memory.recallBlock({
+            buildId: memoryKeyForProject(projects?.[0]?.id),
+            task: lastUserMessageText(history),
+            surface: 'chat',
+        });
+
+        const { model: servingModel, stream } = geminiService.generateCodingContentStream(history, projects, persona, useWebSearch, customStyles, lowLatencyMode, model, mode, recalled);
 
         res.setHeader('Content-Type', 'application/x-ndjson');
 

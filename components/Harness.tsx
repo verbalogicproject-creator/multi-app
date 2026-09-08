@@ -1,36 +1,45 @@
 import React, { useState } from 'react';
 import AgentManager from './AgentManager';
 import AiControls from './AiControls';
+import PromptEngineeringStudio from './PromptEngineeringStudio';
 
 /**
- * The harness: who is working, and how they are configured.
+ * The harness: who is working, what they are told, and what they run on.
  *
- * Agents and AI Settings were two tabs in a rail, which was two names for one subject.
- * An agent *is* a persona bound to a project; a persona is what an agent runs on. Asking
- * a person to hold that relationship across a tab switch is asking them to keep the
- * system's filing structure in their head instead of the thing they are configuring.
+ * Three parts, not two now — each answering a different question, deliberately
+ * kept apart rather than merged further:
  *
- * So they are one destination with two parts. **Experts** defines who can work —
- * agents, each bound to a persona and a project. **Configuration** is what they run on
- * — the persona composer, the style blocks, and the model behaviour switches that were
- * already shared between them.
+ * **Experts** — who can work: agents, each bound to a persona and a project,
+ * and the persona composer itself (model, skills, base instructions, composed
+ * styles). A persona has no meaning apart from the agent(s) it drives, so it
+ * lives where agents are defined, not in a separate settings screen — the
+ * lesson the original two-tab merge already drew, extended rather than
+ * abandoned now that a persona is more than a name and a style.
  *
- * The rail's disabled-while-an-agent-is-active rule went with the split. It existed to
- * stop you editing settings that the active agent had already claimed, which was a real
- * hazard when the two lived apart and a non-issue once they are on the same screen: the
- * relationship is now visible rather than something a tooltip has to warn you about.
+ * **Prompts** (`PromptEngineeringStudio`) — what a chosen model is actually
+ * told: the per-model foundation prompts a persona's `modelId` selects
+ * (`providers/skillSource.js`'s `kind: 'model-prompt'` entries), editable
+ * here; the additive `kind: 'skill'` entries, browsable but not editable
+ * (third-party, MIT-licensed — see `skills/THIRD-PARTY-NOTICES.md`).
  *
- * Not yet here, and named so it is not mistaken for done: editing the prompts and skills
- * that **this app itself** runs on — the main agent, the builder, the wizard. That is the
- * second half of "harness" and it needs the change-control the archives all designed and
- * never wired, which is its own commit rather than a text box.
+ * This is only *half* of what this comment used to flag as "not yet here":
+ * this app's own embedded generation prompts — the builder, the wizard,
+ * `server.js`'s `/api/builder/*` routes, `HARNESS.md` — remain un-editable
+ * through any UI. That is a separate, larger piece of work (the
+ * change-control the archives all designed and never wired) this tab does
+ * not attempt; naming it here so it is not mistaken for finished.
+ *
+ * **Configuration** — purely harness-wide runtime behaviour (Web Search, Low
+ * Latency) — narrowed to exactly this once persona-authoring moved to
+ * Experts. Nothing persona- or prompt-shaped belongs here.
  */
 
-type Part = 'experts' | 'configuration';
+type Part = 'experts' | 'prompts' | 'configuration';
 
 const PARTS: { id: Part; label: string; hint: string }[] = [
     { id: 'experts', label: 'Experts', hint: 'Who can work, and on what' },
-    { id: 'configuration', label: 'Configuration', hint: 'What they run on' },
+    { id: 'prompts', label: 'Prompts', hint: 'What a chosen model is actually told' },
+    { id: 'configuration', label: 'Configuration', hint: 'Harness-wide runtime behaviour' },
 ];
 
 const Harness: React.FC = () => {
@@ -78,6 +87,7 @@ const Harness: React.FC = () => {
                 the expert it belongs to — the same rule the destinations follow. */}
             <div className="flex-1 min-h-0 overflow-y-auto p-4 md:p-6 w-full max-w-4xl mx-auto">
                 <div className={part === 'experts' ? '' : 'hidden'}><AgentManager /></div>
+                <div className={part === 'prompts' ? '' : 'hidden'}><PromptEngineeringStudio /></div>
                 <div className={part === 'configuration' ? '' : 'hidden'}><AiControls /></div>
             </div>
         </div>

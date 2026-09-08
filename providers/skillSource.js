@@ -12,7 +12,7 @@
 // usage justifies that coupling — not attempted here, same reasoning
 // declaration-guard used to defer its own context-os integration.
 
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync, writeFileSync, renameSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n\r?\n?([\s\S]*)$/;
@@ -106,4 +106,42 @@ export const getSkill = (dir, id) => {
     if (!skillIds(dir).includes(id)) return null;
     const result = readSkillFile(dir, id);
     return result.error ? null : result;
+};
+
+/**
+ * Rewrites a skill's body, keeping its frontmatter byte-identical (same name,
+ * description, kind — the fields declare the skill's identity, and changing
+ * them is a different operation this function refuses to do implicitly).
+ *
+ * Restricted to `kind: 'model-prompt'`. The `kind: 'skill'` files are
+ * third-party, MIT-licensed content (see `skills/THIRD-PARTY-NOTICES.md`) —
+ * editing someone else's attributed work in place, silently diverging from
+ * its upstream, is a real footgun, not a feature. Skills stay selectable, not
+ * editable, until a real need for a locally-forked skill shows up.
+ *
+ * Atomic write (temp file in the same directory, then rename) so a killed
+ * process cannot leave a half-written SKILL.md — the same discipline
+ * declaration-guard's own `_atomic_write` uses for the same reason.
+ */
+export const updateSkillBody = (dir, id, newBody) => {
+    const current = getSkill(dir, id);
+    if (!current) return { ok: false, error: `No skill "${id}".` };
+    if (current.kind !== 'model-prompt') {
+        return { ok: false, error: `"${id}" is a kind: "${current.kind}" skill — only kind: "model-prompt" entries can be edited through this path.` };
+    }
+    const trimmedBody = String(newBody ?? '').trim();
+    if (!trimmedBody) return { ok: false, error: 'A skill body cannot be empty.' };
+
+    const frontmatter = `---\nname: ${current.name}\ndescription: ${current.description}\nkind: ${current.kind}\n---\n\n`;
+    const out = frontmatter + trimmedBody + '\n';
+    const finalPath = join(dir, id, 'SKILL.md');
+    const tmpPath = join(dir, id, `.SKILL.md.${process.pid}.${Date.now()}.tmp`);
+    try {
+        writeFileSync(tmpPath, out, 'utf-8');
+        renameSync(tmpPath, finalPath);
+    } catch (error) {
+        try { unlinkSync(tmpPath); } catch { /* best-effort cleanup; the real error is below */ }
+        return { ok: false, error: `Could not write ${finalPath}: ${error.message}` };
+    }
+    return { ok: true, skill: getSkill(dir, id) };
 };

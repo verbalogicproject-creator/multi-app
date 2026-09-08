@@ -28,6 +28,56 @@ export const getModels = async (): Promise<{ models: CatalogModel[]; defaults: R
     }
 };
 
+export interface SkillMeta {
+    id: string;
+    name: string;
+    description: string;
+    kind: 'skill' | 'model-prompt';
+}
+
+export interface Skill extends SkillMeta {
+    body: string;
+}
+
+/** The skill/model-prompt catalog. Returns an empty list rather than null on
+ *  failure — a picker with nothing to show is a more honest empty state than
+ *  a picker that silently never rendered. */
+export const listSkills = async (): Promise<SkillMeta[]> => {
+    try {
+        const response = await fetch('/api/skills');
+        if (!response.ok) return [];
+        const data = await response.json();
+        return Array.isArray(data?.skills) ? data.skills : [];
+    } catch {
+        return [];
+    }
+};
+
+export const getSkill = async (id: string): Promise<Skill | null> => {
+    try {
+        const response = await fetch(`/api/skills/${encodeURIComponent(id)}`);
+        return response.ok ? await response.json() : null;
+    } catch {
+        return null;
+    }
+};
+
+/** Prompt Engineering Studio's save. Throws with the server's own reason on
+ *  failure (a rejected kind, an empty body) so the editor can show it, rather
+ *  than swallowing it the way a picker's read path safely can. */
+export const updateSkillBody = async (id: string, body: string): Promise<Skill> => {
+    const response = await fetch(`/api/skills/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body }),
+    });
+    if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.message || 'Failed to save the prompt.');
+    }
+    return response.json();
+};
+
 export interface QuotaSnapshot {
     date: string;
     counts: Record<string, number>;

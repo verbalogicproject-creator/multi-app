@@ -5,8 +5,9 @@
     "statement": "POST /api/builder/generate is the pipeline's sole entry point: plan + theme in, a streaming NDJSON progress log out, ending in one final line carrying the file set and repair statistics.",
     "mechanism": {
       "file": "server.js",
-      "line": 720,
-      "verifiedContentHash": "sha256:d10b36aa74a59bcf",
+      "line": 801,
+      "note": "line shifted 720→801 2026-09-08 by unrelated additions earlier in the file (skills routes, recall wiring); route itself unchanged, re-verified by reading it",
+      "verifiedContentHash": "sha256:ee0501f441af5cd4",
       "staleness": "verified"
     },
     "level": "review",
@@ -64,8 +65,8 @@
       "statement": "After generation, repairIfNeeded runs up to MAX_ROUNDS=3 compiler-repair rounds, but only while the previous round strictly reduced the total error count; a round that does not improve things is the last one either way. Per FILE (not per round), a repaired file whose own error count did not fall is individually reverted to its pre-round content; the aggregate result of the last round is kept as final regardless of whether reverting brought the project's overall error count above where the round started.",
       "mechanism": {
         "file": "server.js",
-        "line": 806,
-        "note": "repairIfNeeded() — line shifted 766→806 2026-09-08 by unrelated additions earlier in the file (Gemini cost/efficiency + plan-design-direction work); logic itself unchanged, re-verified by reading it",
+        "line": 849,
+        "note": "repairIfNeeded() — line shifted 766→806→849 2026-09-08 across two rounds of unrelated additions earlier in the file; logic itself unchanged, re-verified by reading it",
         "verifiedContentHash": "sha256:005965653ed34beb",
         "staleness": "verified"
       },
@@ -87,8 +88,8 @@
       "statement": "Every builder model call goes through withModelFallback: 2 tries per model with 2s/4s backoff on a transient failure (HTTP 429 or 503, or an NVIDIA-specific 'resource exhausted' message with no status field), then falls to the next model in the chain — the requested model's own declared `fallback` array, then MODELS.coding, deduped and filtered to configured providers.",
       "mechanism": {
         "file": "server.js",
-        "line": 507,
-        "note": "TRANSIENT_STATUSES, isTransient(), withModelFallback() — line shifted 484→507 2026-09-08 by unrelated additions earlier in the file; logic itself unchanged, re-verified by reading it",
+        "line": 550,
+        "note": "TRANSIENT_STATUSES, isTransient(), withModelFallback() — line shifted 484→507→550 2026-09-08 across two rounds of unrelated additions earlier in the file; logic itself unchanged, re-verified by reading it",
         "verifiedContentHash": "sha256:841ef263fd871629",
         "staleness": "verified"
       },
