@@ -30,9 +30,35 @@ process.env.MEMORY_DB_DIR = scratch;
 const bridge = await import('../memory/bridge.js');
 const proposals = await import('../memory/proposals.js');
 
+/**
+ * `multi-graph-memory` is an optional peer: every `*Safe` call in the bridge answers
+ * `null` rather than throwing when the engine is missing, because nothing on the
+ * builder's critical path may wait on memory. This file used to consume those answers
+ * without checking them, so a missing engine did not skip the ladder — it crashed the
+ * suite at `evidenceIds: [ev1.id]`, reading as a broken test rather than an absent
+ * dependency. It could therefore only run on a machine that already had the engine
+ * built, which is precisely the class of thing a test suite is supposed to reveal.
+ *
+ * The bridge already knows the answer and publishes it, so ask it rather than
+ * re-deriving it here.
+ *
+ * A skip is not a pass. `describe.skipIf` reports every rung below by name as skipped,
+ * and the warning says what went unverified — a check that goes quiet because it
+ * looked at nothing is worse than one that fails, since it still buys confidence.
+ */
+const { available: ENGINE, reason: ENGINE_REASON } = await bridge.probe();
+if (!ENGINE) {
+    console.warn(
+        `\n[memory-loop] the lesson ladder was NOT verified — skipped, not passed.` +
+        `\n               reason: ${ENGINE_REASON}\n`,
+    );
+}
+
 const s = {};
 
 beforeAll(async () => {
+    // Without the engine every value below is null; the skipped tests read none of them.
+    if (!ENGINE) return;
     const buildId = `build-step5-${Date.now().toString(36)}`;
     const OBJECTIVE = 'generate Plant Tracker — style "Forest" / Sans-serif & Friendly';
 
@@ -236,11 +262,12 @@ beforeAll(async () => {
 });
 
 afterAll(() => {
+    // Safe with or without the engine: closeAll iterates an empty map when nothing opened.
     bridge.closeAll();
     rmSync(scratch, { recursive: true, force: true });
 });
 
-describe('attempt 1: it fails', () => {
+describe.skipIf(!ENGINE)('attempt 1: it fails', () => {
     it('attempt 1 opens', () => { expect(Boolean(s.epi1)).toBe(true); });
     it('a failed verdict proposes exactly the mapped lesson', () => {
         expect(s.proposed.length, s.proposed.map(p => p.code).join(', ')).toBe(1);
@@ -254,33 +281,33 @@ describe('attempt 1: it fails', () => {
     });
 });
 
-describe('the proposal must NOT be in the governed packet', () => {
+describe.skipIf(!ENGINE)('the proposal must NOT be in the governed packet', () => {
     it("a proposed lesson is NOT in the engine's governed recall", () => {
         expect(!s.governed.includes('re-read every relative import'), s.governed ? `${s.governed.length} chars recalled` : 'nothing recalled').toBe(true);
     });
 });
 
-describe('attempt 2: the repair, which is where the proposal is tried', () => {
+describe.skipIf(!ENGINE)('attempt 2: the repair, which is where the proposal is tried', () => {
     it('attempt 2 is a distinct episode', () => { expect(Boolean(s.epi2) && s.epi2 !== s.epi1).toBe(true); });
     it('the trial block carries the proposal', () => { expect(s.trial.includes('re-read every relative import'), `${s.trial.length} chars`).toBe(true); });
     it('and says plainly that it is unproven', () => { expect(/have not yet been shown to help/.test(s.trial)).toBe(true); });
     it('and is separate from the governed block', () => { expect(!s.trial.includes('Memory from earlier builds')).toBe(true); });
 });
 
-describe('the ratchet only turns after the episode closes verified', () => {
+describe.skipIf(!ENGINE)('the ratchet only turns after the episode closes verified', () => {
     it('reuse is refused while the episode is still open', () => { expect(s.tooEarly.length).toBe(0); });
     it('a verified episode that applied it promotes it', () => { expect(s.qualified.length, JSON.stringify(s.qualified)).toBe(1); });
     it('to QUALIFIED', () => { expect(s.qualified[0]?.status, s.qualified[0]?.status).toBe('qualified'); });
     it('with the reuse counted once', () => { expect(String(s.qualified[0]?.reuseCount)).toBe('1'); });
 });
 
-describe('and NOW it is injectable', () => {
+describe.skipIf(!ENGINE)('and NOW it is injectable', () => {
     it('a qualified lesson IS in the governed recall', () => {
         expect(s.after.includes('re-read every relative import'), `${s.after.length} chars`).toBe(true);
     });
 });
 
-describe('the gate the engine keeps, not us', () => {
+describe.skipIf(!ENGINE)('the gate the engine keeps, not us', () => {
     it('it is still not approved — that stays human-only', () => { expect(s.lesson?.status, s.lesson?.status).toBe('qualified'); });
     it('and it carries the limits it was proposed with', () => {
         expect(s.lesson?.limits?.[0]?.startsWith('Observed on Vite + React'), s.lesson?.limits?.[0]).toBe(true);
@@ -288,14 +315,14 @@ describe('the gate the engine keeps, not us', () => {
     it('and cites the evidence from both attempts', () => { expect(String(s.lesson?.evidenceIds?.length)).toBe('2'); });
 });
 
-describe('the trial is scoped to what actually broke, and self-limits', () => {
+describe.skipIf(!ENGINE)('the trial is scoped to what actually broke, and self-limits', () => {
     it('the trial carries the note about what just broke', () => { expect(s.scoped.includes('Emit JSON strictly')).toBe(true); });
     it('and not the unrelated one from an older failure', () => {
         expect(!s.scoped.includes('re-read every relative import'), 'a note that stopped being relevant stops being injected').toBe(true);
     });
 });
 
-describe('the seam: a type error is a lesson like any other', () => {
+describe.skipIf(!ENGINE)('the seam: a type error is a lesson like any other', () => {
     it('a type error proposes a lesson', () => { expect(s.tsProposed?.length, JSON.stringify(s.tsProposed?.map(p => p.code))).toBe(1); });
     it('and it is guidance a model can act on', () => {
         expect(s.tsProposals[0]?.recommendation?.includes('type-check'), s.tsProposals[0]?.recommendation?.slice(0, 60)).toBe(true);
@@ -304,7 +331,7 @@ describe('the seam: a type error is a lesson like any other', () => {
     it('a passing attempt qualifies it', () => { expect(s.tsLesson?.status, s.tsLesson?.status).toBe('qualified'); });
 });
 
-describe('the ladder learns from behaviour, not only from text', () => {
+describe.skipIf(!ENGINE)('the ladder learns from behaviour, not only from text', () => {
     it('an app that renders nothing proposes a lesson', () => {
         expect(s.behaveProposals.length, JSON.stringify(s.behaveProposals.map(p => p.code))).toBe(1);
     });
@@ -319,13 +346,13 @@ describe('the ladder learns from behaviour, not only from text', () => {
     it('and an app that renders promotes it', () => { expect(s.behaveLesson?.status, s.behaveLesson?.status).toBe('qualified'); });
 });
 
-describe('independence: the property the whole ladder rests on', () => {
+describe.skipIf(!ENGINE)('independence: the property the whole ladder rests on', () => {
     it('an episode proposes a lesson', () => { expect(s.selfProposed.length).toBe(1); });
     it('and cannot promote it by passing itself', () => { expect(s.selfQualified.length, JSON.stringify(s.selfQualified)).toBe(0); });
     it('so it is still only proposed', () => { expect(s.selfLesson?.status, s.selfLesson?.status).toBe('proposed'); });
 });
 
-describe('the loop crosses builds, or it is not a loop', () => {
+describe.skipIf(!ENGINE)('the loop crosses builds, or it is not a loop', () => {
     it('an earlier build proposes a lesson', () => { expect(s.aProposed.length >= 1).toBe(true); });
     it('and a later build can see it', () => {
         expect(s.carried, `build B sees ${s.bState?.lessons?.length ?? 0} lesson(s)`).toBe(true);

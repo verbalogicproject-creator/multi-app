@@ -283,6 +283,13 @@ export const SURFACES = [
         await dockTo(p, 'Harness');
         await p.getByRole('tab', { name: 'Experts' }).click(); await p.waitForTimeout(400);
     } },
+    // The Harness's middle tab, and the last one with no audited surface. Every part of
+    // it renders at once behind a `hidden` class rather than being unmounted, so a
+    // regression here is invisible from the other two tabs while still shipping.
+    { name: 'harness-prompts', phone: true,  desktop: true,  reach: async p => {
+        await dockTo(p, 'Harness');
+        await p.getByRole('tab', { name: 'Prompts' }).click(); await p.waitForTimeout(400);
+    } },
     // The densest collection of native controls in the app — sliders, toggles, selects.
     { name: 'harness-config',  phone: true,  desktop: true,  reach: async p => {
         await dockTo(p, 'Harness');
