@@ -1,0 +1,82 @@
+# The verification gates, run non-interactively so regressions surface between
+# sessions instead of mid-session. Mirrors `scripts/gates.sh` — that script is the
+# source of truth for which gates exist; this file only decides when they run.
+#
+# Two jobs, because the tiers have genuinely different costs:
+#
+#   fast  — every push and PR. No build, no browser, ~30s locally.
+#   full  — manual (`workflow_dispatch`) only, for now. It downloads a Chromium and
+#           runs the four CDP gates, ~5min locally. It is opt-in rather than
+#           on-push because it has never been observed green on a GitHub runner:
+#           it passes here, and "passes on the author's device" is not evidence
+#           about CI. Promote it to `push` once a manual run proves it.
+name: gates
+
+on:
+  push:
+    branches: [main, 'feat/**']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  fast:
+    name: gates (fast tier)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'      # package.json engines: node >=24
+          cache: npm
+
+      - run: npm ci
+
+      - name: Run gates
+        run: scripts/gates.sh --tier fast
+
+      - name: Triage gate failures
+        if: failure()
+        continue-on-error: true    # triage must never mask or replace the real failure
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+            echo "No ANTHROPIC_API_KEY secret configured - skipping automated triage."
+            exit 0
+          fi
+          npx -y @anthropic-ai/claude-code \
+            -p "The gates in scripts/gates.sh failed on this run. Re-run the failing gate, read its output, and report the root cause plus the minimal fix. Do not edit files." \
+            --allowedTools "Read,Bash"
+
+  full:
+    name: gates (full tier, manual)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - run: npm ci
+
+      # `playwright-core` ships the install CLI but no browser. Install the revision
+      # this exact playwright-core expects, then ask it where that landed — deriving
+      # the path instead of hardcoding one is the whole point of CHROME_PATH.
+      - name: Install Chromium
+        run: npx playwright-core install --with-deps chromium
+
+      - name: Resolve Chromium path
+        run: |
+          CHROME_PATH="$(node -e "import('playwright-core').then(p => console.log(p.chromium.executablePath()))")"
+          echo "Resolved: $CHROME_PATH"
+          test -x "$CHROME_PATH" || { echo "resolved path is not executable"; exit 1; }
+          echo "CHROME_PATH=$CHROME_PATH" >> "$GITHUB_ENV"
+
+      - name: Run gates
+        run: scripts/gates.sh --tier full --start-server
