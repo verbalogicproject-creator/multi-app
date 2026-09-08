@@ -25,9 +25,13 @@
 # is echoed so a failure can be attributed to an engine change.
 name: gates
 
+# Every push, on every branch. An earlier version listed `[main, 'feat/**']`, which
+# silently ran nothing at all for the first `fix/**` branch pushed to it — no failure,
+# no skip, no signal. A trigger that covers one branch-naming convention reads exactly
+# like a trigger that covers the repo, right up until the branch you are on is not in
+# the list. The fast tier is ~40s; enumerating prefixes is not worth a blind spot.
 on:
   push:
-    branches: [main, 'feat/**']
   pull_request:
   workflow_dispatch:
 
