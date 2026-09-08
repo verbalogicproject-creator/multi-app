@@ -18,14 +18,42 @@ const CANDIDATES = [
     '/root/.cache/ms-playwright/chromium-1234/chrome-linux/chrome',
 ];
 
+/**
+ * Pure resolver, split out from `findChrome` so the decision is testable without a
+ * browser, a filesystem, or a process exit. Returns `{path}` or `{error}`.
+ *
+ * `CHROME_PATH`, when set, wins over the hardcoded candidates — the candidates are
+ * this device's PRoot paths and do not exist on a CI runner, so without an override
+ * the CDP gates can only ever run here. A *wrong* `CHROME_PATH` is an error rather
+ * than a fall-through to the candidates: an explicit declaration that does not
+ * resolve is a broken environment, and silently using a different browser than the
+ * one named is exactly the kind of "it passed, but not on what you think" result
+ * this harness exists to prevent.
+ */
+export const resolveChrome = ({ env = process.env, exists = existsSync } = {}) => {
+    const declared = env.CHROME_PATH;
+    if (declared) {
+        return exists(declared)
+            ? { path: declared }
+            : { error: `CHROME_PATH is set to "${declared}" but nothing exists there.` };
+    }
+    const found = CANDIDATES.find(exists);
+    return found
+        ? { path: found }
+        : {
+            error: 'No Chromium found. Looked in:\n  ' + CANDIDATES.join('\n  ')
+                + '\n(~/.cache/puppeteer is empty scaffolding — do not look there.)'
+                + '\nSet CHROME_PATH to a Chromium binary to override.',
+        };
+};
+
 export const findChrome = () => {
-    const found = CANDIDATES.find(existsSync);
-    if (!found) {
-        console.error('No Chromium found. Looked in:\n  ' + CANDIDATES.join('\n  '));
-        console.error('(~/.cache/puppeteer is empty scaffolding — do not look there.)');
+    const { path, error } = resolveChrome();
+    if (error) {
+        console.error(error);
         process.exit(1);
     }
-    return found;
+    return path;
 };
 
 export const PHONE = { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true };
