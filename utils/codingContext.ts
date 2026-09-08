@@ -35,3 +35,40 @@ export const previewSummaryFrom = (issues: BuildIssue[] | null): string => {
     if (issues.length === 0) return 'Builds and runs without error.';
     return issues.map((i) => `[${i.severity}] ${i.code}${i.file ? ` (${i.file})` : ''}: ${i.message}`).join('\n');
 };
+
+/**
+ * The same TS1xxx/TS17xxx=syntax, TS2xxx+=type-error split `typecheck/parse.js`
+ * already uses server-side (`memory/proposals.js`'s `PROPOSAL_TABLE`/
+ * `PATTERN_TABLE` vocabulary) — ported here, not imported, since that module
+ * lives in a server-only directory and this runs in the browser. Same regex,
+ * same two buckets; a change to one has to be made to the other by hand, which
+ * is an acceptable seam for two lines that have not moved in a long time.
+ */
+const SYNTAX_CODE = /^TS(1\d{3}|17\d{3})$/;
+
+/** Which of the ladder's stable codes are present, not how many diagnostics —
+ *  matching `PATTERN_TABLE`/`PROPOSAL_TABLE`'s own granularity (one entry per
+ *  code, not per occurrence). `null`/incomplete reads as "unknown", not "clean"
+ *  — the caller must not treat an unfinished typecheck as a resolved one. */
+export const typeErrorCodesFrom = (result: TypecheckResult | null): Set<string> | null => {
+    if (!result || !result.completed) return null;
+    const codes = new Set<string>();
+    for (const d of result.diagnostics) codes.add(SYNTAX_CODE.test(d.code) ? 'syntax-error' : 'type-error');
+    return codes;
+};
+
+/**
+ * Which codes disappeared (resolved) and which appeared (introduced) between
+ * two reads of the same project. `null` on either side means "nothing to
+ * compare" — a first-ever read has no "before", and an incomplete/cancelled
+ * typecheck must not be read as either a fix or a regression.
+ */
+export const diagnosticCodeDelta = (
+    before: Set<string> | null,
+    after: Set<string> | null,
+): { resolved: string[]; introduced: string[] } => {
+    if (!before || !after) return { resolved: [], introduced: [] };
+    const resolved = [...before].filter((c) => !after.has(c));
+    const introduced = [...after].filter((c) => !before.has(c));
+    return { resolved, introduced };
+};

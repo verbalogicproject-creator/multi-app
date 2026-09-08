@@ -154,6 +154,69 @@ export function unmappedCodes(codes) {
 }
 
 /**
+ * Codes a *resolved* diagnostic can justify a pattern for — deliberately a
+ * subset of `PROPOSAL_TABLE`'s codes, not all of them. The generation-time
+ * codes (`unresolved-import`, `missing-index-html`, `placeholder-content`,
+ * ...) describe a manifest/file-request failure that has no equivalent once a
+ * file already exists and is being edited; only the codes a live
+ * diagnostics/preview comparison can actually re-observe as resolved belong
+ * here.
+ *
+ * Deliberately no hand-written "why this worked" recommendation, unlike
+ * `PROPOSAL_TABLE`'s. A fix lesson can say "avoid X" because the mistake is
+ * named and specific; a pattern can only honestly say "this combination
+ * resolved this class of issue once" — the actual evidence for whether it
+ * generalizes is the ladder's own qualify/approve mechanism (a second,
+ * distinct, verified reuse), not a sentence asserted at proposal time. See
+ * `declarations-clarification-correction.md` — a recommendation this file
+ * cannot back with evidence is exactly the overclaiming that document warns
+ * against.
+ */
+const PATTERN_TABLE = {
+    'type-error': { trigger: 'A type error was present, then resolved without introducing a new one' },
+    'syntax-error': { trigger: 'A syntax error was present, then resolved without introducing a new one' },
+    'runtime-error': { trigger: 'The app threw at runtime, then ran cleanly after a fix' },
+    'bundle-error': { trigger: 'The project failed to bundle, then bundled cleanly after a fix' },
+};
+
+const PATTERN_RECOMMENDATION =
+    'The persona, skill, and model combination active when this was resolved is worth trying again for ' +
+    'a similar issue — but this records that something worked once, not why it will always work. ' +
+    'Confidence comes from a second, distinct, verified reuse (the ladder\'s own qualification gate), not from this note alone.';
+
+/**
+ * The patterns a *resolved* verdict justifies — the success-side mirror of
+ * `proposalsFor`. Reuses the exact same lessons table and ladder (no schema
+ * change): a pattern is a lesson like any other, distinguished only by a
+ * reserved `"pattern"` triggerTag, so the dashboard can separate "corrects a
+ * defect" from "endorses an approach that already worked" while both ride the
+ * same proposed → qualified → approved gates — a pattern still needs a
+ * second, distinct, verified episode to qualify, same as a fix.
+ *
+ * A clean pass with nothing to fix (`codes` empty) proposes nothing — passing
+ * because nothing was ever broken teaches exactly as little as failing
+ * because an instrument gave up (`proposalsFor`'s own `inconclusive` case).
+ */
+export function patternsFor(payload) {
+    if (!payload || payload.ok !== true) return [];
+    if (payload.inconclusive === true) return [];
+
+    const codes = payload.codes ?? {};
+    return Object.keys(codes)
+        .filter((code) => code in PATTERN_TABLE)
+        .sort()
+        .map((code) => ({
+            code,
+            trigger: PATTERN_TABLE[code].trigger,
+            recommendation: PATTERN_RECOMMENDATION,
+            scope: BUILD_SCOPE,
+            domain: 'build',
+            limits: LIMITS,
+            triggerTags: ['pattern', code],
+        }));
+}
+
+/**
  * The lessons a verdict justifies. Pure: no I/O, no clock, no engine.
  *
  * A passing verdict justifies none — a build that worked teaches nothing about

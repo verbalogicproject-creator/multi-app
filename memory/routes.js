@@ -130,7 +130,14 @@ memoryRouter.post('/events', async (req, res) => {
             // text -- so the tenth build to break the same way proposes the same
             // lesson rather than a tenth copy of it.
             if (event.kind === 'verification.completed') {
+                // Two symmetric sources of lessons from the same event kind: a failed
+                // verdict proposes a fix (proposalsFor), a resolved one proposes a
+                // pattern (patternsFor) -- never both from the same payload, since
+                // `ok` is exactly one of true or false.
                 for (const proposal of proposals.proposalsFor(event.payload)) {
+                    pending.push({ proposal, episodeId: event.episodeId ?? episodeId, evidenceIds: cited });
+                }
+                for (const proposal of proposals.patternsFor(event.payload)) {
                     pending.push({ proposal, episodeId: event.episodeId ?? episodeId, evidenceIds: cited });
                 }
                 // A code in neither the proposal table nor its stated exclusions is a

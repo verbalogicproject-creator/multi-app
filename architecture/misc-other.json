@@ -56,7 +56,7 @@
       "file": "server.js",
       "line": null,
       "note": "PORT env var overrides; API_TARGET must move with it for the Vite proxy",
-      "verifiedContentHash": "sha256:599362da41d09612",
+      "verifiedContentHash": "sha256:1f27ddf354eb7151",
       "staleness": "verified"
     },
     "level": "review",

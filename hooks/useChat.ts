@@ -5,9 +5,10 @@ import * as apiService from '../services/apiService';
 import * as pyodideService from '../services/pyodideService';
 import { applyPatch } from '../utils/patchFile';
 import { splitAtApprovalGate } from '../utils/toolSequence';
-import { fileTreeFrom, diagnosticsSummaryFrom, previewSummaryFrom } from '../utils/codingContext';
+import { fileTreeFrom, diagnosticsSummaryFrom, previewSummaryFrom, typeErrorCodesFrom, diagnosticCodeDelta } from '../utils/codingContext';
 import { runTypecheck } from '../services/typecheckService';
 import { previewVerdict } from '../services/previewVerdict';
+import * as memoryService from '../services/memoryService';
 
 /**
  * A `runPython` call pauses the sequence it arrived in, wherever it sits — not
@@ -37,6 +38,12 @@ const withLiveContext = async (
     projects: Project[],
     filesByProject: Map<string, ProjectFile[]>,
     setStatusText: (text: string) => void,
+    /* Fires with the raw (unsummarized) typecheck result right after it's
+       computed — the hook's `recordDiagnosticsDelta` closure below is what
+       actually compares it against the last read and writes to memory.
+       Optional so this function's own contract (enrich `projects[0]`) stays
+       unchanged for any caller that doesn't care. */
+    onTypecheck?: (projectId: string, result: Awaited<ReturnType<typeof runTypecheck>>) => void,
 ): Promise<Project[]> => {
     const target = projects[0];
     if (!target) return projects;
@@ -51,6 +58,7 @@ const withLiveContext = async (
         runTypecheck(target.id, record, 0),
         previewVerdict(target.id, record),
     ]);
+    onTypecheck?.(target.id, typecheck);
 
     const withContext: Project = {
         ...target,
@@ -101,6 +109,63 @@ export const useChat = (
     const [isLoading, setIsLoading] = useState(false);
     const [statusText, setStatusText] = useState('');
     const pendingApprovals = useRef(new Map<string, PendingToolApproval>());
+    /* Per-project state for the write side of the memory ladder (see the plan:
+       "closing the loop"). Keyed on `memoryService.memoryKeyFor(projectId)`,
+       not the raw id — same sanitizing every memory call needs. Lives in refs,
+       not state: neither should ever trigger a re-render, and both need to
+       survive across renders the same way `pendingApprovals` already does. */
+    const lastDiagnosticCodes = useRef(new Map<string, Set<string> | null>());
+    const chatEpisodeId = useRef(new Map<string, string>());
+
+    /**
+     * The write half of "the ladder improves with use." Compares this read's
+     * diagnostic codes against the last one seen for this project and, on a
+     * real change, records it through the exact same memory event path the
+     * app-builder wizard already uses — `memory/routes.js`'s `POST /events`,
+     * unmodified, dispatching to `proposalsFor`/`patternsFor`.
+     *
+     * A resolved code and an introduced code are reported as two separate
+     * events in one call, not folded into one — a turn can fix one thing and
+     * break another, and `ok` is exactly one of true or false per event.
+     *
+     * The first read of a project each session has no "before" to compare —
+     * stored, not treated as a regression from nothing. Memory being
+     * unavailable (no episode obtainable) is silently skipped, matching this
+     * app's "nothing on the builder's critical path waits on memory" rule —
+     * a coding turn must never be slowed or broken by this.
+     */
+    const recordDiagnosticsDelta = useCallback((projectId: string, typecheck: Awaited<ReturnType<typeof runTypecheck>>) => {
+        const key = memoryService.memoryKeyFor(projectId);
+        if (!key) return;
+        const codes = typeErrorCodesFrom(typecheck);
+        const previous = lastDiagnosticCodes.current.get(key) ?? null;
+        lastDiagnosticCodes.current.set(key, codes);
+        if (codes === null || previous === null) return; // nothing to compare yet
+
+        const { resolved, introduced } = diagnosticCodeDelta(previous, codes);
+        if (resolved.length === 0 && introduced.length === 0) return; // most turns
+
+        void (async () => {
+            let episodeId = chatEpisodeId.current.get(key) ?? null;
+            if (!episodeId) {
+                episodeId = await memoryService.openEpisode(key, 'IDE peer-programming session', null);
+                if (!episodeId) return; // memory unavailable — never blocks the chat itself
+                chatEpisodeId.current.set(key, episodeId);
+            }
+
+            const events: memoryService.MemoryEvent[] = [];
+            const evidence: memoryService.MemoryEvidence[] = [];
+            if (resolved.length > 0) {
+                evidence.push({ key: 'fix', kind: 'verification.result', ref: 'chat://diagnostics', summary: `Resolved: ${resolved.join(', ')}` });
+                events.push({ kind: 'verification.completed', payload: { ok: true, codes: Object.fromEntries(resolved.map((c) => [c, true])) }, evidenceKeys: ['fix'] });
+            }
+            if (introduced.length > 0) {
+                evidence.push({ key: 'regression', kind: 'verification.result', ref: 'chat://diagnostics', summary: `Introduced: ${introduced.join(', ')}` });
+                events.push({ kind: 'verification.completed', payload: { ok: false, codes: Object.fromEntries(introduced.map((c) => [c, true])) }, evidenceKeys: ['regression'] });
+            }
+            memoryService.record(key, episodeId, events, evidence);
+        })();
+    }, []);
 
     useEffect(() => {
         try {
@@ -349,7 +414,9 @@ export const useChat = (
                 newMessage.regenerationData = { prompt, file };
             } else { // coding or chat mode
                 const history = [...messages, userMessage];
-                const activeProjects = mode === 'coding' ? await withLiveContext(projects, filesByProject, setStatusText) : [];
+                const activeProjects = mode === 'coding'
+                    ? await withLiveContext(projects, filesByProject, setStatusText, recordDiagnosticsDelta)
+                    : [];
                 const stream = await apiService.generateCodingContentStream(history, activeProjects, persona, useWebSearch, customStyles, lowLatencyMode, model, mode);
                 await processStream(stream, history, mode);
             }

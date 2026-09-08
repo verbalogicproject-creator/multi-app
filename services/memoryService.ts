@@ -92,6 +92,18 @@ const VALID_BUILD_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 export const newBuildId = (): string =>
     `build-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 
+/**
+ * A `Project.id` (from `generateUniqueId()`, the same unsafe generator the
+ * comment above warns about — `types/project.ts`'s `Project` predates memory
+ * entirely, so it was never given `newBuildId()`'s safer shape) used directly
+ * as a memory key. Deterministic and reversible-enough to debug (the `.` is
+ * the only character this repo's ids ever produce outside `VALID_BUILD_ID`),
+ * so every call site that wants "this project's memory" gets the same key
+ * without needing a second id persisted anywhere.
+ */
+export const memoryKeyFor = (projectId: string | null | undefined): string | null =>
+    projectId ? projectId.replace(/[^A-Za-z0-9_-]/g, '-') : null;
+
 const warned = new Set<string>();
 
 /**

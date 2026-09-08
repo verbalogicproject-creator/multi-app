@@ -26,6 +26,12 @@ export interface Persona {
   name: string;
   baseInstructions: string;
   composedStyles: ComposedStyle[];
+  /** Which catalog model this persona is tuned for — optional so every persona
+   *  saved before this field existed keeps working, model-agnostic, unchanged. */
+  modelId?: string;
+  /** Additive skill ids (kind: 'skill' from the skill catalog) layered on top
+   *  of the model's own foundation prompt. */
+  skillIds?: string[];
 }
 
 export interface Agent {
