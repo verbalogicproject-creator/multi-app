@@ -28,3 +28,9 @@ multi-app-how-to-integrate-auth.md
 # Reference material pulled in for the harness-upgrade analysis (Gemini API docs) —
 # research input, not this project's own documentation.
 docs/
+
+# Per-session read receipts written by the vouch tooling. Machine output about a
+# session, not about this project — it accumulates one file per session and has no
+# meaning to anyone who wasn't in that session.
+.vouch/
+architecture/.vouch/

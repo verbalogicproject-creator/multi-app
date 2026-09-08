@@ -117,7 +117,8 @@ const startPreview = async () => {
             console.error(`preview server exited (code ${proc.exitCode}) instead of serving ${PORT}:`);
             console.error(log.trim() || '(no output)');
             if (/already in use/i.test(log)) {
-                console.error(`\nSomething else holds ${PORT}. Free it:  pkill -f "vite preview --port ${PORT}"`);
+                console.error(`\nSomething else holds ${PORT}. Free it by port, never by pattern:`);
+                console.error(`  fuser -k ${PORT}/tcp    # or: lsof -ti:${PORT} | xargs -r kill`);
             }
             process.exit(1);
         }
