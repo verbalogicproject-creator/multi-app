@@ -52,7 +52,15 @@ building anything on top of this data (including the planned semantic-recall
 upgrade — see `architecture/memory-system-ladder.json`).
 
 ### 1.3 The MCP memory server is scoped to a store nothing writes to
-**Confirmed, and now understood mechanically**
+**RESOLVED.** The third option below was taken: `memory/bridge.js` now opens one
+store for the whole builder (`.multi-memory/builder.db`, project id `builder`),
+which is the same store `.multi-memory.json` already resolved the MCP server to.
+A build id survives as an attribution dimension rather than as a file name, so
+there is nothing left for a `buildId` parameter to reach. The `build-*.db` files
+are pre-unification residue and are read by nothing. The record below is kept
+because the reasoning still applies to any future per-scope split.
+
+**Originally confirmed, and understood mechanically**
 (`architecture/memory-system-ladder.json#engineInternals.scopeResolutionAndTheRealDefect`).
 `.multi-memory.json` resolves the `multi-memory` MCP server to a single
 project-scoped `builder.db`; real generation history lives in per-build

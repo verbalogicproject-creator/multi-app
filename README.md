@@ -94,7 +94,7 @@ a cost estimate first.
 | `MODEL_IMAGE` / `MODEL_VIDEO` | Media models (features flagged off) | `gemini-3.1-flash-image` / `veo-3.1-generate-preview` |
 | `QUOTA_LIMITS` | JSON overriding assumed daily free-tier request limits | see `server.js` |
 | `MODEL_PRICES` | JSON overriding per-1M token prices used for spend estimates | see `providers/catalog.js` |
-| `MEMORY_DB_DIR` | Where per-build memory databases are written | `.multi-memory/` |
+| `MEMORY_DB_DIR` | Where the builder's memory database is written | `.multi-memory/` |
 
 Feature flags live in `utils/features.ts`. Image editing, video generation and
 live audio are **off** pending re-verification against current models.
@@ -132,10 +132,19 @@ The builder records what it did and recalls what it learned. The engine is
 dependency; this app supplies the facts and the human gate, and owns none of the
 storage logic.
 
-**One database per build**, at `.multi-memory/<buildId>.db`. A build id is minted
-when a wizard run starts and travels with it — in localStorage, in the request
-body of every builder call, and into `SavedBuild.memory` when the result is kept.
-The stock `multi-memory` CLI reads exactly the same files.
+**One database, shared by every build**, at `.multi-memory/builder.db`, under the
+constant project id `builder`. A lesson here is about the model and the
+toolchain rather than about one application, so it would be worth nothing locked
+inside the build that learned it — an earlier design kept a database per build,
+and every build started from zero because nothing ever asked the previous one
+what it had found out.
+
+A build id is still minted when a wizard run starts and travels with it — in
+localStorage, in the request body of every builder call, and into
+`SavedBuild.memory` when the result is kept — but it is now an *attribution
+dimension* (`cycleId` on events, `baseRevisionId` on episodes) rather than the
+name of a file. The stock `multi-memory` CLI reads the same store. Any
+`.multi-memory/build-*.db` files on disk predate this and are read by nothing.
 
 **Where the facts come from** is split by who can see them:
 

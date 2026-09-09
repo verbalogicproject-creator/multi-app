@@ -137,8 +137,14 @@ run."
 
 ### Memory (`memory/`, consumed from `/root/multi-graph-memory`)
 
-The builder records what it did and recalls what it learned, one SQLite database per build id
-(`.multi-memory/<buildId>.db`). A failed validator verdict proposes a lesson through a declared table
+The builder records what it did and recalls what it learned, in **one SQLite database shared by
+every build** — `.multi-memory/builder.db`, scoped to the constant project id `builder`
+(`memory/bridge.js`). That is deliberate: a builder lesson is about the model and the toolchain
+("this model writes unterminated template literals"), not about one application, so every build
+inherits them. The build id survives as an attribution dimension (`cycleId` on events,
+`baseRevisionId` on episodes), which keeps one build's own history separable while its lessons stay
+common property. The `build-*.db` files beside it are pre-unification residue.
+A failed validator verdict proposes a lesson through a declared table
 (`memory/proposals.js`, one entry per validator issue code — no model in that decision); a lesson
 climbs `proposed → qualified → approved` only by being tried in a *later, different* attempt that then
 passes, with `approved` reserved for a human via `POST /api/memory/lessons/:id/approve`. **Nothing on
